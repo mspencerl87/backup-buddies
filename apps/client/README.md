@@ -30,13 +30,19 @@ built on top of this foundation.
 
 ## Running it
 
-See `.env.example` for the three things you need to fill in (a device
-token from your dashboard, your own passphrase, and the API URL — the
-last one you can usually leave as-is). Then:
+If you don't already have this directory (e.g. you don't have access to
+the project's private source repo), get it with:
 
 ```bash
-cp .env.example .env
-# edit .env
+curl -fsSL https://app.filegarden.net/client/install.sh | bash
+cd backup-buddies-client
+```
+
+Then fill in `.env` — a device token from your dashboard's Devices card,
+your own passphrase, and the API URL (you can usually leave that last one
+as-is) — and:
+
+```bash
 docker compose up -d
 docker compose logs -f
 ```

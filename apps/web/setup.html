@@ -43,19 +43,20 @@
           On your <a href="/dashboard.html">dashboard</a>, under <strong>Devices</strong>, give this machine a label (e.g. "home desktop") and click <strong>Add device</strong>. You'll see a token — copy it now, it's only shown once.
         </li>
         <li>
-          <strong>Download the client files</strong>
-          Clone or download <code>apps/client/</code> from the project's repository — it contains <code>docker-compose.yml</code> and <code>.env.example</code>. (If you don't have access to the repository, ask whoever set up your account for these two files.)
+          <strong>Download the client</strong>
+          Run this on the machine you want to back up — it downloads everything needed, no account or repository access required:
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>curl -fsSL https://app.filegarden.net/client/install.sh | bash
+cd backup-buddies-client</code></pre>
         </li>
         <li>
           <strong>Fill in your <code>.env</code> file</strong>
-          Copy <code>.env.example</code> to <code>.env</code> and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
+          The installer already created <code>.env</code> for you from the template — open it and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
         </li>
         <li>
           <strong>Start it</strong>
-          In that folder, run:
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>docker compose up -d
 docker compose logs -f</code></pre>
-          You should see a line confirming the device registered. Your Devices card on the dashboard will now show this device as connected.
+          The first run builds the image locally (a few minutes); after that, starting is instant. You should see a line confirming the device registered. Your Devices card on the dashboard will now show this device as connected.
         </li>
         <li>
           <strong>Confirm it found your buddy</strong>

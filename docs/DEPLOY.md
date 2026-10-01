@@ -289,16 +289,27 @@ agent customers run in Docker. This section is server-side setup; see
      < ../../db/migrations/006_devices_and_marketplace.sql
    docker compose up -d --build api
    ```
-2. **Nothing else changes on app-1** — devices and marketplace listings are
-   ordinary rows in the existing database, served by the existing API
-   container. The client image is built and pushed separately (see below)
-   and never runs on app-1 at all; it runs on each customer's own machine.
+2. That same `git pull` + `docker compose up -d` already picks up the
+   Caddyfile and docker-compose.yml changes that make `apps/client/`
+   served publicly at `https://app.filegarden.net/client/` — this is how
+   customers get the client without needing access to this (private)
+   repo. Nothing else to do here; the client itself never runs on app-1,
+   only its source files are served from it.
 
-**Publishing the client image:** `.github/workflows/build-client.yml`
-builds and pushes `ghcr.io/<repo>/client` on any push to `apps/client/**`
-— there's no deploy step, since customers pull (or build) the image
-themselves via `apps/client/docker-compose.yml`. Note this repo is
-private, so by default that GHCR package is private too: either make the
-`client` package public (package settings on GHCR) before sharing it with
-real customers, or have them `build: .` locally from the `apps/client/`
-source instead of pulling.
+**Distributing the client:** since the repo is private, customers can't
+`git clone` it. Two ways around that, both already wired up:
+
+- **Default, zero-config:** `apps/client/install.sh` is served at
+  `https://app.filegarden.net/client/install.sh` — customers run
+  `curl -fsSL https://app.filegarden.net/client/install.sh | bash`, which
+  downloads the source (docker-compose.yml, Dockerfile, Cargo files,
+  main.rs) straight from your own server and builds the image locally.
+  No GitHub access, no Docker registry login, nothing to misconfigure.
+- **Faster, optional:** `.github/workflows/build-client.yml` also builds
+  and pushes `ghcr.io/<repo>/client` on every push to `apps/client/**`.
+  That GHCR package is private by default (matching the repo) — if you'd
+  rather customers `docker pull` a prebuilt image instead of compiling
+  Rust locally, make the `client` package public under the repo's
+  Packages settings on GitHub, then switch the `image:` line in
+  `apps/client/docker-compose.yml` back to the GHCR reference (it's left
+  in as a comment).

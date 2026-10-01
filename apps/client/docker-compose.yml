@@ -2,19 +2,25 @@
 # backing up. See the "Set up the client" page on your dashboard, or
 # apps/web/setup.html, for the full walkthrough.
 #
-# Quick start:
+# Easiest way to get this file (and everything else it needs) without
+# access to the project's private source repo:
+#   curl -fsSL https://app.filegarden.net/client/install.sh | bash
+#
+# Quick start once you have this directory:
 #   1. Copy .env.example to .env and fill in the two values it asks for
 #      (from your dashboard's Devices card).
-#   2. docker compose up -d
+#   2. docker compose up -d        (builds the image locally the first
+#                                    time — a few minutes — then starts it)
 #   3. docker compose logs -f   — you should see "registered this device's
 #      node id with the API", then (once your buddy's client is also
 #      running) "connectivity test succeeded".
 
 services:
   client:
-    image: ghcr.io/yourusername/backup-buddies/client:latest
-    # Or build locally instead of pulling:
-    # build: .
+    build: .
+    # If you have access to the project's GitHub Container Registry
+    # package and it's been made public, pulling is faster than building:
+    # image: ghcr.io/yourusername/backup-buddies/client:latest
     restart: unless-stopped
     env_file: .env
     volumes:

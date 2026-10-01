@@ -13,6 +13,15 @@ app.filegarden.net {
 		reverse_proxy api:3000
 	}
 
+	# The backup client's source + install files, served publicly so
+	# customers can fetch it with one curl command even though this repo
+	# itself is private — see apps/client/install.sh.
+	handle_path /client/* {
+		root * /srv/client
+		header Cache-Control "no-cache"
+		file_server
+	}
+
 	# Everything else is the static site. no-cache (not no-store) means
 	# browsers always revalidate with a conditional request before reusing
 	# a cached copy — still fast (a 304 when nothing changed), but a push
