@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How it works — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/login.html">Log in</a>
+      <a href="/signup.html">Sign up</a>
+    </nav>
+  </header>
+
+  <main class="about-main">
+    <section class="hero" style="padding-top:1.5rem">
+      <h1>How Backup Buddies works</h1>
+      <p>
+        Two people trade storage, not money. Each one's files are encrypted
+        before they ever leave the device, so your buddy stores your data
+        without being able to read it — and so do we.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>Data flow</h2>
+      <p class="muted">
+        Everything below the dashed line is content Backup Buddies' own
+        servers never touch. The only things that ever reach our server are
+        account details, buddy pairings, and invite codes — never file
+        contents, never encryption keys.
+      </p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 760 420" role="img" aria-labelledby="diagram-title diagram-desc" class="flow-diagram">
+          <title id="diagram-title">Backup Buddies data flow</title>
+          <desc id="diagram-desc">Your device and your buddy's device exchange encrypted file blobs directly over a peer-to-peer connection. A relay server assists with NAT traversal only when a direct connection isn't possible, and still cannot decrypt the data. The Backup Buddies server only ever sees account, pairing, and invite metadata.</desc>
+
+          <!-- Server zone (metadata only) -->
+          <rect x="20" y="20" width="720" height="110" rx="10" class="zone zone-server" />
+          <text x="40" y="44" class="zone-label">Backup Buddies server — metadata only</text>
+          <rect x="300" y="58" width="160" height="56" rx="8" class="box box-server" />
+          <text x="380" y="82" text-anchor="middle" class="box-title">Accounts &amp;</text>
+          <text x="380" y="99" text-anchor="middle" class="box-title">pairings DB</text>
+
+          <!-- devices -->
+          <rect x="40" y="200" width="190" height="90" rx="8" class="box box-device" />
+          <text x="135" y="232" text-anchor="middle" class="box-title">Your device</text>
+          <text x="135" y="252" text-anchor="middle" class="box-sub">Encrypts &amp; hashes</text>
+          <text x="135" y="268" text-anchor="middle" class="box-sub">files locally</text>
+
+          <rect x="530" y="200" width="190" height="90" rx="8" class="box box-device" />
+          <text x="625" y="232" text-anchor="middle" class="box-title">Buddy's device</text>
+          <text x="625" y="252" text-anchor="middle" class="box-sub">Stores ciphertext,</text>
+          <text x="625" y="268" text-anchor="middle" class="box-sub">can't decrypt it</text>
+
+          <!-- relay zone -->
+          <rect x="260" y="320" width="240" height="80" rx="8" class="box box-relay" />
+          <text x="380" y="352" text-anchor="middle" class="box-title">Relay (fallback only)</text>
+          <text x="380" y="370" text-anchor="middle" class="box-sub">Still can't decrypt anything</text>
+
+          <!-- dashed boundary line -->
+          <line x1="20" y1="150" x2="740" y2="150" class="boundary" />
+          <text x="40" y="168" class="zone-label zone-label-dim">everything below never touches our server</text>
+
+          <!-- metadata arrows (dotted) -->
+          <path d="M135 200 C 135 150, 250 90, 300 86" class="arrow arrow-meta" marker-end="url(#arrowMeta)" />
+          <path d="M625 200 C 625 150, 510 90, 460 86" class="arrow arrow-meta" marker-end="url(#arrowMeta)" />
+
+          <!-- direct P2P arrow -->
+          <path d="M230 230 L 530 230" class="arrow arrow-direct" marker-end="url(#arrowDirect)" />
+          <path d="M530 250 L 230 250" class="arrow arrow-direct" marker-end="url(#arrowDirect)" />
+          <text x="380" y="215" text-anchor="middle" class="flow-label">encrypted blobs, direct (QUIC)</text>
+
+          <!-- relay fallback arrows -->
+          <path d="M160 290 C 160 330, 240 345, 260 352" class="arrow arrow-relay" marker-end="url(#arrowRelay)" />
+          <path d="M500 352 C 540 345, 600 330, 600 290" class="arrow arrow-relay" marker-end="url(#arrowRelay)" />
+
+          <defs>
+            <marker id="arrowMeta" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" class="arrowhead-meta" />
+            </marker>
+            <marker id="arrowDirect" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" class="arrowhead-direct" />
+            </marker>
+            <marker id="arrowRelay" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" class="arrowhead-relay" />
+            </marker>
+          </defs>
+        </svg>
+
+        <div class="diagram-legend">
+          <span><i class="swatch swatch-direct"></i> direct peer-to-peer (normal path)</span>
+          <span><i class="swatch swatch-relay"></i> relay fallback (NAT traversal only)</span>
+          <span><i class="swatch swatch-meta"></i> metadata to our server (no file data)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <h2>Step by step</h2>
+      <ol class="steps">
+        <li>
+          <strong>You pair up.</strong>
+          One of you generates an invite code tied to a pledged storage
+          amount; the other redeems it. This creates a buddy pairing record
+          in our database — just the two account IDs and the pledged size,
+          nothing about your files.
+        </li>
+        <li>
+          <strong>Your device gets a keypair.</strong>
+          Each device generates its own Iroh node identity and encryption
+          keys locally when it's set up. Private keys never leave the device
+          and are never sent to our server.
+        </li>
+        <li>
+          <strong>Files are encrypted before they leave your machine.</strong>
+          Each file is encrypted client-side, then content-addressed with a
+          BLAKE3 hash. The hash becomes the file's identifier — your buddy's
+          device (and anything in between) only ever sees opaque ciphertext
+          and a hash, never plaintext.
+        </li>
+        <li>
+          <strong>Devices connect directly, peer-to-peer.</strong>
+          Using the Iroh networking layer, your device and your buddy's
+          device negotiate a direct QUIC connection — the same kind of NAT
+          hole-punching BitTorrent and similar P2P tools use — and the
+          encrypted blob transfers straight between you.
+        </li>
+        <li>
+          <strong>If a direct connection isn't possible, a relay assists.</strong>
+          Some network setups (strict corporate firewalls, certain carrier
+          NATs) block direct hole-punching. When that happens, encrypted
+          bytes are relayed through our self-hosted relay server — but the
+          relay only ever moves already-encrypted ciphertext. It has no
+          decryption key and cannot read, inspect, or reconstruct your
+          files.
+        </li>
+        <li>
+          <strong>Your buddy's device stores the ciphertext.</strong>
+          It counts against their pledged storage and sits there, encrypted,
+          until you need to restore it. They cannot decrypt it — they don't
+          have your key.
+        </li>
+      </ol>
+    </section>
+
+    <section class="about-section">
+      <h2>What we can see vs. what we can't</h2>
+      <div class="split-table">
+        <div class="split-col">
+          <h3>We can see</h3>
+          <ul>
+            <li>Your account email</li>
+            <li>Who you're paired with</li>
+            <li>How much storage you've pledged</li>
+            <li>Invite codes and their status</li>
+            <li>Aggregate relay bandwidth used (for billing, if you're on a metered plan)</li>
+          </ul>
+        </div>
+        <div class="split-col">
+          <h3>We can never see</h3>
+          <ul>
+            <li>Your files' contents</li>
+            <li>Your encryption keys</li>
+            <li>File names or folder structure (encrypted along with the content)</li>
+            <li>Anything your buddy's device stores on their disk</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <h2>The technical stack</h2>
+      <p class="muted">For anyone who wants the specifics:</p>
+      <ul class="tech-list">
+        <li><strong>Transport:</strong> <a href="https://github.com/n0-computer/iroh" target="_blank" rel="noopener">Iroh</a>, a QUIC-based peer-to-peer networking library with built-in NAT hole-punching and relay fallback.</li>
+        <li><strong>Content addressing:</strong> iroh-blobs, with BLAKE3 hashing — files are identified and verified by content hash, not filename.</li>
+        <li><strong>Encryption:</strong> performed entirely client-side before any data is hashed or transferred; your buddy and our relay only ever handle ciphertext.</li>
+        <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established — it's a blind forwarder, not a storage point.</li>
+        <li><strong>Server:</strong> a small Node/Express API and Postgres database, holding only accounts, device identities (public node IDs, not keys), buddy pairings, and invite codes.</li>
+      </ul>
+    </section>
+
+    <section class="hero" style="padding-top:1rem">
+      <a class="btn" href="/signup.html">Get started</a>
+      <a class="btn btn-secondary" href="/">Back home</a>
+    </section>
+  </main>
+</body>
+</html>

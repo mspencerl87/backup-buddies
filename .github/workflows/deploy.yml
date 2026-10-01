@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - "apps/api/**"
+      - "apps/web/**"
       - "deploy/app/**"
+      - "db/migrations/**"
       - ".github/workflows/deploy.yml"
 
 jobs:
@@ -42,7 +44,9 @@ jobs:
           username: ${{ secrets.LINODE_APP_USER }}
           key: ${{ secrets.LINODE_APP_SSH_KEY }}
           script: |
-            cd /opt/backup-buddies/deploy/app
+            cd /opt/backup-buddies
+            git pull
+            cd deploy/app
             docker compose pull api
             docker compose up -d
             docker image prune -f
