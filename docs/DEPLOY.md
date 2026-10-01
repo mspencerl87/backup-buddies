@@ -159,11 +159,32 @@ What changed, for reference:
 - `deploy/app/docker-compose.yml` mounts `apps/web` read-only into the
   `caddy` service at `/srv/web`.
 
-`apps/web/**`, `deploy/app/**`, and `db/migrations/**` are all CI trigger
-paths, and the deploy job runs `git pull` on app-1 before touching Docker —
-so pushing any of the above to `main` deploys itself. The manual steps
-above are only needed for a first deploy, or to apply a new migration by
-hand (CI never runs migrations automatically).
+`apps/api/**`, `apps/web/**`, `deploy/app/**`, and `db/migrations/**` are
+all CI trigger paths (`.github/workflows/deploy.yml`), and the deploy job
+runs `git pull` on app-1 before touching Docker — so pushing any of the
+above to `main` deploys itself. The manual steps above are only needed for
+a first deploy, or to apply a new migration by hand (CI never runs
+migrations automatically).
+
+**`apps/client/**` is deliberately *not* in that trigger list** — a client
+change never needs an image build/push/restart on app-1, since the client
+itself never runs there (see section 11). But Caddy on app-1 serves
+`apps/client/` straight from this checkout (`deploy/app/docker-compose.yml`
+mounts it read-only), so what `install.sh` and friends hand out to
+customers is whatever's on disk here — **which CI will never update for
+you**. After any push that touches `apps/client/`, pull it by hand:
+
+```bash
+cd /opt/backup-buddies && git pull
+```
+
+No `docker compose` command needed — Caddy just serves files off disk, so
+the next request picks up the change immediately. Easy to forget: CI's own
+`git pull` on app-1 only fires for the trigger paths above, so a
+client-only push can sit live-but-unpulled indefinitely with nothing in
+the Actions tab ever telling you — the first sign is usually a customer
+(or you, testing `install.sh`) getting a build that doesn't match what's
+in `main`.
 
 ## 8. Set up the GitHub Actions deploy
 
@@ -313,3 +334,10 @@ agent customers run in Docker. This section is server-side setup; see
   Packages settings on GitHub, then switch the `image:` line in
   `apps/client/docker-compose.yml` back to the GHCR reference (it's left
   in as a comment).
+
+**Where client data lives:** `apps/client/docker-compose.yml` bind-mounts
+`DATA_DIR_HOST` (set in the customer's own `.env`, defaults to `./data`
+next to their compose file) to `/data` in the container — a real,
+customer-visible folder rather than a Docker-managed named volume, by
+design (easier to find/move/back up independently). Nothing for app-1 to
+do here; this only affects the customer's own machine.
