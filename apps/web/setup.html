@@ -62,6 +62,7 @@ cd backup-buddies-client</code></pre>
         <li>
           <strong>Fill in your <code>.env</code> file</strong>
           The installer already created <code>.env</code> for you from the template — open it and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
+          By default your data is stored in a Docker-managed volume, which needs no setup — but if you'd rather it live in a specific folder (a separate disk, a NAS mount, wherever), set <code>DATA_DIR_HOST</code> in <code>.env</code> to that path.
         </li>
         <li>
           <strong>Start it</strong>

@@ -24,7 +24,13 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      - client_data:/data
+      # Defaults to a Docker-managed named volume (client_data, declared
+      # below). Set DATA_DIR_HOST in .env to use a directory you choose
+      # instead — e.g. DATA_DIR_HOST=/mnt/backup-data or DATA_DIR_HOST=./data
+      # — and Compose treats it as a bind mount instead, no change needed
+      # here. See .env.example for details.
+      - ${DATA_DIR_HOST:-client_data}:/data
 
 volumes:
+  # Only actually created when DATA_DIR_HOST is left unset (see above).
   client_data:
