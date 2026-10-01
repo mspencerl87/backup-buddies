@@ -1,6 +1,11 @@
 import express from 'express';
+import 'express-async-errors'; // must load before any router is defined — patches Express 4's router so a rejected promise in an async handler reaches the error-handling middleware below instead of hanging the request
+import cookieParser from 'cookie-parser';
 import { healthRouter } from './routes/health.js';
 import { stripeWebhookRouter } from './routes/stripe-webhook.js';
+import { authRouter } from './routes/auth.js';
+import { meRouter } from './routes/me.js';
+import { invitesRouter } from './routes/invites.js';
 
 const app = express();
 
@@ -12,10 +17,20 @@ app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(stripeWebhookRouter);
 
 app.use(express.json());
-app.use(healthRouter);
+app.use(cookieParser());
 
-// TODO: routes for account signup, buddy pairing, device registration,
-// and quota lookups go here as the product grows past this skeleton.
+app.use(healthRouter);
+app.use(authRouter);
+app.use(meRouter);
+app.use(invitesRouter);
+
+// Catch-all error handler: any route above that throws (or rejects, since
+// Express 4 doesn't auto-catch async errors) lands here instead of
+// crashing the process or hanging the request.
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: 'internal server error' });
+});
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {

@@ -5,3 +5,17 @@
 api.filegarden.net {
 	reverse_proxy api:3000
 }
+
+app.filegarden.net {
+	# Everything under /api/* goes to the backend, prefix stripped so the
+	# Express routes stay unprefixed (e.g. /api/signup -> POST /signup).
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	# Everything else is the static site.
+	handle {
+		root * /srv/web
+		file_server
+	}
+}

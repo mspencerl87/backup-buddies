@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="/signup.html">Sign up</a>
+    </nav>
+  </header>
+
+  <main>
+    <form id="login-form">
+      <h2 style="margin-top:0">Log in</h2>
+
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required autocomplete="email">
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+
+      <button class="btn" type="submit">Log in</button>
+      <p class="error" id="error"></p>
+      <p class="muted">Don't have an account? <a href="/signup.html">Sign up</a></p>
+    </form>
+  </main>
+
+  <script>
+    const form = document.getElementById('login-form');
+    const errorEl = document.getElementById('error');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorEl.textContent = '';
+
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Something went wrong.';
+          return;
+        }
+
+        window.location.href = '/dashboard.html';
+      } catch (err) {
+        errorEl.textContent = 'Could not reach the server. Try again.';
+      }
+    });
+  </script>
+</body>
+</html>

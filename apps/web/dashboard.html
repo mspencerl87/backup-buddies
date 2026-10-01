@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>Your account</h2>
+      <p id="account-summary" class="muted">Loading…</p>
+    </div>
+
+    <div class="card">
+      <h2>Buddy pairings</h2>
+      <table id="pairings-table" style="display:none">
+        <thead>
+          <tr><th>Other account</th><th>Pledged</th><th>Status</th><th>Since</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="pairings-empty" class="muted">No buddy pairings yet — invite someone below, or redeem a code they sent you.</p>
+    </div>
+
+    <div class="card">
+      <h2>Invite a buddy</h2>
+      <p class="muted">Pick how much storage you're willing to trade, generate a code, and send it to the person you want as your backup buddy.</p>
+      <form id="invite-form">
+        <label for="pledged-gb">Storage to pledge (GB)</label>
+        <input type="number" id="pledged-gb" min="1" value="50" required>
+        <button class="btn" type="submit" style="margin-top:1rem">Generate invite code</button>
+      </form>
+      <p class="error" id="invite-error"></p>
+      <p id="invite-result" class="muted" style="display:none"></p>
+    </div>
+
+    <div class="card">
+      <h2>Redeem a code</h2>
+      <p class="muted">Got a code from someone? Enter it here to pair up.</p>
+      <div class="inline-form">
+        <input type="text" id="redeem-code" placeholder="e.g. 7f3a9c2b1e">
+        <button class="btn" id="redeem-btn" type="button">Redeem</button>
+      </div>
+      <p class="error" id="redeem-error"></p>
+    </div>
+
+    <div class="card">
+      <h2>Invites you've sent</h2>
+      <table id="invites-table" style="display:none">
+        <thead>
+          <tr><th>Code</th><th>Pledged</th><th>Status</th><th>Created</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="invites-empty" class="muted">You haven't created any invites yet.</p>
+    </div>
+  </main>
+
+  <script>
+    function formatBytes(bytes) {
+      const gb = bytes / (1024 ** 3);
+      return gb >= 1 ? `${gb.toFixed(0)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleDateString();
+    }
+
+    async function loadMe() {
+      const res = await fetch('/api/me', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return null;
+      }
+      return res.json();
+    }
+
+    function renderAccount(account) {
+      document.getElementById('account-summary').textContent =
+        `${account.email} — ${account.tier} tier`;
+    }
+
+    function renderPairings(pairings, selfId) {
+      const table = document.getElementById('pairings-table');
+      const empty = document.getElementById('pairings-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (pairings.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const p of pairings) {
+        const otherId = p.account_a_id === selfId ? p.account_b_id : p.account_a_id;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${otherId.slice(0, 8)}…</code></td>
+          <td>${formatBytes(Number(p.pledged_bytes))}</td>
+          <td>${p.status}</td>
+          <td>${formatDate(p.created_at)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function loadInvites() {
+      const res = await fetch('/api/invites', { credentials: 'same-origin' });
+      const data = await res.json();
+
+      const table = document.getElementById('invites-table');
+      const empty = document.getElementById('invites-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (data.invites.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const inv of data.invites) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${inv.code}</code></td>
+          <td>${formatBytes(Number(inv.pledged_bytes))}</td>
+          <td>${inv.status}</td>
+          <td>${formatDate(inv.created_at)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function init() {
+      const me = await loadMe();
+      if (!me) return;
+
+      renderAccount(me.account);
+      renderPairings(me.pairings, me.account.id);
+      await loadInvites();
+    }
+
+    document.getElementById('invite-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('invite-error');
+      const resultEl = document.getElementById('invite-result');
+      errorEl.textContent = '';
+      resultEl.style.display = 'none';
+
+      const gb = Number(document.getElementById('pledged-gb').value);
+      const pledgedBytes = Math.round(gb * 1024 ** 3);
+
+      const res = await fetch('/api/invites', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pledged_bytes: pledgedBytes }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Could not create invite.';
+        return;
+      }
+
+      resultEl.textContent = `Invite code: ${data.invite.code} — send this to your buddy.`;
+      resultEl.style.display = 'block';
+      await loadInvites();
+    });
+
+    document.getElementById('redeem-btn').addEventListener('click', async () => {
+      const errorEl = document.getElementById('redeem-error');
+      errorEl.textContent = '';
+      const code = document.getElementById('redeem-code').value.trim();
+      if (!code) return;
+
+      const res = await fetch(`/api/invites/${encodeURIComponent(code)}/redeem`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Could not redeem code.';
+        return;
+      }
+
+      document.getElementById('redeem-code').value = '';
+      await init();
+    });
+
+    document.getElementById('logout-link').addEventListener('click', async (e) => {
+      e.preventDefault();
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/';
+    });
+
+    init();
+  </script>
+</body>
+</html>
