@@ -33,7 +33,7 @@ async function createSession(accountId) {
 }
 
 authRouter.post('/signup', async (req, res) => {
-  const { email, password } = req.body ?? {};
+  const { email, password, accepted_terms } = req.body ?? {};
 
   if (typeof email !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'email and password are required' });
@@ -41,14 +41,17 @@ authRouter.post('/signup', async (req, res) => {
   if (password.length < 8) {
     return res.status(400).json({ error: 'password must be at least 8 characters' });
   }
+  if (accepted_terms !== true) {
+    return res.status(400).json({ error: 'you must accept the Terms of Service to sign up' });
+  }
 
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await bcrypt.hash(password, 12);
 
   try {
     const result = await pool.query(
-      `INSERT INTO accounts (email, password_hash, tier)
-       VALUES ($1, $2, 'free')
+      `INSERT INTO accounts (email, password_hash, tier, terms_accepted_at)
+       VALUES ($1, $2, 'free', now())
        RETURNING id, email, tier, created_at`,
       [normalizedEmail, passwordHash],
     );
@@ -203,12 +206,23 @@ authRouter.get('/auth/google/callback', async (req, res) => {
     ).rows[0];
 
     if (byEmail) {
-      await pool.query('UPDATE accounts SET google_sub = $1 WHERE id = $2', [payload.sub, byEmail.id]);
+      // Reaching this callback at all means they came through the gated
+      // "Continue with Google" button on our signup/login pages, which
+      // requires checking the terms box first — so this counts as
+      // acceptance too, same as the password signup path. Only backfills
+      // it if it was never set.
+      await pool.query(
+        `UPDATE accounts
+            SET google_sub = $1,
+                terms_accepted_at = COALESCE(terms_accepted_at, now())
+          WHERE id = $2`,
+        [payload.sub, byEmail.id],
+      );
       account = byEmail;
     } else {
       const inserted = await pool.query(
-        `INSERT INTO accounts (email, google_sub, tier)
-         VALUES ($1, $2, 'free')
+        `INSERT INTO accounts (email, google_sub, tier, terms_accepted_at)
+         VALUES ($1, $2, 'free', now())
          RETURNING id, email, tier`,
         [normalizedEmail, payload.sub],
       );
