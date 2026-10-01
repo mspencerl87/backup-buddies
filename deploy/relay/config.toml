@@ -16,5 +16,5 @@ enable_quic_addr_discovery = true
 # certbot) or switch to whatever automatic mode the current iroh-relay
 # version supports for your setup.
 cert_mode = "Manual"
-manual_cert_path = "/certs/cert.pem"
-manual_key_path = "/certs/cert.key.pem"
+manual_cert_path = "/etc/letsencrypt/live/relay.filegarden.net/fullchain.pem"
+manual_key_path = "/etc/letsencrypt/live/relay.filegarden.net/privkey.pem"

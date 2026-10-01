@@ -19,8 +19,5 @@ services:
       - "7824:7824/udp"
     volumes:
       - ./config.toml:/config.toml:ro
-      - relay_certs:/certs
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     command: ["--config-path", "/config.toml"]
-
-volumes:
-  relay_certs:
