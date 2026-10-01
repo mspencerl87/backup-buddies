@@ -257,6 +257,16 @@ async fn handle_incoming(incoming: iroh::endpoint::Incoming, data_dir: PathBuf) 
 
     send.write_all(hash.as_bytes()).await?;
     send.finish()?;
+    // finish() only enqueues the stream close — it does not wait for the
+    // buddy to actually receive the ack. Without waiting here, this task
+    // returns immediately, `conn` drops, and the resulting QUIC
+    // CONNECTION_CLOSE can reach the buddy before (or interleaved with)
+    // the ack bytes, especially over the relay's added latency — seen as
+    // "failed to read ack from buddy: closed by peer" on their side even
+    // though we did send the ack. stopped() resolves once the peer has
+    // acknowledged receipt of the whole stream, so it's safe to drop the
+    // connection after this.
+    send.stopped().await.ok();
 
     tracing::info!(from = %remote, bytes = data.len(), saved_to = %out_path.display(), "received encrypted test payload");
     Ok(())
