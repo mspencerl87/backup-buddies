@@ -30,6 +30,8 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 0;
   padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border);
 }
@@ -41,10 +43,22 @@ header .logo {
   color: var(--text);
 }
 
+header nav {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1.25rem;
+  row-gap: 0.4rem;
+}
+
 header nav a {
-  margin-left: 1.25rem;
   text-decoration: none;
   font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+header nav a.current {
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
 main {

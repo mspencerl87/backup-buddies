@@ -10,6 +10,11 @@
   <header>
     <a class="logo" href="/">Backup Buddies</a>
     <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/getting-started.html">Getting started</a>
+      <a href="/setup.html">Client setup</a>
+      <a href="/dashboard.html" class="current">Dashboard</a>
+      <a href="/terms.html">Terms</a>
       <a href="#" id="logout-link">Log out</a>
     </nav>
   </header>
@@ -20,7 +25,7 @@
       <p id="account-summary" class="muted">Loading…</p>
     </div>
 
-    <div class="card">
+    <div class="card" id="billing">
       <h2>Billing</h2>
       <p id="billing-summary" class="muted">Loading…</p>
       <p id="billing-note" class="muted" style="display:none"></p>
@@ -28,7 +33,7 @@
       <p class="error" id="billing-error"></p>
     </div>
 
-    <div class="card">
+    <div class="card" id="devices">
       <h2>Devices</h2>
       <p class="muted">Each machine running the backup client needs its own device token. <a href="/setup.html">How do I set up the client?</a></p>
       <table id="devices-table" style="display:none">
@@ -50,7 +55,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="find-a-buddy">
       <h2>Find a buddy</h2>
       <p class="muted">Don't have anyone to pair with yet? Browse people who've listed storage publicly, or list your own below.</p>
       <div id="marketplace-list"></div>
@@ -69,7 +74,7 @@
       <p id="pairings-empty" class="muted">No buddy pairings yet — invite someone below, or redeem a code they sent you.</p>
     </div>
 
-    <div class="card">
+    <div class="card" id="invite-a-buddy">
       <h2>Invite a buddy</h2>
       <p class="muted">Pick how much storage you're willing to trade, generate a code, and send it to the person you want as your backup buddy.</p>
       <form id="invite-form">

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting started — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/getting-started.html" class="current">Getting started</a>
+      <a href="/setup.html">Client setup</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/login.html">Log in</a>
+      <a href="/signup.html">Sign up</a>
+    </nav>
+  </header>
+
+  <main class="about-main">
+    <section class="hero" style="padding-top:1.5rem">
+      <h1>Getting started</h1>
+      <p>
+        Everything you need to go from nothing to two machines actually
+        backing each other up, in order. Each step links to where you'll
+        do it.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>1. Create your account</h2>
+      <p class="muted">
+        <a href="/signup.html">Sign up</a> with an email and password, or
+        with Google — either way you'll need to accept the Terms of
+        Service, which spells out that data stored with a buddy is at your
+        own risk (see <a href="/terms.html">Terms</a> for the full picture
+        of what that means and what doesn't change).
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>2. Find a buddy</h2>
+      <p class="muted">
+        You need someone to trade storage with before anything else here
+        is useful. From your <a href="/dashboard.html#invite-a-buddy">dashboard</a>,
+        you have two options:
+      </p>
+      <ul class="tech-list">
+        <li><strong>Invite someone you know</strong> — pick how much storage to pledge, generate a code under <a href="/dashboard.html#invite-a-buddy">Invite a buddy</a>, and send it to them directly.</li>
+        <li><strong>Find someone publicly</strong> — check "List this publicly" when creating your invite to list it in <a href="/dashboard.html#find-a-buddy">Find a buddy</a>, or browse that same list to request a pairing with someone who's already listed space.</li>
+      </ul>
+      <p class="muted">Either way, a pairing becomes active the moment the other side redeems it — no approval step beyond that.</p>
+    </section>
+
+    <section class="about-section">
+      <h2>3. Check your billing</h2>
+      <p class="muted">
+        The first 50GB you pledge (combined across all your pairings) is
+        free. Past that, it's $3/TB/month, billed automatically based on
+        how much you've pledged — not how much you've actually used. Check
+        your estimated cost and subscribe (if needed) under
+        <a href="/dashboard.html#billing">Billing</a>. If you're staying
+        under 50GB, you can skip this — nothing to subscribe to yet.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>4. Set up the client on your machine(s)</h2>
+      <p class="muted">
+        This is the part that actually moves data. Once you have an active
+        pairing:
+      </p>
+      <ul class="tech-list">
+        <li>Add a device under <a href="/dashboard.html#devices">Devices</a> on your dashboard — this gives you a token.</li>
+        <li>Follow the full walkthrough on the <a href="/setup.html">Client setup</a> page to install and run it with that token.</li>
+        <li>Do this on every machine you want backed up. Your buddy needs to do the same on theirs — both sides have to be running the client for anything to happen.</li>
+      </ul>
+    </section>
+
+    <section class="about-section">
+      <h2>5. Confirm it's working</h2>
+      <p class="muted">
+        Once both clients are running, your dashboard's Devices card will
+        show each device as connected, and the client's own logs will show
+        a successful connectivity check roughly every 30 seconds. See the
+        <a href="/setup.html">Client setup</a> page's troubleshooting
+        section if that's not happening.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>What's not built yet</h2>
+      <p class="muted">
+        Right now the client proves the connection works end to end with
+        real encryption — it doesn't yet watch a folder and back it up
+        automatically, or let you restore files. That's the next thing
+        being built. This page will be updated as that lands.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>
