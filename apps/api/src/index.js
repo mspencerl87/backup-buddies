@@ -6,6 +6,7 @@ import { stripeWebhookRouter } from './routes/stripe-webhook.js';
 import { authRouter } from './routes/auth.js';
 import { meRouter } from './routes/me.js';
 import { invitesRouter } from './routes/invites.js';
+import { billingRouter } from './routes/billing.js';
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use(healthRouter);
 app.use(authRouter);
 app.use(meRouter);
 app.use(invitesRouter);
+app.use(billingRouter);
 
 // Catch-all error handler: any route above that throws (or rejects, since
 // Express 4 doesn't auto-catch async errors) lands here instead of

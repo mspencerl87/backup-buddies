@@ -221,15 +221,54 @@ unset and the "Continue with Google" button just redirects to a
    account whose email matches an existing password account links the two
    (same account, now usable either way) rather than creating a duplicate.
 
-## 10. Stripe setup (once you're ready to bill)
+## 10. Stripe setup (billing by pledged storage)
 
-1. Create the flat recurring Prices for each tier (free/starter/standard/
-   plus/pro) in the Stripe dashboard.
-2. Create a Billing Meter (`relay_gb_used`, aggregation: sum) and a metered
-   Price with graduated tiers matching each plan's included-GB allowance.
-3. Add a webhook endpoint pointing at
-   `https://api.yourdomain.com/webhooks/stripe`, subscribed to at least
-   `invoice.payment_succeeded`, `invoice.payment_failed`, and
-   `customer.subscription.updated` — matching the handler in
-   `apps/api/src/routes/stripe-webhook.js`.
-4. Copy the webhook's signing secret into `.env` as `STRIPE_WEBHOOK_SECRET`.
+Billing model: 50GB free per account, then $3/TB/month on however much
+storage you're actively pledging across your buddy pairings — a
+subscription **quantity** (in GB) that updates automatically whenever a
+pairing is created or ends, not a live usage meter. Relay-bandwidth overage
+billing (`STRIPE_RELAY_METER_ID`, `relay_usage_events`) is a separate,
+not-yet-built piece — this section is just the storage subscription.
+
+1. **Create the tiered Price.** Rather than clicking through the Stripe
+   dashboard's pricing UI (fractional-cent-per-GB pricing is fiddly to get
+   exactly right by hand), run the setup script against your Stripe secret
+   key:
+   ```bash
+   STRIPE_SECRET_KEY=sk_test_xxx node scripts/create-stripe-storage-price.mjs
+   ```
+   No `npm install` needed — it talks to Stripe's REST API directly. It
+   prints a `price_...` ID; put that in `.env` on app-1 as
+   `STRIPE_STORAGE_PRICE_ID`. Start with your **test mode** secret key
+   (Stripe dashboard → toggle Test mode → Developers → API keys) so you can
+   run through a full signup → checkout → subscribe flow with fake cards
+   before ever touching live payments.
+2. **Set `APP_URL`** in `.env` to `https://app.filegarden.net` (no trailing
+   slash) — the Checkout/Billing Portal success and return URLs are built
+   from this.
+3. **Add a webhook endpoint** (Stripe dashboard → Developers → Webhooks)
+   pointing at `https://api.filegarden.net/webhooks/stripe`, subscribed to:
+   `checkout.session.completed`, `customer.subscription.deleted`,
+   `customer.subscription.updated`, `invoice.payment_succeeded`, and
+   `invoice.payment_failed` — matching the handler in
+   `apps/api/src/routes/stripe-webhook.js`. Copy its signing secret into
+   `.env` as `STRIPE_WEBHOOK_SECRET`.
+4. **Apply the migration and restart:**
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/005_billing.sql
+   docker compose up -d --build api
+   ```
+5. **Test it end to end** (test mode): sign up or log into a test account,
+   go to the dashboard's Billing card, click **Subscribe**, and use
+   Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC. You
+   should land back on the dashboard with "Subscription started," and the
+   card should now say **Manage billing** (opens the Stripe-hosted Billing
+   Portal — cancel, update payment method, view invoices, all handled by
+   Stripe, not custom-built here). Create/redeem an invite between two test
+   accounts afterward and confirm the subscription quantity in the Stripe
+   dashboard updates to match the new pledge.
+6. Only once all of that works in test mode: switch to your **live** secret
+   key and webhook signing secret in `.env`, and re-run the setup script
+   with the live key to create a live-mode version of the Price.

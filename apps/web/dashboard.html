@@ -21,6 +21,14 @@
     </div>
 
     <div class="card">
+      <h2>Billing</h2>
+      <p id="billing-summary" class="muted">Loading…</p>
+      <p id="billing-note" class="muted" style="display:none"></p>
+      <button class="btn" id="billing-btn" type="button" style="margin-top:1rem; display:none"></button>
+      <p class="error" id="billing-error"></p>
+    </div>
+
+    <div class="card">
       <h2>Buddy pairings</h2>
       <table id="pairings-table" style="display:none">
         <thead>
@@ -151,6 +159,47 @@
       }
     }
 
+    async function loadBilling() {
+      const summaryEl = document.getElementById('billing-summary');
+      const btnEl = document.getElementById('billing-btn');
+      const errorEl = document.getElementById('billing-error');
+      errorEl.textContent = '';
+
+      const res = await fetch('/api/billing/summary', { credentials: 'same-origin' });
+      if (!res.ok) {
+        summaryEl.textContent = 'Could not load billing info.';
+        return;
+      }
+      const data = await res.json();
+
+      const freeNote = data.billable_gb === 0
+        ? ` (within your ${data.free_allowance_gb}GB free allowance)`
+        : ` — an estimated $${data.estimated_monthly_usd.toFixed(2)}/month`;
+      summaryEl.textContent =
+        `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.`;
+
+      btnEl.style.display = 'inline-block';
+      btnEl.textContent = data.has_subscription ? 'Manage billing' : 'Subscribe';
+      btnEl.onclick = async () => {
+        btnEl.disabled = true;
+        errorEl.textContent = '';
+        try {
+          const endpoint = data.has_subscription ? '/api/billing/portal' : '/api/billing/checkout';
+          const actionRes = await fetch(endpoint, { method: 'POST', credentials: 'same-origin' });
+          const actionData = await actionRes.json();
+          if (!actionRes.ok) {
+            errorEl.textContent = actionData.error || 'Could not start billing.';
+            btnEl.disabled = false;
+            return;
+          }
+          window.location.href = actionData.url;
+        } catch (err) {
+          errorEl.textContent = 'Could not reach the server. Try again.';
+          btnEl.disabled = false;
+        }
+      };
+    }
+
     async function init() {
       const me = await loadMe();
       if (!me) return;
@@ -158,6 +207,17 @@
       renderAccount(me.account);
       renderPairings(me.pairings, me.account.id);
       await loadInvites();
+      await loadBilling();
+
+      const checkoutStatus = new URLSearchParams(window.location.search).get('checkout');
+      const noteEl = document.getElementById('billing-note');
+      if (checkoutStatus === 'success') {
+        noteEl.textContent = 'Subscription started — thanks!';
+        noteEl.style.display = 'block';
+      } else if (checkoutStatus === 'cancelled') {
+        noteEl.textContent = 'Checkout was cancelled — no charge was made.';
+        noteEl.style.display = 'block';
+      }
     }
 
     document.getElementById('invite-form').addEventListener('submit', async (e) => {

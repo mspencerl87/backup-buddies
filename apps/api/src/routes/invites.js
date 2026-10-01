@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { syncSubscriptionQuantity } from './billing.js';
 
 export const invitesRouter = Router();
 
@@ -93,6 +94,15 @@ invitesRouter.post('/invites/:code/redeem', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    // Pairing is now active — bring each side's Stripe subscription
+    // quantity (if they have one) up to date with their new total pledge.
+    // Deliberately after the commit: a Stripe hiccup here should never
+    // roll back a successful pairing, and syncSubscriptionQuantity never
+    // throws on its own.
+    await syncSubscriptionQuantity(invite.inviter_account_id);
+    await syncSubscriptionQuantity(req.account.id);
+
     res.status(201).json({ pairing: pairingResult.rows[0] });
   } catch (err) {
     await client.query('ROLLBACK');

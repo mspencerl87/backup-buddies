@@ -1,8 +1,6 @@
 import { Router } from 'express';
-import Stripe from 'stripe';
 import { pool } from '../db/pool.js';
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+import { stripe } from '../lib/stripe.js';
 
 export const stripeWebhookRouter = Router();
 
@@ -50,12 +48,44 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
         break;
       }
 
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        // client_reference_id is set to the account's id when we create
+        // the Checkout session in routes/billing.js — that's how we tie
+        // "a subscription now exists" back to a specific account.
+        if (session.mode === 'subscription' && session.subscription && session.client_reference_id) {
+          const subscription = await stripe.subscriptions.retrieve(session.subscription);
+          const item = subscription.items.data[0];
+          await pool.query(
+            `UPDATE accounts
+                SET stripe_subscription_id = $1,
+                    stripe_subscription_item_id = $2,
+                    relay_status = 'active'
+              WHERE id = $3`,
+            [subscription.id, item?.id ?? null, session.client_reference_id],
+          );
+        }
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object;
+        // Cancellation (self-service via the billing portal, or a dunning
+        // process giving up after repeated failures) — clear the stored
+        // subscription so the account can start a fresh one later.
+        await pool.query(
+          `UPDATE accounts
+              SET stripe_subscription_id = NULL,
+                  stripe_subscription_item_id = NULL
+            WHERE stripe_subscription_id = $1`,
+          [subscription.id],
+        );
+        break;
+      }
+
       case 'customer.subscription.updated': {
         const subscription = event.data.object;
-        // TODO: map subscription.items back to a tier name and update
-        // accounts.tier, once the Price IDs for each tier are created in
-        // the Stripe dashboard.
-        console.log('Subscription updated', subscription.id);
+        console.log('Subscription updated', subscription.id, subscription.status);
         break;
       }
 
