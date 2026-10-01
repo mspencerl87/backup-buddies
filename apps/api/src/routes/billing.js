@@ -101,6 +101,12 @@ billingRouter.post('/billing/checkout', requireAuth, async (req, res) => {
     customer: customerId,
     client_reference_id: req.account.id,
     line_items: [{ price: process.env.STRIPE_STORAGE_PRICE_ID, quantity }],
+    // Stripe's "Managed Payments" (enabled by default on newer accounts)
+    // requires every product to carry a tax code before Checkout will let
+    // it through. Not something this project needs to deal with yet —
+    // disable it explicitly rather than assigning a tax code we'd have to
+    // get right for a storage-trading subscription product.
+    managed_payments: { enabled: false },
     success_url: `${process.env.APP_URL}/dashboard.html?checkout=success`,
     cancel_url: `${process.env.APP_URL}/dashboard.html?checkout=cancelled`,
   });
