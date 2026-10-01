@@ -1,0 +1,34 @@
+name: Build and publish client image
+
+# This only builds and pushes the image — unlike the API, there's no
+# server to deploy it to. Customers pull ghcr.io/<repo>/client:latest
+# themselves via apps/client/docker-compose.yml.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/client/**"
+      - ".github/workflows/build-client.yml"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/client
+          push: true
+          tags: ghcr.io/${{ github.repository }}/client:latest,ghcr.io/${{ github.repository }}/client:${{ github.sha }}

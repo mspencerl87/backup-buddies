@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up the client — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/dashboard.html">Dashboard</a>
+    </nav>
+  </header>
+
+  <main class="about-main">
+    <section class="hero" style="padding-top:1.5rem">
+      <h1>Set up the client</h1>
+      <p>
+        The website handles your account, billing, and finding a buddy. The
+        actual backup happens through a small program you run on your own
+        computer, in Docker. Here's how to get it running.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>Before you start</h2>
+      <p class="muted">You'll need:</p>
+      <ul class="tech-list">
+        <li><strong>Docker</strong> installed and running on the machine you want to back up.</li>
+        <li><strong>An active buddy pairing</strong> — redeem an invite code or request one from <a href="/dashboard.html">Find a buddy</a> first. The client won't have anyone to talk to without one.</li>
+        <li><strong>A passphrase only you'll know.</strong> Think of it now — it encrypts your data before it leaves your machine, and there's no way to recover it if you lose it. A few random words work well.</li>
+      </ul>
+    </section>
+
+    <section class="about-section">
+      <h2>Steps</h2>
+      <ol class="steps">
+        <li>
+          <strong>Get a device token</strong>
+          On your <a href="/dashboard.html">dashboard</a>, under <strong>Devices</strong>, give this machine a label (e.g. "home desktop") and click <strong>Add device</strong>. You'll see a token — copy it now, it's only shown once.
+        </li>
+        <li>
+          <strong>Download the client files</strong>
+          Clone or download <code>apps/client/</code> from the project's repository — it contains <code>docker-compose.yml</code> and <code>.env.example</code>. (If you don't have access to the repository, ask whoever set up your account for these two files.)
+        </li>
+        <li>
+          <strong>Fill in your <code>.env</code> file</strong>
+          Copy <code>.env.example</code> to <code>.env</code> and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
+        </li>
+        <li>
+          <strong>Start it</strong>
+          In that folder, run:
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>docker compose up -d
+docker compose logs -f</code></pre>
+          You should see a line confirming the device registered. Your Devices card on the dashboard will now show this device as connected.
+        </li>
+        <li>
+          <strong>Confirm it found your buddy</strong>
+          Once your buddy's client is running too, you'll see a "connectivity test succeeded" line in the logs roughly every 30 seconds. That confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible.
+        </li>
+      </ol>
+    </section>
+
+    <section class="about-section">
+      <h2>What this version actually does</h2>
+      <p class="muted">
+        This first release of the client proves the pipe works end to end —
+        your machine, your buddy's machine, and the relay in between — using
+        the same client-side encryption real backups will use. It is not yet
+        doing full folder backup and restore; that's the next piece being
+        built on top of this foundation. If you're trying this out, expect
+        a "connectivity test succeeded" log line, not a working backup yet.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>Troubleshooting</h2>
+      <ul class="tech-list">
+        <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>.</li>
+        <li><strong>Registered, but no connectivity test:</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
+        <li><strong>Lost your device token:</strong> remove the device on your dashboard and add it again — tokens can't be retrieved after creation, only replaced.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>

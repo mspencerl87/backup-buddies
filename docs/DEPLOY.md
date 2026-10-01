@@ -272,3 +272,33 @@ not-yet-built piece — this section is just the storage subscription.
 6. Only once all of that works in test mode: switch to your **live** secret
    key and webhook signing secret in `.env`, and re-run the setup script
    with the live key to create a live-mode version of the Price.
+
+## 11. Device registration + the backup client
+
+Adds device API tokens (so the headless Rust client can authenticate
+without a browser session), a public marketplace for finding a buddy
+without a direct invite code, and `apps/client/` — the actual P2P backup
+agent customers run in Docker. This section is server-side setup; see
+`apps/client/README.md` and the dashboard's **Set up the client** page
+(`/setup.html`) for what the customer does on their own machine.
+
+1. **Apply the migration and restart:**
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/006_devices_and_marketplace.sql
+   docker compose up -d --build api
+   ```
+2. **Nothing else changes on app-1** — devices and marketplace listings are
+   ordinary rows in the existing database, served by the existing API
+   container. The client image is built and pushed separately (see below)
+   and never runs on app-1 at all; it runs on each customer's own machine.
+
+**Publishing the client image:** `.github/workflows/build-client.yml`
+builds and pushes `ghcr.io/<repo>/client` on any push to `apps/client/**`
+— there's no deploy step, since customers pull (or build) the image
+themselves via `apps/client/docker-compose.yml`. Note this repo is
+private, so by default that GHCR package is private too: either make the
+`client` package public (package settings on GHCR) before sharing it with
+real customers, or have them `build: .` locally from the `apps/client/`
+source instead of pulling.

@@ -29,6 +29,36 @@
     </div>
 
     <div class="card">
+      <h2>Devices</h2>
+      <p class="muted">Each machine running the backup client needs its own device token. <a href="/setup.html">How do I set up the client?</a></p>
+      <table id="devices-table" style="display:none">
+        <thead>
+          <tr><th>Label</th><th>Status</th><th>Last seen</th><th>Token</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="devices-empty" class="muted">No devices yet — add one to get a token for the Docker client.</p>
+      <div class="inline-form" style="margin-top:1rem">
+        <input type="text" id="device-label" placeholder="e.g. Spencer's desktop">
+        <button class="btn" id="add-device-btn" type="button">Add device</button>
+      </div>
+      <p class="error" id="device-error"></p>
+      <div id="device-token-reveal" style="display:none; margin-top:1rem; padding:1rem; border:1px solid var(--border); border-radius:8px; background:#11141a;">
+        <p class="muted" style="margin-top:0">This token is shown once — copy it into that device's <code>.env</code> file now. It won't be shown again.</p>
+        <code id="device-token-value" style="display:block; word-break:break-all; padding:0.5rem; margin-bottom:0.5rem"></code>
+        <button class="btn btn-secondary" id="copy-token-btn" type="button">Copy token</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Find a buddy</h2>
+      <p class="muted">Don't have anyone to pair with yet? Browse people who've listed storage publicly, or list your own below.</p>
+      <div id="marketplace-list"></div>
+      <p id="marketplace-empty" class="muted" style="display:none">No public listings right now — be the first to list below.</p>
+      <p class="error" id="marketplace-error"></p>
+    </div>
+
+    <div class="card">
       <h2>Buddy pairings</h2>
       <table id="pairings-table" style="display:none">
         <thead>
@@ -45,6 +75,14 @@
       <form id="invite-form">
         <label for="pledged-gb">Storage to pledge (GB)</label>
         <input type="number" id="pledged-gb" min="1" value="50" required>
+        <label class="checkbox-row" for="invite-public" style="margin-left:0">
+          <input type="checkbox" id="invite-public">
+          <span>List this publicly in "Find a buddy" instead of only sharing the code directly</span>
+        </label>
+        <div id="invite-note-row" style="display:none">
+          <label for="invite-note">Note (optional)</label>
+          <input type="text" id="invite-note" placeholder="e.g. Fast connection, available evenings">
+        </div>
         <button class="btn" type="submit" style="margin-top:1rem">Generate invite code</button>
       </form>
       <p class="error" id="invite-error"></p>
@@ -200,6 +238,141 @@
       };
     }
 
+    function renderDevices(devices) {
+      const table = document.getElementById('devices-table');
+      const empty = document.getElementById('devices-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (devices.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const d of devices) {
+        const status = d.iroh_node_id ? 'connected' : 'not set up yet';
+        const lastSeen = d.last_seen_at ? formatDate(d.last_seen_at) : 'never';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${d.label || '(unlabeled)'}</td>
+          <td>${status}</td>
+          <td>${lastSeen}</td>
+          <td><code>…${d.token_last_four || '????'}</code></td>
+          <td><a href="#" class="remove-device-link" data-id="${d.id}">Remove</a></td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      tbody.querySelectorAll('.remove-device-link').forEach((link) => {
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (!confirm('Remove this device? The running client will stop being able to authenticate.')) return;
+          await fetch(`/api/devices/${link.dataset.id}`, { method: 'DELETE', credentials: 'same-origin' });
+          await loadDevices();
+        });
+      });
+    }
+
+    async function loadDevices() {
+      const res = await fetch('/api/devices', { credentials: 'same-origin' });
+      const data = await res.json();
+      renderDevices(data.devices);
+    }
+
+    document.getElementById('add-device-btn').addEventListener('click', async () => {
+      const errorEl = document.getElementById('device-error');
+      errorEl.textContent = '';
+      const label = document.getElementById('device-label').value.trim();
+
+      const res = await fetch('/api/devices', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label || undefined }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        errorEl.textContent = data.error || 'Could not create device.';
+        return;
+      }
+
+      document.getElementById('device-label').value = '';
+      document.getElementById('device-token-value').textContent = data.token;
+      document.getElementById('device-token-reveal').style.display = 'block';
+      await loadDevices();
+    });
+
+    document.getElementById('copy-token-btn').addEventListener('click', async () => {
+      const token = document.getElementById('device-token-value').textContent;
+      try {
+        await navigator.clipboard.writeText(token);
+      } catch (err) {
+        // Clipboard API may be unavailable (e.g. non-HTTPS) — the token is
+        // already shown on screen to copy by hand.
+      }
+    });
+
+    async function loadMarketplace() {
+      const listEl = document.getElementById('marketplace-list');
+      const emptyEl = document.getElementById('marketplace-empty');
+      const errorEl = document.getElementById('marketplace-error');
+      errorEl.textContent = '';
+
+      const res = await fetch('/api/invites/public', { credentials: 'same-origin' });
+      if (!res.ok) {
+        errorEl.textContent = 'Could not load the marketplace.';
+        return;
+      }
+      const data = await res.json();
+
+      listEl.innerHTML = '';
+      if (data.listings.length === 0) {
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+
+      for (const listing of data.listings) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border)';
+        row.innerHTML = `
+          <div>
+            <strong>${listing.inviter_label}</strong> — ${formatBytes(Number(listing.pledged_bytes))}
+            ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
+          </div>
+          <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
+        `;
+        listEl.appendChild(row);
+      }
+
+      listEl.querySelectorAll('.request-pairing-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          errorEl.textContent = '';
+          btn.disabled = true;
+          const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            errorEl.textContent = data.error || 'Could not request this pairing.';
+            btn.disabled = false;
+            return;
+          }
+          await init();
+        });
+      });
+    }
+
+    document.getElementById('invite-public').addEventListener('change', (e) => {
+      document.getElementById('invite-note-row').style.display = e.target.checked ? 'block' : 'none';
+    });
+
     async function init() {
       const me = await loadMe();
       if (!me) return;
@@ -207,6 +380,8 @@
       renderAccount(me.account);
       renderPairings(me.pairings, me.account.id);
       await loadInvites();
+      await loadDevices();
+      await loadMarketplace();
       await loadBilling();
 
       const checkoutStatus = new URLSearchParams(window.location.search).get('checkout');
@@ -229,12 +404,14 @@
 
       const gb = Number(document.getElementById('pledged-gb').value);
       const pledgedBytes = Math.round(gb * 1024 ** 3);
+      const isPublic = document.getElementById('invite-public').checked;
+      const note = document.getElementById('invite-note').value.trim();
 
       const res = await fetch('/api/invites', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pledged_bytes: pledgedBytes }),
+        body: JSON.stringify({ pledged_bytes: pledgedBytes, is_public: isPublic, note: note || undefined }),
       });
       const data = await res.json();
 

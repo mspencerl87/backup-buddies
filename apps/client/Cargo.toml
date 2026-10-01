@@ -1,0 +1,23 @@
+[package]
+name = "backup-buddies-client"
+version = "0.1.0"
+edition = "2024"
+# Pinned to iroh 1.3.0 to match deploy/relay's iroh-relay:v1.3.0 image —
+# client and relay protocol versions should move together. Verified to
+# compile cleanly against this exact dependency set as of 2026-10-01; iroh's
+# API has shifted release to release (NodeId/NodeAddr renamed to
+# EndpointId/EndpointAddr at some point before 1.3.0), so re-check this
+# against the current `iroh` docs.rs page before bumping the version.
+
+[dependencies]
+age = "0.12.1"
+anyhow = "1.0.104"
+hex = "0.4.3"
+iroh = "1.3.0"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "fs", "io-util", "signal"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"

@@ -7,7 +7,7 @@ export const meRouter = Router();
 meRouter.get('/me', requireAuth, async (req, res) => {
   const [devices, pairings] = await Promise.all([
     pool.query(
-      `SELECT id, iroh_node_id, label, created_at, last_seen_at
+      `SELECT id, iroh_node_id, label, token_last_four, created_at, last_seen_at
          FROM devices
         WHERE account_id = $1
         ORDER BY created_at`,
@@ -26,6 +26,7 @@ meRouter.get('/me', requireAuth, async (req, res) => {
     account: {
       id: req.account.id,
       email: req.account.email,
+      nickname: req.account.nickname,
       tier: req.account.tier,
       relay_status: req.account.relay_status,
       created_at: req.account.created_at,
@@ -35,4 +36,23 @@ meRouter.get('/me', requireAuth, async (req, res) => {
     devices: devices.rows,
     pairings: pairings.rows,
   });
+});
+
+// Sets (or clears) the public display name shown on marketplace listings
+// instead of your email address. Pass an empty string / null to clear it.
+meRouter.patch('/me', requireAuth, async (req, res) => {
+  const { nickname } = req.body ?? {};
+  if (nickname !== undefined && nickname !== null && typeof nickname !== 'string') {
+    return res.status(400).json({ error: 'nickname must be a string' });
+  }
+  if (typeof nickname === 'string' && nickname.length > 40) {
+    return res.status(400).json({ error: 'nickname must be 40 characters or fewer' });
+  }
+
+  await pool.query('UPDATE accounts SET nickname = $1 WHERE id = $2', [
+    nickname || null,
+    req.account.id,
+  ]);
+
+  res.json({ ok: true });
 });
