@@ -61,8 +61,8 @@ docker build -t backup-buddies-client .
 
 ## Data directory
 
-Everything persistent lives under `/data` inside the container (the
-`client_data` named volume in `docker-compose.yml`):
+Everything persistent lives under `/data` inside the container, bind-mounted
+from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
 
 - `/data/iroh_secret_key` — this device's identity. Deleting it means the
   device re-registers under a new identity next startup (update it on

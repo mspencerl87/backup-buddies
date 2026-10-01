@@ -62,7 +62,7 @@ cd backup-buddies-client</code></pre>
         <li>
           <strong>Fill in your <code>.env</code> file</strong>
           The installer already created <code>.env</code> for you from the template — open it and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
-          By default your data is stored in a Docker-managed volume, which needs no setup — but if you'd rather it live in a specific folder (a separate disk, a NAS mount, wherever), set <code>DATA_DIR_HOST</code> in <code>.env</code> to that path.
+          Your data is stored in <code>DATA_DIR_HOST</code>, a real folder on this machine — it defaults to <code>./data</code> next to this file, but you can point it anywhere (a separate disk, a NAS mount) by changing that one line.
         </li>
         <li>
           <strong>Start it</strong>
@@ -97,7 +97,7 @@ docker compose logs -f</code></pre>
         <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
         <li><code>docker compose ps</code> — check whether it's currently running.</li>
         <li><code>docker compose restart</code> — restart it without rebuilding.</li>
-        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in the <code>client_data</code> volume) — <code>docker compose up -d</code> picks up right where it left off.</li>
+        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in <code>DATA_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
       </ul>
     </section>
 
