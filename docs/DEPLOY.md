@@ -159,11 +159,11 @@ What changed, for reference:
 - `deploy/app/docker-compose.yml` mounts `apps/web` read-only into the
   `caddy` service at `/srv/web`.
 
-If you add further static-site changes later and want CI to auto-deploy
-them too, add `apps/web/**` to the trigger paths in
-`.github/workflows/deploy.yml` — right now that workflow only watches
-`apps/api/**` and `deploy/app/**`, so an `apps/web`-only change needs the
-manual `git pull && docker compose up -d` above.
+`apps/web/**`, `deploy/app/**`, and `db/migrations/**` are all CI trigger
+paths, and the deploy job runs `git pull` on app-1 before touching Docker —
+so pushing any of the above to `main` deploys itself. The manual steps
+above are only needed for a first deploy, or to apply a new migration by
+hand (CI never runs migrations automatically).
 
 ## 8. Set up the GitHub Actions deploy
 
@@ -180,7 +180,48 @@ automatically. The relay side isn't wired into CI yet since it changes far
 less often — redeploy it manually with `git pull && docker compose up -d`
 when needed.
 
-## 9. Stripe setup (once you're ready to bill)
+## 9. Google sign-in
+
+Lets people sign up/log in with their Google account instead of (or in
+addition to) email + password. Entirely optional — leave the env vars
+unset and the "Continue with Google" button just redirects to a
+"not configured" message, everything else keeps working.
+
+1. In the [Google Cloud Console](https://console.cloud.google.com/), create
+   a project (or use an existing one) and go to **APIs & Services →
+   Credentials**.
+2. **Configure the OAuth consent screen** first if you haven't: User type
+   "External" is fine for a public product; add your support email; you
+   don't need to submit for verification just to let people sign in with
+   basic profile/email scopes.
+3. **Create Credentials → OAuth client ID**, application type **Web
+   application**.
+   - Authorized JavaScript origins: `https://app.filegarden.net`
+   - Authorized redirect URIs: `https://app.filegarden.net/api/auth/google/callback`
+     — must match exactly, including the `/api` prefix (that's what Caddy
+     strips before proxying to the API's `/auth/google/callback` route).
+4. Copy the generated **Client ID** and **Client secret** into `.env` on
+   app-1:
+   ```
+   GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxx
+   GOOGLE_REDIRECT_URI=https://app.filegarden.net/api/auth/google/callback
+   ```
+5. Apply the new migration (adds `google_sub`, makes `password_hash`
+   optional) and restart the API so it picks up both the new env vars and
+   the new `google-auth-library` dependency:
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/003_google_oauth.sql
+   docker compose up -d --build api
+   ```
+6. Test it: visit `/login.html`, click **Continue with Google**, and
+   confirm you land on the dashboard afterward. Signing in with a Google
+   account whose email matches an existing password account links the two
+   (same account, now usable either way) rather than creating a duplicate.
+
+## 10. Stripe setup (once you're ready to bill)
 
 1. Create the flat recurring Prices for each tier (free/starter/standard/
    plus/pro) in the Stripe dashboard.

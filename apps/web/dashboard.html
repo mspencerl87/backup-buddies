@@ -85,8 +85,12 @@
     }
 
     function renderAccount(account) {
+      const methods = [];
+      if (account.has_password) methods.push('password');
+      if (account.has_google) methods.push('Google');
+      const methodNote = methods.length ? ` (signed in via ${methods.join(' & ')})` : '';
       document.getElementById('account-summary').textContent =
-        `${account.email} — ${account.tier} tier`;
+        `${account.email} — ${account.tier} tier${methodNote}`;
     }
 
     function renderPairings(pairings, selfId) {

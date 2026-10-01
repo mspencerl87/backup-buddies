@@ -29,6 +29,8 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       tier: req.account.tier,
       relay_status: req.account.relay_status,
       created_at: req.account.created_at,
+      has_password: Boolean(req.account.password_hash),
+      has_google: Boolean(req.account.google_sub),
     },
     devices: devices.rows,
     pairings: pairings.rows,
