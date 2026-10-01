@@ -13,9 +13,13 @@ app.filegarden.net {
 		reverse_proxy api:3000
 	}
 
-	# Everything else is the static site.
+	# Everything else is the static site. no-cache (not no-store) means
+	# browsers always revalidate with a conditional request before reusing
+	# a cached copy — still fast (a 304 when nothing changed), but a push
+	# here is never masked by a stale local copy sitting around.
 	handle {
 		root * /srv/web
+		header Cache-Control "no-cache"
 		file_server
 	}
 }
