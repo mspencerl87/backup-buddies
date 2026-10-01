@@ -1,0 +1,64 @@
+# Backup Buddies
+
+Peer-to-peer backup trading: users pledge storage to a paired "buddy" and back up
+to each other's disks instead of a cloud provider. Files are chunked and
+encrypted client-side before they ever leave a device — neither buddy, nor this
+service, can read the other's data.
+
+## How it's laid out
+
+This is two independently deployable pieces, matching the two Linodes:
+
+| Path | Deploys to | What it is |
+|---|---|---|
+| `apps/api/` + `deploy/app/` | `app-1` | Control plane: Express API + Postgres + Caddy (TLS) |
+| `deploy/relay/` | `relay-1` | Self-hosted Iroh relay (NAT-traversal fallback) |
+
+The API never touches user file data — it only handles accounts, buddy
+pairing, device NodeIds, quotas, and billing. The relay only ever forwards
+already-encrypted bytes between two paired clients when a direct P2P
+connection can't be established.
+
+## Stack
+
+- **API**: Node.js (Express) + `pg` — see `apps/api`
+- **DB**: Postgres 16, schema in `db/init.sql`
+- **Relay**: official `n0computer/iroh-relay` Docker image
+- **TLS / reverse proxy**: Caddy (automatic HTTPS)
+- **DNS / edge**: Cloudflare (see note below — the relay needs a DNS-only record)
+- **Billing**: Stripe (flat tier price + metered relay-usage price via Stripe
+  Billing Meters)
+
+## Cloudflare: where it fits and where it doesn't
+
+Cloudflare's proxy ("orange cloud") is great in front of the **API** domain
+(e.g. `api.yourdomain.com`) — free DDoS protection, caching for static
+responses, and you already pay for it. Use it there.
+
+**Do not proxy the relay's hostname through Cloudflare.** The relay needs raw
+UDP/QUIC reachability for NAT hole-punching and direct connections; Cloudflare's
+proxy only handles HTTP(S)/TCP traffic on specific ports and will break this.
+Give the relay host (e.g. `relay.yourdomain.com`) a **DNS-only (grey cloud)**
+record pointing straight at the Linode's IP.
+
+Cloudflare is still useful for the relay's DNS record itself, and you can put
+Cloudflare Access in front of anything admin-only later (e.g. a future
+dashboard) without it interfering with the relay protocol.
+
+## OS choice: Ubuntu 24.04 LTS, not "latest"
+
+Use **Ubuntu 24.04 LTS** on both Linodes specifically, not whatever "latest"
+resolves to at image-creation time. LTS releases get security patches for
+years and won't change Docker/kernel behavior out from under you on a
+re-provision; a non-LTS "latest" release goes end-of-life in ~9 months, which
+you don't want to discover mid-production.
+
+## Deploying
+
+See `docs/DEPLOY.md` for the step-by-step: provisioning the two Linodes,
+DNS records, environment variables, and the first `docker-compose up`.
+
+## Environment variables
+
+Copy `.env.example` to `.env` on `app-1` and fill in real values. **Never
+commit `.env`.**

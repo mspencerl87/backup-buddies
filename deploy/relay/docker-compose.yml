@@ -1,0 +1,26 @@
+# Self-hosted Iroh relay — NAT-traversal fallback for buddy pairs that can't
+# connect directly to each other.
+#
+# Port numbers below are taken from the iroh-relay README as of writing
+# (HTTPS relay traffic, QUIC address discovery on 7824/udp). Confirm these
+# against `docker run n0computer/iroh-relay --help` and the current
+# n0-computer/iroh-relay README before deploying — these details can shift
+# between releases, and this compose file pins a version specifically so an
+# upstream change doesn't silently alter your running config.
+#
+# Source: https://github.com/n0-computer/iroh/blob/main/iroh-relay/README.md
+
+services:
+  relay:
+    image: n0computer/iroh-relay:v1.3.0
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "7824:7824/udp"
+    volumes:
+      - ./config.toml:/config.toml:ro
+      - relay_certs:/certs
+    command: ["--config-path", "/config.toml"]
+
+volumes:
+  relay_certs:

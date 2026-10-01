@@ -1,0 +1,24 @@
+# secrets / local env — never commit
+.env
+*.env.local
+
+# node
+node_modules/
+npm-debug.log*
+
+# db data volumes (if ever bind-mounted locally)
+pgdata/
+*.sql.bak
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# caddy runtime state (certs etc, lives on the server, not in git)
+deploy/app/caddy_data/
+deploy/app/caddy_config/

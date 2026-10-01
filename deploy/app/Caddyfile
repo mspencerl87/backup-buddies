@@ -1,0 +1,7 @@
+# Replace with your real API hostname. Caddy will automatically obtain and
+# renew a TLS certificate via Let's Encrypt — this works whether or not the
+# DNS record is proxied through Cloudflare, as long as port 80 is reachable
+# for the ACME challenge.
+api.yourdomain.com {
+	reverse_proxy api:3000
+}

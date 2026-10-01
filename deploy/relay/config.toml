@@ -1,0 +1,20 @@
+# Example iroh-relay config — verify field names against the current
+# n0-computer/iroh-relay README before relying on this; the relay is young
+# enough that config shape has changed between releases.
+# https://github.com/n0-computer/iroh/blob/main/iroh-relay/README.md
+
+# Open to any client by default. Tighten this once you're only expecting
+# your own app's clients to use it (e.g. a shared_token checked by your API
+# at pairing time).
+access = "everyone"
+
+enable_quic_addr_discovery = true
+
+[tls]
+# "Manual" here because this box is behind a DNS-only (non-proxied)
+# Cloudflare record — point these at a cert you manage yourself (e.g. via
+# certbot) or switch to whatever automatic mode the current iroh-relay
+# version supports for your setup.
+cert_mode = "Manual"
+manual_cert_path = "/certs/cert.pem"
+manual_key_path = "/certs/cert.key.pem"
