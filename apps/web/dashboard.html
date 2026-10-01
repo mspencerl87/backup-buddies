@@ -78,8 +78,49 @@
       <h2>Invite a buddy</h2>
       <p class="muted">Pick how much storage you're willing to trade, generate a code, and send it to the person you want as your backup buddy.</p>
       <form id="invite-form">
-        <label for="pledged-gb">Storage to pledge (GB)</label>
-        <input type="number" id="pledged-gb" min="1" value="50" required>
+        <label for="pledged-gb">Storage to pledge</label>
+        <select id="pledged-gb" required>
+          <option value="500" selected>500 GB</option>
+          <option value="1000">1 TB</option>
+          <option value="1500">1.5 TB</option>
+          <option value="2000">2 TB</option>
+          <option value="2500">2.5 TB</option>
+          <option value="3000">3 TB</option>
+          <option value="3500">3.5 TB</option>
+          <option value="4000">4 TB</option>
+          <option value="4500">4.5 TB</option>
+          <option value="5000">5 TB</option>
+          <option value="5500">5.5 TB</option>
+          <option value="6000">6 TB</option>
+          <option value="6500">6.5 TB</option>
+          <option value="7000">7 TB</option>
+          <option value="7500">7.5 TB</option>
+          <option value="8000">8 TB</option>
+          <option value="8500">8.5 TB</option>
+          <option value="9000">9 TB</option>
+          <option value="9500">9.5 TB</option>
+          <option value="10000">10 TB</option>
+          <option value="10500">10.5 TB</option>
+          <option value="11000">11 TB</option>
+          <option value="11500">11.5 TB</option>
+          <option value="12000">12 TB</option>
+          <option value="12500">12.5 TB</option>
+          <option value="13000">13 TB</option>
+          <option value="13500">13.5 TB</option>
+          <option value="14000">14 TB</option>
+          <option value="14500">14.5 TB</option>
+          <option value="15000">15 TB</option>
+          <option value="15500">15.5 TB</option>
+          <option value="16000">16 TB</option>
+          <option value="16500">16.5 TB</option>
+          <option value="17000">17 TB</option>
+          <option value="17500">17.5 TB</option>
+          <option value="18000">18 TB</option>
+          <option value="18500">18.5 TB</option>
+          <option value="19000">19 TB</option>
+          <option value="19500">19.5 TB</option>
+          <option value="20000">20 TB</option>
+        </select>
         <label class="checkbox-row" for="invite-public" style="margin-left:0">
           <input type="checkbox" id="invite-public">
           <span>List this publicly in "Find a buddy" instead of only sharing the code directly</span>

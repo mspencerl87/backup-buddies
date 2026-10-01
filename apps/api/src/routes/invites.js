@@ -6,6 +6,15 @@ import { syncSubscriptionQuantity } from './billing.js';
 
 export const invitesRouter = Router();
 
+// Pledges are constrained to clean, even steps rather than an arbitrary
+// byte count — easier to reason about across pairings/billing, and avoids
+// someone fat-fingering "5000000" instead of "50". 500GB steps, 500GB to
+// 20,000GB (20TB) — the same GB basis (1024**3 bytes) the dashboard already
+// displays everywhere, just capped and quantized.
+const GB = 1024 ** 3;
+const PLEDGE_STEP_BYTES = 500 * GB;
+const PLEDGE_MAX_BYTES = 20_000 * GB;
+
 // Short, URL-safe, hard to guess by brute force but easy to read aloud or
 // paste into a text message — e.g. "7f3a9c2b1e".
 function generateInviteCode() {
@@ -21,8 +30,15 @@ invitesRouter.post('/invites', requireAuth, async (req, res) => {
   const { pledged_bytes, is_public, note } = req.body ?? {};
 
   const pledgedBytes = Number(pledged_bytes);
-  if (!Number.isInteger(pledgedBytes) || pledgedBytes <= 0) {
-    return res.status(400).json({ error: 'pledged_bytes must be a positive integer' });
+  if (
+    !Number.isInteger(pledgedBytes) ||
+    pledgedBytes < PLEDGE_STEP_BYTES ||
+    pledgedBytes > PLEDGE_MAX_BYTES ||
+    pledgedBytes % PLEDGE_STEP_BYTES !== 0
+  ) {
+    return res.status(400).json({
+      error: `pledged_bytes must be a multiple of ${PLEDGE_STEP_BYTES} (500GB) between ${PLEDGE_STEP_BYTES} and ${PLEDGE_MAX_BYTES} (20TB)`,
+    });
   }
   if (note !== undefined && note !== null && typeof note !== 'string') {
     return res.status(400).json({ error: 'note must be a string' });

@@ -154,7 +154,8 @@ label:first-child {
   margin-top: 0;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 0.6rem 0.75rem;
   border-radius: 8px;
@@ -164,7 +165,8 @@ input {
   font-size: 0.95rem;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: 1px solid var(--accent);
 }
 
