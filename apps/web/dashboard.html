@@ -117,6 +117,19 @@
   </main>
 
   <script>
+    // Every API route returns JSON, even its errors — except when a
+    // request never reaches Express at all (wrong path, server down,
+    // Caddy/Cloudflare returning its own error page). res.json() throws
+    // on those instead of giving back something we can show, so callers
+    // use this instead of calling res.json() directly.
+    async function parseJsonResponse(res) {
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Unexpected response (${res.status}) — try refreshing the page.`);
+      }
+      return res.json();
+    }
+
     function formatBytes(bytes) {
       const gb = bytes / (1024 ** 3);
       return gb >= 1 ? `${gb.toFixed(0)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
@@ -132,7 +145,7 @@
         window.location.href = '/login.html';
         return null;
       }
-      return res.json();
+      return parseJsonResponse(res);
     }
 
     function renderAccount(account) {
@@ -173,32 +186,37 @@
     }
 
     async function loadInvites() {
-      const res = await fetch('/api/invites', { credentials: 'same-origin' });
-      const data = await res.json();
-
-      const table = document.getElementById('invites-table');
       const empty = document.getElementById('invites-empty');
-      const tbody = table.querySelector('tbody');
-      tbody.innerHTML = '';
+      try {
+        const res = await fetch('/api/invites', { credentials: 'same-origin' });
+        const data = await parseJsonResponse(res);
 
-      if (data.invites.length === 0) {
-        table.style.display = 'none';
+        const table = document.getElementById('invites-table');
+        const tbody = table.querySelector('tbody');
+        tbody.innerHTML = '';
+
+        if (data.invites.length === 0) {
+          table.style.display = 'none';
+          empty.style.display = 'block';
+          return;
+        }
+
+        table.style.display = '';
+        empty.style.display = 'none';
+
+        for (const inv of data.invites) {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td><code>${inv.code}</code></td>
+            <td>${formatBytes(Number(inv.pledged_bytes))}</td>
+            <td>${inv.status}</td>
+            <td>${formatDate(inv.created_at)}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+      } catch (err) {
+        empty.textContent = 'Could not load your invites — try refreshing.';
         empty.style.display = 'block';
-        return;
-      }
-
-      table.style.display = '';
-      empty.style.display = 'none';
-
-      for (const inv of data.invites) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><code>${inv.code}</code></td>
-          <td>${formatBytes(Number(inv.pledged_bytes))}</td>
-          <td>${inv.status}</td>
-          <td>${formatDate(inv.created_at)}</td>
-        `;
-        tbody.appendChild(tr);
       }
     }
 
@@ -208,12 +226,18 @@
       const errorEl = document.getElementById('billing-error');
       errorEl.textContent = '';
 
-      const res = await fetch('/api/billing/summary', { credentials: 'same-origin' });
-      if (!res.ok) {
-        summaryEl.textContent = 'Could not load billing info.';
+      let data;
+      try {
+        const res = await fetch('/api/billing/summary', { credentials: 'same-origin' });
+        if (!res.ok) {
+          summaryEl.textContent = 'Could not load billing info.';
+          return;
+        }
+        data = await parseJsonResponse(res);
+      } catch (err) {
+        summaryEl.textContent = 'Could not load billing info — try refreshing.';
         return;
       }
-      const data = await res.json();
 
       const freeNote = data.billable_gb === 0
         ? ` (within your ${data.free_allowance_gb}GB free allowance)`
@@ -229,7 +253,7 @@
         try {
           const endpoint = data.has_subscription ? '/api/billing/portal' : '/api/billing/checkout';
           const actionRes = await fetch(endpoint, { method: 'POST', credentials: 'same-origin' });
-          const actionData = await actionRes.json();
+          const actionData = await parseJsonResponse(actionRes);
           if (!actionRes.ok) {
             errorEl.textContent = actionData.error || 'Could not start billing.';
             btnEl.disabled = false;
@@ -283,9 +307,13 @@
     }
 
     async function loadDevices() {
-      const res = await fetch('/api/devices', { credentials: 'same-origin' });
-      const data = await res.json();
-      renderDevices(data.devices);
+      try {
+        const res = await fetch('/api/devices', { credentials: 'same-origin' });
+        const data = await parseJsonResponse(res);
+        renderDevices(data.devices);
+      } catch (err) {
+        document.getElementById('device-error').textContent = err.message || 'Could not load devices.';
+      }
     }
 
     document.getElementById('add-device-btn').addEventListener('click', async () => {
@@ -293,23 +321,27 @@
       errorEl.textContent = '';
       const label = document.getElementById('device-label').value.trim();
 
-      const res = await fetch('/api/devices', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label || undefined }),
-      });
-      const data = await res.json();
+      try {
+        const res = await fetch('/api/devices', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: label || undefined }),
+        });
+        const data = await parseJsonResponse(res);
 
-      if (!res.ok) {
-        errorEl.textContent = data.error || 'Could not create device.';
-        return;
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not create device.';
+          return;
+        }
+
+        document.getElementById('device-label').value = '';
+        document.getElementById('device-token-value').textContent = data.token;
+        document.getElementById('device-token-reveal').style.display = 'block';
+        await loadDevices();
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not reach the server. Try again.';
       }
-
-      document.getElementById('device-label').value = '';
-      document.getElementById('device-token-value').textContent = data.token;
-      document.getElementById('device-token-reveal').style.display = 'block';
-      await loadDevices();
     });
 
     document.getElementById('copy-token-btn').addEventListener('click', async () => {
@@ -328,12 +360,18 @@
       const errorEl = document.getElementById('marketplace-error');
       errorEl.textContent = '';
 
-      const res = await fetch('/api/invites/public', { credentials: 'same-origin' });
-      if (!res.ok) {
-        errorEl.textContent = 'Could not load the marketplace.';
+      let data;
+      try {
+        const res = await fetch('/api/invites/public', { credentials: 'same-origin' });
+        if (!res.ok) {
+          errorEl.textContent = 'Could not load the marketplace.';
+          return;
+        }
+        data = await parseJsonResponse(res);
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load the marketplace.';
         return;
       }
-      const data = await res.json();
 
       listEl.innerHTML = '';
       if (data.listings.length === 0) {
@@ -359,17 +397,22 @@
         btn.addEventListener('click', async () => {
           errorEl.textContent = '';
           btn.disabled = true;
-          const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
-            method: 'POST',
-            credentials: 'same-origin',
-          });
-          const data = await res.json();
-          if (!res.ok) {
-            errorEl.textContent = data.error || 'Could not request this pairing.';
+          try {
+            const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
+              method: 'POST',
+              credentials: 'same-origin',
+            });
+            const data = await parseJsonResponse(res);
+            if (!res.ok) {
+              errorEl.textContent = data.error || 'Could not request this pairing.';
+              btn.disabled = false;
+              return;
+            }
+            await init();
+          } catch (err) {
+            errorEl.textContent = err.message || 'Could not request this pairing.';
             btn.disabled = false;
-            return;
           }
-          await init();
         });
       });
     }
@@ -379,11 +422,23 @@
     });
 
     async function init() {
-      const me = await loadMe();
+      let me;
+      try {
+        me = await loadMe();
+      } catch (err) {
+        document.getElementById('account-summary').textContent =
+          'Could not load your account — try refreshing the page.';
+        return;
+      }
       if (!me) return;
 
       renderAccount(me.account);
       renderPairings(me.pairings, me.account.id);
+
+      // Each of these handles its own errors internally, so one section
+      // failing (e.g. a stale deploy missing a route) never blocks the
+      // rest of the page from loading — that's what silently broke
+      // Billing here before this was added.
       await loadInvites();
       await loadDevices();
       await loadMarketplace();
@@ -412,22 +467,26 @@
       const isPublic = document.getElementById('invite-public').checked;
       const note = document.getElementById('invite-note').value.trim();
 
-      const res = await fetch('/api/invites', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pledged_bytes: pledgedBytes, is_public: isPublic, note: note || undefined }),
-      });
-      const data = await res.json();
+      try {
+        const res = await fetch('/api/invites', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pledged_bytes: pledgedBytes, is_public: isPublic, note: note || undefined }),
+        });
+        const data = await parseJsonResponse(res);
 
-      if (!res.ok) {
-        errorEl.textContent = data.error || 'Could not create invite.';
-        return;
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not create invite.';
+          return;
+        }
+
+        resultEl.textContent = `Invite code: ${data.invite.code} — send this to your buddy.`;
+        resultEl.style.display = 'block';
+        await loadInvites();
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not create invite.';
       }
-
-      resultEl.textContent = `Invite code: ${data.invite.code} — send this to your buddy.`;
-      resultEl.style.display = 'block';
-      await loadInvites();
     });
 
     document.getElementById('redeem-btn').addEventListener('click', async () => {
@@ -436,19 +495,23 @@
       const code = document.getElementById('redeem-code').value.trim();
       if (!code) return;
 
-      const res = await fetch(`/api/invites/${encodeURIComponent(code)}/redeem`, {
-        method: 'POST',
-        credentials: 'same-origin',
-      });
-      const data = await res.json();
+      try {
+        const res = await fetch(`/api/invites/${encodeURIComponent(code)}/redeem`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+        const data = await parseJsonResponse(res);
 
-      if (!res.ok) {
-        errorEl.textContent = data.error || 'Could not redeem code.';
-        return;
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not redeem code.';
+          return;
+        }
+
+        document.getElementById('redeem-code').value = '';
+        await init();
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not redeem code.';
       }
-
-      document.getElementById('redeem-code').value = '';
-      await init();
     });
 
     document.getElementById('logout-link').addEventListener('click', async (e) => {

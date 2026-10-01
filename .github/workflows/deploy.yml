@@ -36,6 +36,8 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -43,10 +45,21 @@ jobs:
           host: ${{ secrets.LINODE_APP_HOST }}
           username: ${{ secrets.LINODE_APP_USER }}
           key: ${{ secrets.LINODE_APP_SSH_KEY }}
+          envs: GH_ACTOR,GH_TOKEN
+          # set -e so a failed step (e.g. an image that can't be pulled)
+          # fails this job loudly in the Actions UI instead of silently
+          # falling through to `docker compose up -d`, which would just
+          # keep running whatever stale image happened to be cached
+          # locally — exactly what happened before this was added.
           script: |
+            set -euo pipefail
             cd /opt/backup-buddies
             git pull
             cd deploy/app
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
             docker compose pull api
             docker compose up -d
             docker image prune -f
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
