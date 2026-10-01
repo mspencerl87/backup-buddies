@@ -34,7 +34,13 @@
       <h2>Before you start</h2>
       <p class="muted">You'll need:</p>
       <ul class="tech-list">
-        <li><strong>Docker</strong> installed and running on the machine you want to back up.</li>
+        <li>
+          <strong>Docker, with Docker Compose (the <code>docker compose</code> command, not the older standalone <code>docker-compose</code>).</strong>
+          Docker Desktop (Mac/Windows/Linux) includes this already. On a Linux server without Docker Desktop, install the <a href="https://docs.docker.com/compose/install/" target="_blank" rel="noopener">Compose plugin</a> alongside Docker.
+          Check you have it with:
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>docker compose version</code></pre>
+          That should print a version number. If instead you get "docker: 'compose' is not a docker command", Compose isn't installed yet — follow the link above before continuing.
+        </li>
         <li><strong>An active buddy pairing</strong> — redeem an invite code or request one from <a href="/dashboard.html">Find a buddy</a> first. The client won't have anyone to talk to without one.</li>
         <li><strong>A passphrase only you'll know.</strong> Think of it now — it encrypts your data before it leaves your machine, and there's no way to recover it if you lose it. A few random words work well.</li>
       </ul>
@@ -80,6 +86,18 @@ docker compose logs -f</code></pre>
         built on top of this foundation. If you're trying this out, expect
         a "connectivity test succeeded" log line, not a working backup yet.
       </p>
+    </section>
+
+    <section class="about-section">
+      <h2>Useful <code>docker compose</code> commands</h2>
+      <p class="muted">Run these from inside the <code>backup-buddies-client</code> folder (where its <code>docker-compose.yml</code> lives):</p>
+      <ul class="tech-list">
+        <li><code>docker compose up -d</code> — start the client in the background. Safe to run again any time (e.g. after editing <code>.env</code>) — it restarts with the new settings.</li>
+        <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
+        <li><code>docker compose ps</code> — check whether it's currently running.</li>
+        <li><code>docker compose restart</code> — restart it without rebuilding.</li>
+        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in the <code>client_data</code> volume) — <code>docker compose up -d</code> picks up right where it left off.</li>
+      </ul>
     </section>
 
     <section class="about-section">

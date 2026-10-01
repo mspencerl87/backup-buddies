@@ -11,6 +11,16 @@
 
 set -euo pipefail
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Error: docker is not installed. Install Docker first: https://docs.docker.com/get-docker/" >&2
+  exit 1
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  echo "Error: 'docker compose' isn't available (you may only have the older standalone docker-compose)." >&2
+  echo "Install the Compose plugin: https://docs.docker.com/compose/install/" >&2
+  exit 1
+fi
+
 BASE_URL="https://app.filegarden.net/client"
 DEST="backup-buddies-client"
 
