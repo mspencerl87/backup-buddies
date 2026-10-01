@@ -61,10 +61,24 @@ devicesRouter.put('/devices/me/node-id', requireDeviceAuth, async (req, res) => 
     return res.status(400).json({ error: 'iroh_node_id is required' });
   }
 
-  await pool.query(
-    `UPDATE devices SET iroh_node_id = $1, last_seen_at = now() WHERE id = $2`,
-    [iroh_node_id, req.device.id],
-  );
+  try {
+    await pool.query(
+      `UPDATE devices SET iroh_node_id = $1, last_seen_at = now() WHERE id = $2`,
+      [iroh_node_id, req.device.id],
+    );
+  } catch (err) {
+    // iroh_node_id is UNIQUE (db/init.sql) — this fires if some other
+    // device row already holds this node id (e.g. a stale row from an
+    // earlier .env/token mixup). Surface it clearly instead of letting a
+    // raw Postgres unique-violation become an opaque 500 that the client
+    // then misreports as a bad DEVICE_TOKEN.
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'this iroh_node_id is already registered to a different device',
+      });
+    }
+    throw err;
+  }
 
   res.json({ ok: true });
 });
