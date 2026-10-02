@@ -23,7 +23,8 @@
     </nav>
   </header>
 
-  <main>
+  <main class="dashboard-main">
+    <div class="dashboard-grid">
     <div class="card">
       <h2>Your account</h2>
       <p id="account-summary" class="muted">Loading…</p>
@@ -158,6 +159,7 @@
         <tbody></tbody>
       </table>
       <p id="invites-empty" class="muted">You haven't created any invites yet.</p>
+    </div>
     </div>
   </main>
 
@@ -425,17 +427,44 @@
       }
       emptyEl.style.display = 'none';
 
+      // Group by pledge size so the list reads as a handful of expandable
+      // tiers (500GB, 1TB, …) rather than every single node at once — the
+      // flat list this replaced would get unreadable once there were more
+      // than a few dozen public listings.
+      const bySize = new Map();
       for (const listing of data.listings) {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; padding:0.6rem 0; border-bottom:1px solid var(--border)';
-        row.innerHTML = `
-          <div>
-            <strong>${listing.inviter_label}</strong> — ${formatBytes(Number(listing.pledged_bytes))}
-            ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
-          </div>
-          <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
-        `;
-        listEl.appendChild(row);
+        const bytes = Number(listing.pledged_bytes);
+        if (!bySize.has(bytes)) bySize.set(bytes, []);
+        bySize.get(bytes).push(listing);
+      }
+      const tiers = Array.from(bySize.keys()).sort((a, b) => a - b);
+
+      for (const bytes of tiers) {
+        const listings = bySize.get(bytes);
+        const details = document.createElement('details');
+        details.className = 'marketplace-tier';
+        // Open the smallest couple of tiers by default so the list isn't
+        // fully collapsed on first load; everything else starts closed.
+        if (tiers.indexOf(bytes) < 2) details.open = true;
+
+        const summary = document.createElement('summary');
+        summary.innerHTML = `${formatBytes(bytes)} <span class="muted">· ${listings.length} available</span>`;
+        details.appendChild(summary);
+
+        for (const listing of listings) {
+          const row = document.createElement('div');
+          row.className = 'marketplace-row';
+          row.innerHTML = `
+            <div>
+              <strong>${listing.inviter_label}</strong>
+              ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
+            </div>
+            <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
+          `;
+          details.appendChild(row);
+        }
+
+        listEl.appendChild(details);
       }
 
       listEl.querySelectorAll('.request-pairing-btn').forEach((btn) => {

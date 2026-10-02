@@ -265,6 +265,70 @@ footer a {
   margin-bottom: 1.25rem;
 }
 
+/* Dashboard-only: a wider page split into two balanced columns instead of
+   one centered stack — cards flow left-then-right and settle wherever
+   there's room, like a masonry layout, rather than every card stretching
+   to a single column's width. */
+.dashboard-main {
+  max-width: 1120px;
+}
+
+.dashboard-grid {
+  column-count: 2;
+  column-gap: 1.25rem;
+}
+
+.dashboard-grid > .card {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+@media (max-width: 860px) {
+  .dashboard-grid {
+    column-count: 1;
+  }
+}
+
+.marketplace-tier {
+  border-bottom: 1px solid var(--border);
+}
+
+.marketplace-tier:last-child {
+  border-bottom: none;
+}
+
+.marketplace-tier summary {
+  cursor: pointer;
+  padding: 0.6rem 0;
+  font-weight: 600;
+  list-style: none;
+}
+
+.marketplace-tier summary::-webkit-details-marker {
+  display: none;
+}
+
+.marketplace-tier summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.marketplace-tier[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.marketplace-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0 0.6rem 1.4rem;
+  border-top: 1px solid var(--border);
+}
+
 .card h2 {
   margin-top: 0;
   font-size: 1.1rem;
