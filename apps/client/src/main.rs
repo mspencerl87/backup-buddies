@@ -499,11 +499,19 @@ async fn main() -> Result<()> {
                                                 .collect(),
                                             last_ok_at: None,
                                             consecutive_failures: 0,
-                                            // Nothing was sent/deleted this cycle, but that's
-                                            // "in sync" rather than "stuck" when nothing also
-                                            // failed — only an all-failed attempt counts as no
-                                            // progress.
-                                            made_progress: stats.files_failed == 0,
+                                            // We successfully connected and ran a cycle — that's
+                                            // what "stale" should track (can we reach this buddy
+                                            // at all), not whether specific files keep getting
+                                            // rejected. A permanently-stuck file (over pledge,
+                                            // too large, etc.) fails every single cycle forever
+                                            // by definition, so gating progress on files_failed
+                                            // == 0 would make a perfectly healthy connection look
+                                            // "stale — last synced never" permanently. That
+                                            // specific-file problem is already called out loudly
+                                            // by the failed-files line and the "backup failed"
+                                            // pill right next to it — staleness doesn't need to
+                                            // repeat it.
+                                            made_progress: true,
                                             last_synced_at: None,
                                         }
                                     }
