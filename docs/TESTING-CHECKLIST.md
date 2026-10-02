@@ -161,6 +161,37 @@ clean. Not yet tested against real traffic.
       (re-advertise cleanly on startup, old record expires on the other
       side within a reasonable time — `DiscoveryEvent::Expired`)
 
+## Needs testing — dashboard visibility, "Cheap" tier
+
+Spencer asked, after noticing the dashboard gives no indication *why* a
+file is stuck failing (only that it is), for a cheap first pass at
+Syncthing-style device/transfer visibility — this tier, the harder
+Medium/Bigger-lift tiers tracked under "Flagged, not yet scoped" below.
+Not yet exercised on testa/testb (built, compiles clean, not yet deployed
++ manually confirmed):
+
+- [ ] STOP_SENDING reason codes (`protocol::PutRejectReason` — pledge
+      exceeded, too large, invalid path, disk full) now ride the QUIC
+      stop code itself, not just the ack string, so the sender learns
+      *why* even though it never gets to read the ack (that's the
+      deadlock fix from above — the receiver cuts the blocked write
+      before the sender could've read a response). `backup.rs` unwraps
+      `WriteError::Stopped` via `reject_reason_from_err` and threads the
+      human-readable reason through `BackupCycleStats.failed_paths`
+      (now `Vec<FailedFile { path, reason }>` instead of bare paths).
+- [ ] Dashboard now renders that reason next to each failing file (e.g.
+      "pledge-test-5.bin (your buddy's pledge to you is full)") instead
+      of just a bare path list — confirm by forcing a pledge-exceeded
+      rejection again and checking the dashboard, not just the logs.
+- [ ] New "This Device" card: build version (`CARGO_PKG_VERSION`) and
+      process uptime — confirm uptime resets to ~0 right after a
+      container restart and climbs normally afterward.
+- [ ] Same card: local backup-dir file count + total size (a live
+      re-scan via `backup::local_backup_summary`, not anything from the
+      manifest) — confirm it shows on a device with a `BACKUP_DIR` set
+      and stays hidden (no empty/zero row) on a receive-only device with
+      none.
+
 ## Verified working (2026-10-02)
 
 - [x] Backup cycle: testa → testb, new/changed files detected and sent
@@ -400,3 +431,46 @@ other migration there).
       (buddy's missing something the manifest thinks landed, or has
       something stale) triggers a re-send or at minimum a loud,
       visible warning rather than silent, permanent drift.
+- [ ] **Syncthing-style dashboard visibility — Medium and Bigger-lift
+      tiers.** Spencer shared a screenshot of Syncthing's Folders/"This
+      Device" panels as a template and asked for a cheap tier now, the
+      rest later (the cheap tier — STOP_SENDING reason codes surfaced on
+      the dashboard, plus version/uptime/local-file-count — shipped
+      below). Remaining, roughly in order of how much they'd cost:
+  - Medium:
+    - Global State rollup — Syncthing's Folders panel shows "Global
+      State" (what the whole cluster has) vs. "Local State" (what this
+      node has). Our closest equivalent would be, per buddy: our
+      manifest's file count/bytes (what we believe we've sent) vs. their
+      actual received/ count/bytes (available already via the existing
+      `List`/`DiskStats` requests) — i.e. a live reconciliation check,
+      which overlaps a lot with the reconciliation backlog item above;
+      probably worth doing as one piece of work rather than two.
+    - Rescan interval/toggle display — we don't have a configurable scan
+      interval today (fixed ~30s cycle, see "Documented, intentional
+      limits" above), so this would first need that to become
+      configurable before there's anything to display.
+    - Discovery peer count — how many buddies are currently visible via
+      mDNS on the local network right now, not just logged once at
+      discovery time. Needs the main.rs mDNS task to publish a live
+      count somewhere the dashboard can read (e.g. a shared
+      `Arc<Mutex<HashSet<EndpointId>>>` alongside the existing dedup set)
+      rather than only logging.
+  - Bigger lift:
+    - Live streaming transfer rate (bytes/sec updating during an
+      in-progress cycle, not just the after-the-fact rate computed from
+      a finished cycle's bytes_sent/duration_ms). Needs the backup loop
+      to report progress incrementally rather than only at cycle end —
+      similar shape to the restore-progress work already done, but for
+      the outbound/backup path.
+    - Listener reachability checks — Syncthing actively verifies each
+      configured listen address is actually reachable from outside.
+      We have no equivalent concept; would need an active probe (self-
+      connect through the relay, or ask a buddy to connect back) rather
+      than just reporting the configured SYNC_PORT.
+    - Multi-buddy "Shared With" — Syncthing's model is one folder shared
+      with N devices; ours is 1:1 (one buddy relationship = one pledge,
+      one manifest). Showing "shared with" as a list doesn't map onto
+      the current architecture at all — this would be a real design
+      change (a backup_dir shared with multiple buddies at once), not a
+      dashboard addition, so it stays out of scope here.

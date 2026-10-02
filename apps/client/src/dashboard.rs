@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 
 use age::secrecy::SecretString;
@@ -58,7 +59,7 @@ pub struct CycleRecord {
     // failure, since "ran but some files are stuck" deserves the same
     // attention as "didn't run at all".
     pub files_failed: Option<usize>,
-    pub failed_files: Vec<String>,
+    pub failed_files: Vec<FailedFileView>,
     // Set by record_cycle below, not by the caller: when this cycle
     // succeeded, last_ok_at is this cycle's own `at`; when it didn't,
     // it's carried forward from whatever the last successful cycle was —
@@ -70,6 +71,22 @@ pub struct CycleRecord {
     // moment one succeeds. One bad cycle reads very differently from
     // twenty in a row.
     pub consecutive_failures: u32,
+}
+
+/// One failed path plus why, when we know why — see
+/// backup::reject_reason_from_err for how `reason` gets populated. Its own
+/// type (rather than reusing backup::FailedFile directly) so this module
+/// controls the wire shape independent of backup.rs's internals.
+#[derive(Clone, Serialize)]
+pub struct FailedFileView {
+    pub path: String,
+    pub reason: Option<&'static str>,
+}
+
+impl From<crate::backup::FailedFile> for FailedFileView {
+    fn from(f: crate::backup::FailedFile) -> Self {
+        Self { path: f.path, reason: f.reason }
+    }
 }
 
 pub type CycleBook = Arc<Mutex<HashMap<String, CycleRecord>>>;
@@ -104,6 +121,10 @@ struct AppState {
     passphrase: SecretString,
     stale_after_secs: u64,
     restore_progress: RestoreProgressBook,
+    // Set once, when the dashboard starts serving — i.e. process start for
+    // all practical purposes, since the dashboard comes up alongside the
+    // rest of main.rs. Used only to report uptime; never reset.
+    started_at: Instant,
 }
 
 /// One entry per buddy we've ever kicked off a restore for — only the
@@ -148,11 +169,27 @@ struct DiskStatus {
     used_bytes: u64,
 }
 
+/// What's actually sitting in `backup_dir` right now, independent of
+/// what's made it into any buddy's manifest yet — a plain re-scan (see
+/// backup::local_backup_summary), not a sync-protocol number.
+#[derive(Serialize)]
+struct LocalBackupStatus {
+    file_count: usize,
+    total_bytes: u64,
+}
+
 #[derive(Serialize)]
 struct StatusResponse {
     node_id: String,
     backup_dir: Option<String>,
     data_dir: String,
+    // Build version and process uptime — the same two numbers a
+    // Syncthing-style "This Device" panel shows, so a person checking the
+    // dashboard can tell at a glance whether this device has restarted
+    // recently and which build it's running.
+    version: &'static str,
+    uptime_secs: u64,
+    local_backup: Option<LocalBackupStatus>,
     disk: Option<DiskStatus>,
     // Sum of every buddy's pledged_bytes — the total we've promised to
     // store for others on this same disk. Compared against `disk` on the
@@ -243,6 +280,7 @@ pub async fn run(
         passphrase,
         stale_after_secs,
         restore_progress: Arc::new(Mutex::new(HashMap::new())),
+        started_at: Instant::now(),
     };
 
     let app = Router::new()
@@ -350,10 +388,24 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
 
     let bandwidth = *state.bandwidth_book.lock().unwrap();
 
+    let local_backup = match &state.backup_dir {
+        Some(dir) => match crate::backup::local_backup_summary(dir).await {
+            Ok((file_count, total_bytes)) => Some(LocalBackupStatus { file_count, total_bytes }),
+            Err(err) => {
+                tracing::warn!(?err, "failed to scan backup dir for dashboard");
+                None
+            }
+        },
+        None => None,
+    };
+
     Json(StatusResponse {
         node_id: state.node_id.clone(),
         backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
         data_dir: state.data_dir.display().to_string(),
+        version: env!("CARGO_PKG_VERSION"),
+        uptime_secs: state.started_at.elapsed().as_secs(),
+        local_backup,
         disk,
         pledged_out_total_bytes,
         buddies,
@@ -750,6 +802,27 @@ const INDEX_HTML: &str = r#"<!doctype html>
   <div class="sub">This device: <code id="node-id">…</code> · backing up <code id="backup-dir">…</code></div>
 </header>
 <main>
+  <div class="card" id="device-card">
+    <h2>This Device</h2>
+    <div class="disk-stats">
+      <div class="stat">
+        <div class="label">Version</div>
+        <div class="value" id="device-version">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Uptime</div>
+        <div class="value" id="device-uptime">…</div>
+      </div>
+      <div class="stat" id="local-files-stat" style="display:none;">
+        <div class="label">Local files</div>
+        <div class="value" id="local-files-count">…</div>
+      </div>
+      <div class="stat" id="local-size-stat" style="display:none;">
+        <div class="label">Local size</div>
+        <div class="value" id="local-files-size">…</div>
+      </div>
+    </div>
+  </div>
   <div class="card" id="disk-card" style="display:none;">
     <h2>Disk</h2>
     <div class="muted"><code id="data-dir">…</code></div>
@@ -833,6 +906,17 @@ function fmtAgo(unixSecs) {
   if (secs < 60) return secs + "s ago";
   if (secs < 3600) return Math.floor(secs / 60) + "m ago";
   return Math.floor(secs / 3600) + "h ago";
+}
+// "5m", "3h 12m", "2d 04h" — coarse, same spirit as fmtEta: nobody needs
+// second-level precision on how long a process has been up.
+function fmtUptime(secs) {
+  secs = Math.max(0, Math.floor(secs));
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return mins + "m";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + "h " + String(mins % 60).padStart(2, "0") + "m";
+  const days = Math.floor(hrs / 24);
+  return days + "d " + String(hrs % 24).padStart(2, "0") + "h";
 }
 
 // Transfer rate from raw bytes/duration rather than storing a precomputed
@@ -1469,7 +1553,9 @@ function renderBuddy(b) {
   let failedLine = "";
   if (cycle && cycle.files_failed > 0) {
     const sample =
-      cycle.failed_files && cycle.failed_files.length ? ": " + cycle.failed_files.join(", ") : "";
+      cycle.failed_files && cycle.failed_files.length
+        ? ": " + cycle.failed_files.map((f) => f.path + (f.reason ? " (" + f.reason + ")" : "")).join(", ")
+        : "";
     failedLine =
       '<div class="muted" style="color: var(--danger); margin-top: 0.4rem;">⚠ ' +
       cycle.files_failed + " file(s) won't send/receive" + sample + "</div>";
@@ -1598,6 +1684,20 @@ async function refresh() {
   const data = await res.json();
   document.getElementById("node-id").textContent = data.node_id;
   document.getElementById("backup-dir").textContent = data.backup_dir || "(nothing — receive-only)";
+
+  document.getElementById("device-version").textContent = data.version;
+  document.getElementById("device-uptime").textContent = fmtUptime(data.uptime_secs);
+  const localFilesStat = document.getElementById("local-files-stat");
+  const localSizeStat = document.getElementById("local-size-stat");
+  if (data.local_backup) {
+    localFilesStat.style.display = "block";
+    localSizeStat.style.display = "block";
+    document.getElementById("local-files-count").textContent = data.local_backup.file_count;
+    document.getElementById("local-files-size").textContent = fmtBytes(data.local_backup.total_bytes);
+  } else {
+    localFilesStat.style.display = "none";
+    localSizeStat.style.display = "none";
+  }
 
   renderDisk(data);
   renderBandwidth(data);

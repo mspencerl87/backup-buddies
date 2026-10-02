@@ -10,7 +10,20 @@ use sha2::{Digest, Sha256};
 
 use crate::manifest::{Manifest, ManifestEntry};
 use crate::netinfo::{self, ConnectionQuality};
-use crate::protocol::{self, SyncAck, SyncRequest};
+use crate::protocol::{self, PutRejectReason, SyncAck, SyncRequest};
+
+/// One path that failed to back up this cycle, with a human-readable
+/// reason when we have one. `reason` is `Some` only when the buddy told us
+/// *why* via a STOP_SENDING code (see protocol::PutRejectReason) — any
+/// other failure (connection drop, local read error, a delete that
+/// failed) still shows up here, just without a specific explanation
+/// beyond "failed to sync", since those aren't the buddy actively
+/// rejecting the file.
+#[derive(Debug, Clone)]
+pub struct FailedFile {
+    pub path: String,
+    pub reason: Option<&'static str>,
+}
 
 /// What one backup cycle actually did, including transfer metrics — not
 /// just file counts. `bytes_sent`/`duration_ms` come straight off the
@@ -31,12 +44,29 @@ pub struct BackupCycleStats {
     // cycle's diff and gets retried), but worth the dashboard calling out:
     // a file that keeps failing every cycle isn't a transient blip.
     pub files_failed: usize,
-    // A capped sample of which paths failed, for display — not every one
-    // if there are many, just enough to point someone at the problem.
-    pub failed_paths: Vec<String>,
+    // A capped sample of which paths failed, with a reason when the buddy
+    // gave us one — not every failure if there are many, just enough to
+    // point someone at the problem.
+    pub failed_paths: Vec<FailedFile>,
 }
 
 const MAX_FAILED_PATHS_SHOWN: usize = 10;
+
+/// Pulls a `PutRejectReason` out of a `put_one_file` error, when the
+/// failure was the buddy's own STOP_SENDING telling us why — walks the
+/// anyhow error's source chain since `write_all`'s `WriteError::Stopped`
+/// gets wrapped in `.context(...)` on the way out.
+fn reject_reason_from_err(err: &anyhow::Error) -> Option<&'static str> {
+    err.chain()
+        .find_map(|cause| cause.downcast_ref::<iroh::endpoint::WriteError>())
+        .and_then(|werr| match werr {
+            iroh::endpoint::WriteError::Stopped(code) => {
+                PutRejectReason::from_code(code.into_inner())
+            }
+            _ => None,
+        })
+        .map(PutRejectReason::message)
+}
 
 /// One pass: scan `backup_dir`, diff against what we last told `buddy_id`
 /// we'd sent them, and push anything new, changed, or deleted. Connects to
@@ -99,10 +129,11 @@ pub async fn run_backup_cycle(
                 put_count += 1;
             }
             Err(err) => {
-                tracing::warn!(path = %rel_path, ?err, "failed to back up file — will retry next cycle");
+                let reason = reject_reason_from_err(&err);
+                tracing::warn!(path = %rel_path, ?err, reason, "failed to back up file — will retry next cycle");
                 files_failed += 1;
                 if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
-                    failed_paths.push(rel_path.clone());
+                    failed_paths.push(FailedFile { path: rel_path.clone(), reason });
                 }
             }
         }
@@ -119,7 +150,7 @@ pub async fn run_backup_cycle(
                 tracing::warn!(path = %rel_path, ?err, "failed to tell buddy about a deleted file — will retry next cycle");
                 files_failed += 1;
                 if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
-                    failed_paths.push(rel_path.clone());
+                    failed_paths.push(FailedFile { path: rel_path.clone(), reason: None });
                 }
             }
         }
@@ -196,6 +227,17 @@ async fn delete_one_file(conn: &iroh::endpoint::Connection, rel_path: &str) -> R
 async fn hash_file(path: &Path) -> Result<String> {
     let bytes = tokio::fs::read(path).await.context("failed to read file for hashing")?;
     Ok(hex::encode(Sha256::digest(&bytes)))
+}
+
+/// File count and total (plaintext) bytes under `backup_dir` right now —
+/// for the dashboard's "This Device" panel, not the sync protocol. A
+/// plain re-scan rather than anything manifest-based, since this is meant
+/// to show what's actually sitting in the directory, independent of
+/// whether it's been backed up to any particular buddy yet.
+pub async fn local_backup_summary(backup_dir: &Path) -> Result<(usize, u64)> {
+    let files = scan_local_files(backup_dir).await?;
+    let total_bytes = files.iter().map(|(_, _, size)| size).sum();
+    Ok((files.len(), total_bytes))
 }
 
 // walkdir is synchronous; fine for now given the modest directory sizes

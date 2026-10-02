@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 use crate::bandwidth::BandwidthBook;
 use crate::netinfo::{self, ConnectionQuality};
 use crate::protocol::{
-    self, DiskStatsResponse, ListEntry, ListResponse, ListVersionsResponse, SyncAck, SyncRequest,
-    VersionEntry,
+    self, DiskStatsResponse, ListEntry, ListResponse, ListVersionsResponse, PutRejectReason,
+    SyncAck, SyncRequest, VersionEntry,
 };
 
 // Never let incoming buddy data consume the disk down to nothing, no
@@ -285,12 +285,12 @@ async fn handle_put(
 ) -> Result<()> {
     const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5GB per file, sanity cap
     if ciphertext_len > MAX_FILE_BYTES {
-        reject_without_reading_body(recv, send, "file too large").await?;
+        reject_without_reading_body(recv, send, PutRejectReason::TooLarge).await?;
         return Ok(());
     }
 
     let Some(dest) = safe_join(sender_dir, &path) else {
-        reject_without_reading_body(recv, send, "invalid path").await?;
+        reject_without_reading_body(recv, send, PutRejectReason::InvalidPath).await?;
         return Ok(());
     };
 
@@ -322,7 +322,7 @@ async fn handle_put(
             attempted_bytes = ciphertext_len,
             "rejected file — not enough real disk space left on this host"
         );
-        reject_without_reading_body(recv, send, "not enough disk space on this host").await?;
+        reject_without_reading_body(recv, send, PutRejectReason::DiskFull).await?;
         return Ok(());
     }
 
@@ -396,7 +396,7 @@ async fn handle_put(
         received_bytes,
         "rejected file — would exceed this buddy's pledge"
     );
-    reject_without_reading_body(recv, send, "pledge exceeded").await?;
+    reject_without_reading_body(recv, send, PutRejectReason::PledgeExceeded).await?;
     Ok(())
 }
 
@@ -412,14 +412,18 @@ async fn handle_put(
 // waiting for them to finish sending — a real deadlock, not just a slow
 // cycle. `RecvStream::stop()` sends a QUIC STOP_SENDING frame, which
 // makes their blocked write fail immediately instead of hanging, so they
-// can log the failure and move on to the next file next cycle.
+// can log the failure and move on to the next file next cycle. The error
+// code it carries is `reason`'s own code (see PutRejectReason), so the
+// sender — which generally never gets to read the string ack below, since
+// it's usually still mid-write when the stop lands — can still learn
+// *why*, not just that it failed.
 async fn reject_without_reading_body(
     recv: &mut iroh::endpoint::RecvStream,
     send: &mut iroh::endpoint::SendStream,
-    reason: &'static str,
+    reason: PutRejectReason,
 ) -> Result<()> {
-    recv.stop(iroh::endpoint::VarInt::from_u32(0)).ok();
-    protocol::write_frame(send, &SyncAck::err(reason)).await
+    recv.stop(iroh::endpoint::VarInt::from_u32(reason.code())).ok();
+    protocol::write_frame(send, &SyncAck::err(reason.message())).await
 }
 
 async fn handle_delete(

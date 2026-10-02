@@ -57,6 +57,59 @@ pub enum SyncRequest {
     GetVersion { path: String, version: u32 },
 }
 
+/// Why a Put was rejected *before* its body was ever read (see
+/// receive.rs's `reject_without_reading_body`). Encoded as the QUIC
+/// STOP_SENDING error code, not just the SyncAck's string `error` field —
+/// a sender that's still mid-`write_all` when the rejection happens never
+/// gets to read that ack (that's the deadlock this fixes: the receiver
+/// cuts the sender's blocked write instead of waiting for it to finish),
+/// so the stop code is the only way the reason actually reaches the
+/// sender. The ack's string field is still set too, for a receiver-side
+/// log or a sender that *does* get to read it (e.g. a small file whose
+/// body was already fully buffered/flushed before the stop lands).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PutRejectReason {
+    PledgeExceeded,
+    TooLarge,
+    InvalidPath,
+    DiskFull,
+}
+
+impl PutRejectReason {
+    pub fn code(self) -> u32 {
+        match self {
+            Self::PledgeExceeded => 1,
+            Self::TooLarge => 2,
+            Self::InvalidPath => 3,
+            Self::DiskFull => 4,
+        }
+    }
+
+    /// `None` for code 0 (reserved — an unrelated stream stop, e.g. the
+    /// peer just closing the connection, should never be misread as one
+    /// of these) or any code this version doesn't recognize.
+    pub fn from_code(code: u64) -> Option<Self> {
+        match code {
+            1 => Some(Self::PledgeExceeded),
+            2 => Some(Self::TooLarge),
+            3 => Some(Self::InvalidPath),
+            4 => Some(Self::DiskFull),
+            _ => None,
+        }
+    }
+
+    /// Short, customer-facing explanation — shown on the dashboard next to
+    /// a file that's failing to sync, not just logged.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::PledgeExceeded => "your buddy's pledge to you is full",
+            Self::TooLarge => "file is larger than the 5GB per-file limit",
+            Self::InvalidPath => "file path was rejected as invalid",
+            Self::DiskFull => "your buddy doesn't have enough real disk space left",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SyncAck {
     pub ok: bool,

@@ -491,7 +491,12 @@ async fn main() -> Result<()> {
                                             duration_ms: None,
                                             connection: None,
                                             files_failed: Some(stats.files_failed),
-                                            failed_files: stats.failed_paths.clone(),
+                                            failed_files: stats
+                                                .failed_paths
+                                                .iter()
+                                                .cloned()
+                                                .map(dashboard::FailedFileView::from)
+                                                .collect(),
                                             last_ok_at: None,
                                             consecutive_failures: 0,
                                         }
@@ -508,7 +513,12 @@ async fn main() -> Result<()> {
                                         duration_ms: Some(stats.duration_ms),
                                         connection: stats.connection,
                                         files_failed: Some(stats.files_failed),
-                                        failed_files: stats.failed_paths.clone(),
+                                        failed_files: stats
+                                            .failed_paths
+                                            .iter()
+                                            .cloned()
+                                            .map(dashboard::FailedFileView::from)
+                                            .collect(),
                                         last_ok_at: None,
                                         consecutive_failures: 0,
                                     },
