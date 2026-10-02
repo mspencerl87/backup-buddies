@@ -65,18 +65,26 @@ or "connectivity check succeeded" roughly every 30 seconds.
 
 This device also serves its own small status page — not to be confused
 with your account dashboard on the website — at
-**http://localhost:8080** (or whatever `DASHBOARD_PORT` you set), once
-`docker compose up -d` is running. It shows, per buddy: their pledge to
-you and how much of it is used, how many files you've sent each other and
-how much that totals to, and the result of the last backup cycle (or
-ping, for a buddy you're not backing anything up to). There's also a
-"Restore from this buddy" button, which does the same thing as the
-`restore` command below but writes to `data/restored/<their node id>/`
-and shows you the result right there instead of needing a terminal.
+**http://&lt;this machine's address&gt;:8080** (or whatever `DASHBOARD_PORT`
+you set), once `docker compose up -d` is running. It shows, per buddy:
+their pledge to you and how much of it is used, how many files you've
+sent each other and how much that totals to, and the result of the last
+backup cycle (or ping, for a buddy you're not backing anything up to).
+There's also a "Restore from this buddy" button, which does the same
+thing as the `restore` command below but writes to
+`data/restored/<their node id>/` and shows you the result right there
+instead of needing a terminal.
 
-It's bound to `127.0.0.1` only (see `docker-compose.yml`) — reachable
-from this machine, not your network — because it has no login of its own
-and that restore button is a real action, not just a read-only view.
+**It has no login of its own**, and that restore button is a real action
+— not just a read-only view. By default it's open on every interface
+(most people run this headless and manage it from elsewhere on their
+network), so anyone who can reach this machine on that port can see your
+buddy/pledge info and trigger a restore. If this machine is reachable
+from somewhere you don't trust — the open internet, a shared or guest
+network — either restrict it to loopback (uncomment the `127.0.0.1:`
+version of the port mapping in `docker-compose.yml`) and reach it over
+SSH tunnel or VPN instead, or put a reverse proxy with auth in front of
+it.
 
 ## Restoring
 

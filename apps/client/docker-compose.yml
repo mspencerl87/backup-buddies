@@ -25,9 +25,10 @@
 #
 # A local status page — per-buddy pledge usage, what's been sent/received,
 # last backup cycle, and a one-click restore — is served at
-# http://localhost:8080 once the container is up (change DASHBOARD_PORT in
-# .env to use a different port). It's only reachable from this machine,
-# not your network, by design — see the port mapping below.
+# http://<this machine's address>:8080 once the container is up (change
+# DASHBOARD_PORT in .env to use a different port). It has no login of its
+# own and the restore button is a real action — see the port mapping
+# below if you want it restricted to this machine instead of your LAN.
 
 services:
   client:
@@ -42,12 +43,16 @@ services:
       # controls what's mounted there on the host side, below.
       - BACKUP_DIR=/backup
     ports:
-      # Bound to 127.0.0.1 specifically — not just "8080:8080" — so the
-      # dashboard (no login of its own; it can trigger a restore) isn't
-      # reachable from anywhere but this machine. If you need to reach it
-      # from elsewhere on your network, change this deliberately and know
-      # that's what you're opting into.
-      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+      # Open on every interface, not just loopback — most people run this
+      # headless (a NAS, a home server, a VPS) and manage it from a
+      # browser elsewhere on their network, not sitting at that machine.
+      # It has no login of its own and the restore button is a real
+      # action, so anyone who can reach this machine on this port can see
+      # your pledge/buddy info and trigger a restore. If that's not
+      # acceptable for where this runs (exposed to the open internet, an
+      # untrusted network), bind it to loopback only instead:
+      #   - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+      - "${DASHBOARD_PORT:-8080}:8080"
     volumes:
       # A real, visible folder on this machine — not an opaque
       # Docker-managed volume — so it's easy to find, move, or point your
