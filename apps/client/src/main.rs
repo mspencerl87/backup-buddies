@@ -499,6 +499,12 @@ async fn main() -> Result<()> {
                                                 .collect(),
                                             last_ok_at: None,
                                             consecutive_failures: 0,
+                                            // Nothing was sent/deleted this cycle, but that's
+                                            // "in sync" rather than "stuck" when nothing also
+                                            // failed — only an all-failed attempt counts as no
+                                            // progress.
+                                            made_progress: stats.files_failed == 0,
+                                            last_synced_at: None,
                                         }
                                     }
                                     Ok(stats) => dashboard::CycleRecord {
@@ -521,6 +527,10 @@ async fn main() -> Result<()> {
                                             .collect(),
                                         last_ok_at: None,
                                         consecutive_failures: 0,
+                                        // At least one file actually moved this cycle,
+                                        // regardless of whether others are still stuck.
+                                        made_progress: true,
+                                        last_synced_at: None,
                                     },
                                     Err(err) => dashboard::CycleRecord {
                                         label: label.clone(),
@@ -537,6 +547,8 @@ async fn main() -> Result<()> {
                                         failed_files: Vec::new(),
                                         last_ok_at: None,
                                         consecutive_failures: 0,
+                                        made_progress: false,
+                                        last_synced_at: None,
                                     },
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
@@ -574,6 +586,8 @@ async fn main() -> Result<()> {
                                     failed_files: Vec::new(),
                                     last_ok_at: None,
                                     consecutive_failures: 0,
+                                    made_progress: result.is_ok(),
+                                    last_synced_at: None,
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
                                 match result {

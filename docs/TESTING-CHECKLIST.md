@@ -170,7 +170,7 @@ Medium/Bigger-lift tiers tracked under "Flagged, not yet scoped" below.
 Not yet exercised on testa/testb (built, compiles clean, not yet deployed
 + manually confirmed):
 
-- [ ] STOP_SENDING reason codes (`protocol::PutRejectReason` — pledge
+- [x] STOP_SENDING reason codes (`protocol::PutRejectReason` — pledge
       exceeded, too large, invalid path, disk full) now ride the QUIC
       stop code itself, not just the ack string, so the sender learns
       *why* even though it never gets to read the ack (that's the
@@ -179,10 +179,10 @@ Not yet exercised on testa/testb (built, compiles clean, not yet deployed
       `WriteError::Stopped` via `reject_reason_from_err` and threads the
       human-readable reason through `BackupCycleStats.failed_paths`
       (now `Vec<FailedFile { path, reason }>` instead of bare paths).
-- [ ] Dashboard now renders that reason next to each failing file (e.g.
-      "pledge-test-5.bin (your buddy's pledge to you is full)") instead
-      of just a bare path list — confirm by forcing a pledge-exceeded
-      rejection again and checking the dashboard, not just the logs.
+      **Confirmed live on testb (2026-10-02)**: the buddy card shows "2
+      file(s) won't send/receive: pledge-test-5.bin (your buddy's
+      pledge to you is full), pledge-test-1.bin (your buddy's pledge to
+      you is full)" — reason text displaying correctly next to each path.
 - [ ] New "This Device" card: build version (`CARGO_PKG_VERSION`) and
       process uptime — confirm uptime resets to ~0 right after a
       container restart and climbs normally afterward.
@@ -191,6 +191,25 @@ Not yet exercised on testa/testb (built, compiles clean, not yet deployed
       manifest) — confirm it shows on a device with a `BACKUP_DIR` set
       and stays hidden (no empty/zero row) on a receive-only device with
       none.
+- [x] **Found and fixed while confirming the above**: the same testb
+      screenshot showed "stale — last synced never" even though 11
+      files / 4.0 GB had clearly synced successfully — `last_ok_at`
+      (and therefore staleness) was derived from `ok`, which goes false
+      for the whole cycle the moment *any* file fails, even if the
+      other 11 keep succeeding every cycle. A buddy with one
+      permanently-stuck file looked identical to a buddy where nothing
+      had ever synced. Fixed by splitting the two meanings apart:
+      `ok`/`last_ok_at`/`consecutive_failures` still drive the "backup
+      failed" pill (any failure at all is still worth flagging loudly),
+      but staleness and "last synced Xs ago" now come from a new
+      `made_progress`/`last_synced_at` pair — true when the cycle sent
+      or deleted at least one file, or found nothing that needed doing
+      at all (a truly idle, in-sync cycle); false only when every
+      attempted put/delete failed or the connection itself failed.
+      `cargo build`/`test`/`clippy --all-targets` clean. Not yet
+      redeployed/reconfirmed on testa/testb — should show "last synced
+      <Ns ago>" instead of "never" on the same testb buddy next refresh
+      after deploy.
 
 ## Verified working (2026-10-02)
 

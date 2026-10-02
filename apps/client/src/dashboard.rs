@@ -71,6 +71,20 @@ pub struct CycleRecord {
     // moment one succeeds. One bad cycle reads very differently from
     // twenty in a row.
     pub consecutive_failures: u32,
+    // Set by the caller (main.rs), distinct from `ok`: true when this
+    // cycle actually moved data (sent or deleted at least one file) *or*
+    // found nothing that needed doing at all (a fully idle, already-in-
+    // sync cycle). False when every attempted put/delete failed, or the
+    // connection itself failed. A buddy with one permanently-stuck file
+    // alongside eleven healthy ones should never look exactly like a
+    // buddy where nothing has ever synced — `ok` conflates the two (any
+    // failure at all makes a cycle not-`ok`, which is right for the
+    // "backup failed" pill), so staleness needs its own signal.
+    pub made_progress: bool,
+    // Set by record_cycle below, same pattern as last_ok_at but driven by
+    // `made_progress` instead of `ok` — this is what "stale" and "last
+    // synced" should actually be measured against.
+    pub last_synced_at: Option<u64>,
 }
 
 /// One failed path plus why, when we know why — see
@@ -101,6 +115,11 @@ pub fn record_cycle(cycle_stats: &CycleBook, node_id: &str, mut record: CycleRec
     };
     record.consecutive_failures =
         if record.ok { 0 } else { previous.map(|r| r.consecutive_failures).unwrap_or(0) + 1 };
+    record.last_synced_at = if record.made_progress {
+        Some(record.at)
+    } else {
+        previous.and_then(|r| r.last_synced_at)
+    };
     book.insert(node_id.to_string(), record);
 }
 
@@ -369,7 +388,9 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         // failed — a brand-new pairing with no cycle yet gets the existing
         // "no cycle yet" pill instead, not a false stale warning.
         let stale = cycle.as_ref().is_some_and(|c| {
-            c.last_ok_at.map(|at| unix_now().saturating_sub(at) > state.stale_after_secs).unwrap_or(true)
+            c.last_synced_at
+                .map(|at| unix_now().saturating_sub(at) > state.stale_after_secs)
+                .unwrap_or(true)
         });
 
         buddies.push(BuddyStatus {
@@ -1547,7 +1568,7 @@ function renderBuddy(b) {
   // rather than burying them in the one-line cycle detail above.
   let stalePill = "";
   if (b.stale) {
-    const lastOkText = cycle && cycle.last_ok_at ? fmtAgo(cycle.last_ok_at) : "never";
+    const lastOkText = cycle && cycle.last_synced_at ? fmtAgo(cycle.last_synced_at) : "never";
     stalePill = ' <span class="pill pill-err">stale — last synced ' + lastOkText + '</span>';
   }
   let failedLine = "";
