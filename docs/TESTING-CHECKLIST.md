@@ -131,14 +131,27 @@ clean. Not yet tested against real traffic.
       large, invalid path, disk space, pledge exceeded), not just the
       pledge one. `cargo build`/`test`/`clippy --all-targets` clean,
       commit `a9589cf`.
-- [ ] Re-run pledge-test cleanly once the fix is deployed: pull the new
-      image on testa/testb, restart both (testa's current container is
-      permanently stuck mid-deadlock and needs a fresh start regardless),
-      re-trigger a rejection (`pledge-test-1.bin` is still unaccounted
-      for — never successfully landed or cleanly rejected), and confirm
-      testa now logs a matching `WARN ... failed to back up file ...
-      will retry next cycle` instead of going silent, with the cycle
-      continuing normally afterward.
+- [x] Deadlock fix confirmed live on testa/testb (2026-10-02): after
+      deploying commit `a9589cf` and restarting both, a fresh
+      `pledge-test-5.bin` rejection produced a clean, immediate failure
+      on testa instead of hanging — `WARN ... failed to back up file —
+      will retry next cycle path=pledge-test-5.bin err=failed to send
+      file bytes / Caused by: sending stopped by peer: error 0`.
+      `RecvStream::stop()` cut off the blocked sender exactly as
+      intended; the cycle kept running afterward instead of going
+      silent. Pledge-cap rejection test is now fully closed out (both
+      the rejection math and the failure-handling path around it).
+- [ ] Minor oddity noticed during the re-test, not yet investigated:
+      `pledge-test-2`/`4`/`6` got re-sent by testa even though testb
+      already had them from before this restart — testa's manifest
+      should have remembered them as already-synced. Not a correctness
+      issue (same bytes, just redundant work), but worth a look if it
+      keeps happening — possibly the manifest not surviving the earlier
+      deadlock/restart cleanly. Also noticed a one-off `WARN ... failed
+      closing path err=ClosedPath` on testa mid-cycle that didn't stall
+      anything (a file landed on testb ~2 minutes later) — likely iroh's
+      multipath cleanup (direct LAN path + relay both available now)
+      logging noise rather than a real problem, but watch for recurrence.
 - [ ] Confirm two buddies on *different* networks still behave exactly
       as before this change (mDNS finds nothing, falls through to
       relay/SYNC_PORT direct-over-internet) — must be a strict addition,
