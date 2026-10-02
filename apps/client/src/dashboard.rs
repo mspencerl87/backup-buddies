@@ -516,12 +516,14 @@ function fmtAgo(unixSecs) {
 // --- Buddy disk checks (keeping each other honest) ------------------------
 // A buddy's pledge is just a number agreed over the API — this asks them
 // live, over the sync protocol, what their disk actually looks like right
-// now. Fetched once automatically the first time a buddy's card appears
-// (buddyDiskFetched guards against re-fetching on every 5s status poll,
-// which would mean a fresh connection to every buddy every 5 seconds);
-// the "Recheck" button bypasses that guard for an on-demand refresh.
+// now. Auto-rechecked at most once an hour per buddy (buddyDiskLastFetched
+// tracks when each one was last asked) even though the card re-renders
+// every 5s along with the rest of the status poll — that poll is what
+// notices a check is due, not what drives the check's own frequency. The
+// "Recheck" button bypasses the hourly floor for an on-demand refresh.
+const BUDDY_DISK_RECHECK_MS = 60 * 60 * 1000; // once an hour
 const buddyDiskCache = new Map(); // nodeId -> {text, color}
-const buddyDiskFetched = new Set();
+const buddyDiskLastFetched = new Map(); // nodeId -> ms timestamp of last fetch *attempt*
 
 function formatDiskSummary(stats) {
   if (!stats || stats.total_bytes === 0) {
@@ -797,10 +799,14 @@ function renderBuddy(b) {
   const label = b.label ? b.label : b.node_id.slice(0, 12) + "…";
   browseBtn.addEventListener("click", () => openBrowseModal(b.node_id, label));
 
-  div.querySelector(".buddy-disk-recheck").addEventListener("click", () => fetchBuddyDisk(b.node_id));
+  div.querySelector(".buddy-disk-recheck").addEventListener("click", () => {
+    buddyDiskLastFetched.set(b.node_id, Date.now());
+    fetchBuddyDisk(b.node_id);
+  });
   applyBuddyDisk(b.node_id);
-  if (!buddyDiskFetched.has(b.node_id)) {
-    buddyDiskFetched.add(b.node_id);
+  const lastFetched = buddyDiskLastFetched.get(b.node_id);
+  if (!lastFetched || Date.now() - lastFetched > BUDDY_DISK_RECHECK_MS) {
+    buddyDiskLastFetched.set(b.node_id, Date.now());
     fetchBuddyDisk(b.node_id);
   }
 
