@@ -21,14 +21,13 @@ instead of re-deriving the list from scratch each session.
       completing (182 B in 2.6s via relay)
 - [x] `setup.html` documents where restored files land
       (`data/restored/<buddy>/`) — fixed in commit `a771d4c`
+- [x] Plain "Restore" on a single live (non-deleted) file — confirmed
+      (`bigfile.bin`, 2.0 MB in 3.5s via relay)
 
 ## Not yet exercised
 
-- [ ] Plain "Restore" on a single **live** (non-deleted) file — the
-      underlying hang bug is fixed, but never watched one actually
-      complete end-to-end
-- [ ] "Restore all" on a buddy with a mix of live files — same fix,
-      same gap
+- [ ] "Restore all" on a buddy with a mix of live files — the hang fix
+      covers it too, but never watched a multi-file batch complete
 - [ ] Pledge-enforcement rejection: a buddy sending more than they're
       pledged should be rejected — never triggered
 - [ ] Disk-space-floor rejection (2GB flat / 5% of filesystem,
