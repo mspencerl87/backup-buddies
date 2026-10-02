@@ -61,7 +61,8 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
       `SELECT id, email, nickname, tier, relay_status, created_at,
               stripe_customer_id, stripe_subscription_id,
               (password_hash <> '') AS has_password,
-              (google_sub IS NOT NULL) AS has_google
+              (google_sub IS NOT NULL) AS has_google,
+              email_verified
          FROM accounts
         WHERE id = $1`,
       [accountId],

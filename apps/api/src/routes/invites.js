@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireEmailVerified } from '../middleware/require-email-verified.js';
 import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
 
 export const invitesRouter = Router();
@@ -26,7 +27,7 @@ function generateInviteCode() {
 // by the other person. Optionally public: listed in the marketplace for
 // anyone to find and request, instead of only usable by whoever you send
 // the code to directly.
-invitesRouter.post('/invites', requireAuth, async (req, res) => {
+invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, res) => {
   const { pledged_bytes, is_public, note } = req.body ?? {};
 
   const pledgedBytes = Number(pledged_bytes);
@@ -202,7 +203,7 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId }) {
 }
 
 // Redeem someone else's invite code directly (they sent it to you).
-invitesRouter.post('/invites/:code/redeem', requireAuth, async (req, res) => {
+invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, async (req, res) => {
   const result = await redeemInvite({
     lockQuery: `SELECT * FROM invites WHERE code = $1 FOR UPDATE`,
     lockParam: req.params.code,
@@ -235,7 +236,7 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
 // Request a pairing from a public listing — same effect as redeeming a
 // code, just looked up by listing id instead of needing the code texted
 // to you directly.
-invitesRouter.post('/invites/public/:id/redeem', requireAuth, async (req, res) => {
+invitesRouter.post('/invites/public/:id/redeem', requireAuth, requireEmailVerified, async (req, res) => {
   const result = await redeemInvite({
     lockQuery: `SELECT * FROM invites WHERE id = $1 AND is_public = true FOR UPDATE`,
     lockParam: req.params.id,

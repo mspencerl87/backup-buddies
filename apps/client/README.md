@@ -196,7 +196,8 @@ what's shown rather than adding a streaming/websocket layer for numbers
 that would mostly read "idle" between cycles anyway.
 
 Lifetime relay-vs-direct totals are also shown, in their own card on the
-dashboard — see "Relay bandwidth" below.
+dashboard — see "Relay bandwidth" below, including how that figure now
+actually is wired up to billing.
 
 ## File versions — protection against overwrites and accidental deletes
 
@@ -246,9 +247,17 @@ Every file transferred — your own backups and restores, and anything a
 buddy pushes to or pulls from you — is tallied by which network path
 carried it, direct or via `relay.filegarden.net`, and kept as a running
 lifetime total in a **Bandwidth** card on the dashboard (persisted to
-`data/bandwidth.json`, so it survives restarts). This is the number that
-would actually matter for metered relay-bandwidth billing: direct
-peer-to-peer transfers don't touch the relay at all and cost nothing to
-meter, so the relay figure is specifically "how much of this device's
-traffic would need billing for," not total traffic. This only tracks and
-surfaces the number — it isn't wired up to billing yet.
+`data/bandwidth.json`, so it survives restarts). Direct peer-to-peer
+transfers don't touch the relay at all and are never billed; only the
+relay figure is.
+
+If your account has an active paid subscription, relay bandwidth is billed
+separately from storage, at a rate shown on your dashboard's billing card
+(whole-megabyte granularity — fractions of a megabyte just carry over to
+the next report). Every ~30 seconds, alongside the existing buddy-list
+poll, this client reports however many megabytes of relay traffic have
+accumulated since its last successful report, and only then advances its
+own internal "already reported" marker — so a failed poll re-reports the
+same bytes next cycle instead of losing them, and nothing is ever reported
+twice. Free-tier accounts are never billed for relay bandwidth, no matter
+how much of it they use.

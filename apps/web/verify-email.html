@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify your email — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="alternate icon" href="/assets/favicon.ico">
+  <link rel="apple-touch-icon" href="/assets/favicon-180.png">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/"><img src="/assets/mark.svg" alt="" class="logo-mark">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/getting-started.html">Getting started</a>
+      <a href="/setup.html">Client setup</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/login.html">Log in</a>
+      <a href="/signup.html">Sign up</a>
+    </nav>
+  </header>
+
+  <main>
+    <div id="status-card">
+      <h2 style="margin-top:0" id="status-heading">Verifying your email…</h2>
+      <p id="status-message" class="muted">One moment.</p>
+      <p><a class="btn" href="/dashboard.html" id="dashboard-link" style="display:none">Go to your dashboard</a></p>
+    </div>
+  </main>
+
+  <script>
+    const headingEl = document.getElementById('status-heading');
+    const messageEl = document.getElementById('status-message');
+    const dashboardLinkEl = document.getElementById('dashboard-link');
+
+    function showResult(heading, message, { isError = false } = {}) {
+      headingEl.textContent = heading;
+      messageEl.textContent = message;
+      messageEl.className = isError ? 'error' : 'muted';
+      dashboardLinkEl.style.display = 'inline-block';
+    }
+
+    const token = new URLSearchParams(window.location.search).get('token');
+    if (!token) {
+      showResult('Invalid link', 'This verification link is missing its token.', { isError: true });
+    } else {
+      fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (res.ok) {
+            showResult('Email verified', 'You can now pair with a buddy. Head to your dashboard to get started.');
+          } else {
+            showResult('Could not verify', data.error || 'That link is invalid or has expired.', { isError: true });
+          }
+        })
+        .catch(() => {
+          showResult('Could not reach the server', 'Try again in a moment.', { isError: true });
+        });
+    }
+  </script>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>

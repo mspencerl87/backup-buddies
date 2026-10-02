@@ -55,14 +55,24 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
         // "a subscription now exists" back to a specific account.
         if (session.mode === 'subscription' && session.subscription && session.client_reference_id) {
           const subscription = await stripe.subscriptions.retrieve(session.subscription);
-          const item = subscription.items.data[0];
+          // The subscription may carry a second item now (relay bandwidth,
+          // see billing.js's checkout) alongside storage — find the storage
+          // one by price id rather than assuming index 0, since
+          // stripe_subscription_item_id is specifically the one
+          // syncSubscriptionQuantity() (billing.js) keeps in sync with
+          // pledged GB. Falls back to the first item for safety if the
+          // price id isn't configured/found.
+          const storageItem =
+            subscription.items.data.find(
+              (item) => item.price?.id === process.env.STRIPE_STORAGE_PRICE_ID,
+            ) ?? subscription.items.data[0];
           await pool.query(
             `UPDATE accounts
                 SET stripe_subscription_id = $1,
                     stripe_subscription_item_id = $2,
                     relay_status = 'active'
               WHERE id = $3`,
-            [subscription.id, item?.id ?? null, session.client_reference_id],
+            [subscription.id, storageItem?.id ?? null, session.client_reference_id],
           );
         }
         break;

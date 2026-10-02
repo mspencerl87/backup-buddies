@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { stripe } from '../lib/stripe.js';
+import { RELAY_USD_PER_GB } from '../lib/relay-billing.js';
 
 export const billingRouter = Router();
 
@@ -83,6 +84,11 @@ billingRouter.get('/billing/summary', requireAuth, async (req, res) => {
     estimated_monthly_usd: Number(((billableGB * USD_PER_TB_MONTH) / 1024).toFixed(2)),
     has_subscription: Boolean(req.account.stripe_subscription_id),
     relay_status: req.account.relay_status,
+    // Relay-bandwidth billing is paid-tier only (bundled into the same
+    // checkout/subscription as storage below) — these let the dashboard
+    // show the rate and whether it's actually live on this deployment.
+    relay_usd_per_gb: RELAY_USD_PER_GB,
+    relay_billing_enabled: Boolean(process.env.STRIPE_RELAY_PRICE_ID),
   });
 });
 
@@ -103,11 +109,22 @@ billingRouter.post('/billing/checkout', requireAuth, async (req, res) => {
   // and ready to scale automatically as pledges grow.
   const quantity = Math.max(1, await pledgedGBForAccount(req.account.id));
 
+  const lineItems = [{ price: process.env.STRIPE_STORAGE_PRICE_ID, quantity }];
+  // Bundled into the same subscription as storage, as a second line item —
+  // one invoice, one subscription to manage. Only added when this
+  // deployment has actually created the relay Price (see
+  // scripts/create-stripe-relay-meter-and-price.mjs); no quantity here
+  // since it's a metered price billed from reported usage (see
+  // relay-billing.js / jobs/sync-relay-usage.js), not a line-item quantity.
+  if (process.env.STRIPE_RELAY_PRICE_ID) {
+    lineItems.push({ price: process.env.STRIPE_RELAY_PRICE_ID });
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
     customer: customerId,
     client_reference_id: req.account.id,
-    line_items: [{ price: process.env.STRIPE_STORAGE_PRICE_ID, quantity }],
+    line_items: lineItems,
     // Stripe's "Managed Payments" (enabled by default on newer accounts)
     // requires every product to carry a tax code before Checkout will let
     // it through. Not something this project needs to deal with yet —

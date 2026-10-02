@@ -296,7 +296,7 @@ async fn main() -> Result<()> {
         let cycle_stats = cycle_stats.clone();
         async move {
             loop {
-                match fetch_buddy_devices(&http, &config).await {
+                match fetch_buddy_devices(&http, &config, &bandwidth_book).await {
                     Ok(buddies) => {
                         for buddy in buddies {
                             let Some(node_id_str) = &buddy.iroh_node_id else {
@@ -502,15 +502,34 @@ async fn register_node_id(http: &reqwest::Client, config: &Config, endpoint_id: 
     Ok(())
 }
 
-async fn fetch_buddy_devices(http: &reqwest::Client, config: &Config) -> Result<Vec<BuddyDevice>> {
-    let resp: BuddiesResponse = http
-        .get(format!("{}/devices/me/buddies", config.api_url))
+async fn fetch_buddy_devices(
+    http: &reqwest::Client,
+    config: &Config,
+    bandwidth_book: &bandwidth::BandwidthBook,
+) -> Result<Vec<BuddyDevice>> {
+    // Piggyback relay-bandwidth reporting on this existing poll (see
+    // apps/api/src/routes/devices.js) rather than a separate endpoint —
+    // whole megabytes of relay traffic accumulated since the last
+    // successful report. Only advance the high-water mark (below) once the
+    // request actually succeeds, so a failed poll just re-reports the same
+    // bytes next cycle instead of losing them.
+    let relay_mb = bandwidth::pending_relay_mb(bandwidth_book);
+
+    let resp = http
+        .get(format!(
+            "{}/devices/me/buddies?relay_mb={}",
+            config.api_url, relay_mb
+        ))
         .bearer_auth(&config.device_token)
         .send()
         .await?
-        .error_for_status()?
-        .json()
-        .await?;
+        .error_for_status()?;
+
+    if relay_mb > 0 {
+        bandwidth::mark_relay_reported(&config.data_dir, bandwidth_book, relay_mb).await;
+    }
+
+    let resp: BuddiesResponse = resp.json().await?;
     Ok(resp.buddy_devices)
 }
 

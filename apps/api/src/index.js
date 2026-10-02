@@ -9,6 +9,9 @@ import { invitesRouter } from './routes/invites.js';
 import { billingRouter } from './routes/billing.js';
 import { devicesRouter } from './routes/devices.js';
 import { adminRouter } from './routes/admin.js';
+import { syncRelayUsageToStripe } from './jobs/sync-relay-usage.js';
+import { runStaleAccountCleanup } from './jobs/stale-account-cleanup.js';
+import { sendStaleAccountDigest } from './jobs/stale-account-digest.js';
 
 const app = express();
 
@@ -42,3 +45,65 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`backup-buddies api listening on :${port}`);
 });
+
+// Periodically reports accumulated relay_usage_events to Stripe (see
+// jobs/sync-relay-usage.js). Gated on STRIPE_RELAY_PRICE_ID so this is a
+// no-op until relay billing is actually set up on a given deployment —
+// recordRelayUsage() (lib/relay-billing.js) still writes rows regardless,
+// so turning this on later bills whatever accumulated in the meantime
+// rather than losing it.
+if (process.env.STRIPE_RELAY_PRICE_ID) {
+  const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+  setInterval(() => {
+    syncRelayUsageToStripe().catch((err) => {
+      console.error('Relay usage sync to Stripe failed', err);
+    });
+  }, SYNC_INTERVAL_MS);
+  // Don't wait a full interval after a fresh deploy/restart before the
+  // first sync.
+  setTimeout(() => {
+    syncRelayUsageToStripe().catch((err) => {
+      console.error('Relay usage sync to Stripe failed', err);
+    });
+  }, 60_000);
+}
+
+// Stale-account lifecycle (jobs/stale-account-cleanup.js,
+// jobs/stale-account-digest.js): an inactivity warning email daily, and a
+// digest to the admin(s) of who's gone quiet since that warning — deletion
+// is always a deliberate human action from /admin.html, never automatic.
+// Opt-in and off by default (STALE_ACCOUNT_CLEANUP_ENABLED=true) so this
+// doesn't start emailing real accounts the moment SMTP happens to be
+// configured for something else.
+if (process.env.STALE_ACCOUNT_CLEANUP_ENABLED === 'true') {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  setInterval(() => {
+    runStaleAccountCleanup()
+      .then(({ cleared, warned }) => {
+        if (cleared > 0 || warned > 0) {
+          console.log(`Stale-account cleanup: cleared ${cleared} warning(s), sent ${warned} new one(s).`);
+        }
+      })
+      .catch((err) => console.error('Stale-account cleanup failed', err));
+  }, DAY_MS);
+  setTimeout(() => {
+    runStaleAccountCleanup().catch((err) => console.error('Stale-account cleanup failed', err));
+  }, 5 * 60 * 1000); // 5 minutes after boot, not immediately on every restart
+
+  // Checked daily (not every 30 days) but only actually sends once a
+  // month — sendStaleAccountDigest() tracks its own last-send time in the
+  // job_runs table (migration 008), not in memory, so a restart/redeploy
+  // can't cause it to fire early or skip a cycle the way a bare
+  // setInterval(30 * DAY_MS) would.
+  setInterval(() => {
+    sendStaleAccountDigest()
+      .then(({ candidateCount, sent }) => {
+        if (sent) console.log(`Stale-account digest sent: ${candidateCount} candidate(s).`);
+      })
+      .catch((err) => console.error('Stale-account digest failed', err));
+  }, DAY_MS);
+  setTimeout(() => {
+    sendStaleAccountDigest().catch((err) => console.error('Stale-account digest failed', err));
+  }, 10 * 60 * 1000); // staggered from the cleanup job's own startup run
+}

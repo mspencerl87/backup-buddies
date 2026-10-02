@@ -34,6 +34,7 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       has_password: Boolean(req.account.password_hash),
       has_google: Boolean(req.account.google_sub),
       is_admin: isAdminEmail(req.account.email),
+      email_verified: req.account.email_verified,
     },
     devices: devices.rows,
     pairings: pairings.rows,

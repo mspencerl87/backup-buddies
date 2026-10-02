@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { OAuth2Client } from 'google-auth-library';
 import { pool } from '../db/pool.js';
 import { SESSION_COOKIE, requireAuth } from '../middleware/require-auth.js';
+import { sendVerificationEmail, verifyEmailToken } from '../lib/email-verification.js';
 
 export const authRouter = Router();
 
@@ -60,7 +61,21 @@ authRouter.post('/signup', async (req, res) => {
     const sessionId = await createSession(account.id);
     setSessionCookie(res, sessionId);
 
-    res.status(201).json({ account });
+    // Best-effort — a signup should never fail just because SMTP hiccuped.
+    // The dashboard offers a "resend" button (see /auth/resend-verification
+    // below) for whenever this didn't land.
+    try {
+      await sendVerificationEmail({
+        id: account.id,
+        email: account.email,
+        email_verified: false,
+        email_verification_sent_at: null,
+      });
+    } catch (err) {
+      console.error(`Failed to send verification email to ${account.email}:`, err);
+    }
+
+    res.status(201).json({ account: { ...account, email_verified: false } });
   } catch (err) {
     if (err.code === '23505') {
       // unique_violation on accounts.email
@@ -210,19 +225,28 @@ authRouter.get('/auth/google/callback', async (req, res) => {
       // "Continue with Google" button on our signup/login pages, which
       // requires checking the terms box first — so this counts as
       // acceptance too, same as the password signup path. Only backfills
-      // it if it was never set.
+      // it if it was never set. email_verified is set unconditionally
+      // (not COALESCE'd) — Google just reconfirmed payload.email_verified
+      // above, which is at least as strong as our own token flow, so this
+      // also clears a password-signup account's unverified state if it
+      // links to Google later.
       await pool.query(
         `UPDATE accounts
             SET google_sub = $1,
-                terms_accepted_at = COALESCE(terms_accepted_at, now())
+                terms_accepted_at = COALESCE(terms_accepted_at, now()),
+                email_verified = true
           WHERE id = $2`,
         [payload.sub, byEmail.id],
       );
       account = byEmail;
     } else {
+      // Google accounts skip our own email-verification flow entirely —
+      // payload.email_verified (checked above) is already a stronger
+      // guarantee than the emailed-link token this codebase uses for
+      // password signups.
       const inserted = await pool.query(
-        `INSERT INTO accounts (email, google_sub, tier, terms_accepted_at)
-         VALUES ($1, $2, 'free', now())
+        `INSERT INTO accounts (email, google_sub, tier, terms_accepted_at, email_verified)
+         VALUES ($1, $2, 'free', now(), true)
          RETURNING id, email, tier`,
         [normalizedEmail, payload.sub],
       );
@@ -233,6 +257,41 @@ authRouter.get('/auth/google/callback', async (req, res) => {
   const sessionId = await createSession(account.id);
   setSessionCookie(res, sessionId);
   res.redirect('/dashboard.html');
+});
+
+// --- Email verification ---
+
+// Called from verify-email.html with the token out of the emailed link.
+// No auth required — the token itself (single-use, 48h expiry) is the
+// credential; this lets a verification link work even in a browser that
+// isn't currently logged in as that account.
+authRouter.post('/auth/verify-email', async (req, res) => {
+  const { token } = req.body ?? {};
+  const result = await verifyEmailToken(token);
+
+  if (result === 'verified') return res.json({ ok: true });
+  if (result === 'expired') {
+    return res
+      .status(410)
+      .json({ error: 'That link has expired — log in and resend a new one from your dashboard.' });
+  }
+  return res.status(400).json({ error: 'That verification link is invalid.' });
+});
+
+// Resend from the dashboard, for whenever the signup-time email didn't
+// land (or was never sent — SMTP not configured yet, etc).
+authRouter.post('/auth/resend-verification', requireAuth, async (req, res) => {
+  const result = await sendVerificationEmail(req.account);
+
+  if (result === 'already_verified') {
+    return res.status(409).json({ error: 'Your email is already verified.' });
+  }
+  if (result === 'cooldown') {
+    return res
+      .status(429)
+      .json({ error: 'A verification email was just sent — check your inbox before requesting another.' });
+  }
+  res.json({ ok: true });
 });
 
 authRouter.post('/logout', requireAuth, async (req, res) => {

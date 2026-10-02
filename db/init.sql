@@ -45,9 +45,12 @@ CREATE TABLE buddy_pairings (
   CONSTRAINT different_accounts CHECK (account_a_id <> account_b_id)
 );
 
--- Raw relay bandwidth events, written by the relay server (or an API
--- endpoint the relay calls). Aggregated and reported to Stripe Billing
--- Meters on a schedule, then marked synced.
+-- Raw relay bandwidth events. Written by the API (POST /devices/me/buddies,
+-- see routes/devices.js / lib/relay-billing.js) as each client reports the
+-- relay megabytes it's moved since its last report — the relay server
+-- itself is the stock iroh relay binary and has no way to emit these.
+-- Aggregated and reported to Stripe Billing Meters on a schedule
+-- (jobs/sync-relay-usage.js), then marked synced.
 CREATE TABLE relay_usage_events (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   account_id        UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

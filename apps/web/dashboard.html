@@ -28,6 +28,11 @@
     <div class="card">
       <h2>Your account</h2>
       <p id="account-summary" class="muted">Loading…</p>
+      <p id="verify-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid var(--border); border-radius:8px; background:#2a2310;">
+        Please verify your email — you'll need to before pairing with a buddy.
+        <button class="btn btn-secondary" id="resend-verification-btn" type="button" style="margin-left:0.5rem">Resend verification email</button>
+      </p>
+      <p class="error" id="verify-error"></p>
     </div>
 
     <div class="card" id="billing">
@@ -203,6 +208,16 @@
         });
         errorEl.appendChild(link);
       }
+      if (data.email_unverified) {
+        const link = document.createElement('a');
+        link.href = '#verify-banner';
+        link.textContent = 'Resend verification email';
+        link.style.marginLeft = '0.5rem';
+        link.addEventListener('click', () => {
+          document.getElementById('verify-banner').scrollIntoView({ behavior: 'smooth' });
+        });
+        errorEl.appendChild(link);
+      }
     }
 
     async function loadMe() {
@@ -221,7 +236,39 @@
       const methodNote = methods.length ? ` (signed in via ${methods.join(' & ')})` : '';
       document.getElementById('account-summary').textContent =
         `${account.email} — ${account.tier} tier${methodNote}`;
+
+      // Google accounts are verified at signup (see routes/auth.js) and
+      // never see this — only password accounts that haven't clicked their
+      // emailed link yet.
+      document.getElementById('verify-banner').style.display = account.email_verified
+        ? 'none'
+        : 'block';
     }
+
+    document.getElementById('resend-verification-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('resend-verification-btn');
+      const errorEl = document.getElementById('verify-error');
+      errorEl.className = 'error';
+      errorEl.textContent = '';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/auth/resend-verification', {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+        const data = await parseJsonResponse(res);
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not resend verification email.';
+        } else {
+          errorEl.className = 'muted';
+          errorEl.textContent = 'Verification email sent — check your inbox.';
+        }
+      } catch (err) {
+        errorEl.textContent = 'Could not reach the server. Try again.';
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     function renderPairings(pairings, selfId) {
       const table = document.getElementById('pairings-table');
@@ -308,8 +355,14 @@
       const freeNote = data.billable_gb === 0
         ? ` (within your ${data.free_allowance_gb}GB free allowance)`
         : ` — an estimated $${data.estimated_monthly_usd.toFixed(2)}/month`;
+      // Relay-bandwidth billing only ever applies once there's an active
+      // subscription (see apps/api/src/lib/relay-billing.js) — showing the
+      // rate before then would be a charge that can't actually happen yet.
+      const relayNote = data.has_subscription && data.relay_billing_enabled
+        ? ` Relay bandwidth (when a buddy connection can't go direct) is billed separately at $${data.relay_usd_per_gb.toFixed(2)}/GB.`
+        : '';
       summaryEl.textContent =
-        `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.`;
+        `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.${relayNote}`;
 
       btnEl.style.display = 'inline-block';
       btnEl.textContent = data.has_subscription ? 'Manage billing' : 'Subscribe';

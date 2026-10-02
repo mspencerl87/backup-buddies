@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireDeviceAuth } from '../middleware/require-device-auth.js';
+import { recordRelayUsage } from '../lib/relay-billing.js';
 
 export const devicesRouter = Router();
 
@@ -88,6 +89,17 @@ devicesRouter.put('/devices/me/node-id', requireDeviceAuth, async (req, res) => 
 // last_seen_at) even when called with no new node id to report.
 devicesRouter.get('/devices/me/buddies', requireDeviceAuth, async (req, res) => {
   await pool.query(`UPDATE devices SET last_seen_at = now() WHERE id = $1`, [req.device.id]);
+
+  // Piggybacks relay-bandwidth reporting on this existing 30s poll rather
+  // than a separate endpoint/schedule — see bandwidth.rs on the client.
+  // relay_mb is megabytes relayed *since the client's last successful
+  // report*, not a lifetime total; the client only advances its own
+  // high-water mark once this call succeeds, so a failed poll just means
+  // the same delta gets reported again next time.
+  const relayMb = Number.parseInt(req.query.relay_mb, 10);
+  if (Number.isInteger(relayMb) && relayMb > 0) {
+    await recordRelayUsage(req.device.account_id, relayMb);
+  }
 
   const result = await pool.query(
     `SELECT devices.id, devices.account_id, devices.iroh_node_id, devices.label,

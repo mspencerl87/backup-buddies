@@ -20,6 +20,15 @@ use crate::netinfo::{ConnectionQuality, PathKind};
 pub struct BandwidthTotals {
     pub relay_bytes: u64,
     pub direct_bytes: u64,
+    // High-water mark: how much of relay_bytes has already been reported to
+    // the API (see main.rs's buddies-poll loop and
+    // apps/api/src/lib/relay-billing.js). Only relay traffic is ever
+    // billable — direct peer-to-peer transfers don't touch the relay and
+    // aren't reported at all. Persisted alongside the totals so a restart
+    // doesn't re-report (or lose track of) anything: the delta sent each
+    // poll is always `relay_bytes - reported_relay_bytes` at that moment.
+    #[serde(default)]
+    pub reported_relay_bytes: u64,
 }
 
 pub type BandwidthBook = Arc<Mutex<BandwidthTotals>>;
@@ -57,5 +66,36 @@ pub async fn record(data_dir: &Path, book: &BandwidthBook, quality: &ConnectionQ
     }
     if let Err(err) = save(data_dir, book).await {
         tracing::warn!(?err, "failed to persist bandwidth totals");
+    }
+}
+
+const BYTES_PER_MB: u64 = 1024 * 1024;
+
+/// Whole megabytes of relay traffic accumulated since the last successful
+/// report to the API. Floors rather than rounds, so a fraction of a
+/// megabyte just stays pending for the next poll instead of ever being
+/// reported (and then re-marked-reported) twice.
+pub fn pending_relay_mb(book: &BandwidthBook) -> u64 {
+    let totals = book.lock().unwrap();
+    totals
+        .relay_bytes
+        .saturating_sub(totals.reported_relay_bytes)
+        / BYTES_PER_MB
+}
+
+/// Advances the reported high-water mark by `mb` (whole megabytes) and
+/// persists it. Call this only after the API has confirmed it received the
+/// report — on failure, leave it unmarked so the same bytes are simply
+/// included in the next poll's delta rather than lost.
+pub async fn mark_relay_reported(data_dir: &Path, book: &BandwidthBook, mb: u64) {
+    if mb == 0 {
+        return;
+    }
+    {
+        let mut totals = book.lock().unwrap();
+        totals.reported_relay_bytes = totals.reported_relay_bytes.saturating_add(mb * BYTES_PER_MB);
+    }
+    if let Err(err) = save(data_dir, book).await {
+        tracing::warn!(?err, "failed to persist bandwidth totals after relay report");
     }
 }

@@ -247,9 +247,9 @@ unset and the "Continue with Google" button just redirects to a
 Billing model: 50GB free per account, then $3/TB/month on however much
 storage you're actively pledging across your buddy pairings — a
 subscription **quantity** (in GB) that updates automatically whenever a
-pairing is created or ends, not a live usage meter. Relay-bandwidth overage
-billing (`STRIPE_RELAY_METER_ID`, `relay_usage_events`) is a separate,
-not-yet-built piece — this section is just the storage subscription.
+pairing is created or ends, not a live usage meter. Relay-bandwidth
+billing is a separate piece, bundled onto the same subscription — see
+section 13.
 
 1. **Create the tiered Price.** Rather than clicking through the Stripe
    dashboard's pricing UI (fractional-cent-per-GB pricing is fiddly to get
@@ -369,3 +369,165 @@ A few things worth knowing before using the delete actions:
   the Stripe dashboard — the UI warns on this, but doesn't do it for you.
 - You can't delete your own (admin) account from the page — avoids a
   confusing self-lockout mid-troubleshooting.
+
+## 13. Relay-bandwidth billing
+
+Separate from storage billing (section 10): accounts with an active paid
+subscription are also billed **$0.02/GB** for traffic that actually goes
+through `relay.filegarden.net` — direct peer-to-peer transfers never touch
+the relay and are never billed. Free-tier accounts are never billed for
+relay bandwidth. The client reports its relay usage to the API roughly
+every 30 seconds (piggybacked on its existing buddy-list poll — see
+`apps/client/README.md`'s "Relay bandwidth" section); the API batches that
+into Stripe Billing Meter events on a 15-minute schedule
+(`apps/api/src/jobs/sync-relay-usage.js`).
+
+1. **Create the Billing Meter + metered Price:**
+   ```bash
+   STRIPE_SECRET_KEY=sk_test_xxx node scripts/create-stripe-relay-meter-and-price.mjs
+   ```
+   Prints a `price_...` ID and a `mtr_...` ID. Put both in `.env` on app-1:
+   `STRIPE_RELAY_PRICE_ID` (the one the running app actually reads — it's
+   what gets added to checkout and what gates the sync job) and
+   `STRIPE_RELAY_METER_ID` (kept for reference only; nothing reads it).
+   Start in **test mode**, same reasoning as section 10.
+2. **Restart the API** so it picks up the new env vars:
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose up -d --build api
+   ```
+   No new migration — `relay_usage_events` already exists (`db/init.sql`).
+3. **Backfill existing subscribers**, if there are any accounts that
+   subscribed to storage billing before this section was set up (new
+   subscriptions get both the storage and relay prices from checkout
+   automatically — see `apps/api/src/routes/billing.js`):
+   ```bash
+   STRIPE_SECRET_KEY=sk_test_xxx \
+   STRIPE_STORAGE_PRICE_ID=price_xxx \
+   STRIPE_RELAY_PRICE_ID=price_yyy \
+   node scripts/add-relay-price-to-existing-subscriptions.mjs
+   ```
+4. **Test it end to end** (test mode): subscribe a test account, pair two
+   test clients where at least one is forced through the relay (e.g. block
+   direct UDP between them, or just trust that NAT traversal fails on
+   whatever network you're testing from), let a backup cycle run, and
+   confirm `relay_usage_events` rows show up
+   (`docker compose exec -T postgres psql -U backup_buddies -d backup_buddies -c "select * from relay_usage_events order by occurred_at desc limit 5;"`)
+   with `synced_to_stripe` flipping to `true` within 15 minutes, and a
+   corresponding meter event appearing on the customer in the Stripe
+   dashboard (Customers → the test customer → "Usage" / "Meter events").
+5. Only once that works in test mode: switch to your **live** secret key
+   and re-run both scripts with it (meters/prices are account-scoped, so
+   test-mode ones don't carry over).
+
+## 14. Outgoing email + email verification
+
+Password signups now get a "verify your email" link (bot/throwaway-account
+deterrent); Google signups skip it (Google already confirmed the address —
+see `routes/auth.js`). Unverified accounts can still log in and look
+around — only pairing (creating or redeeming an invite) is blocked, via
+`requireEmailVerified` (`apps/api/src/middleware/require-email-verified.js`)
+on those three routes in `routes/invites.js`.
+
+Email is sent over plain SMTP (`apps/api/src/lib/mailer.js`, via
+`nodemailer`) — no separate transactional-email provider needed if you
+already have a mailbox. This was set up against **Purelymail**
+(`smtp.purelymail.com`), but any standard SMTP mailbox works the same way.
+
+1. **Set SMTP env vars** in `.env` on app-1:
+   ```
+   SMTP_HOST=smtp.purelymail.com
+   SMTP_PORT=465
+   SMTP_USER=you@yourdomain.com
+   SMTP_PASS=...              # an app password if 2FA is on for that mailbox
+   MAIL_FROM="Backup Buddies <you@yourdomain.com>"
+   ```
+   Port 465 is implicit TLS; use 587 for STARTTLS instead if your mailbox
+   provider prefers that — `mailer.js` picks the right mode from the port
+   number automatically. Leaving these unset doesn't break anything: the
+   API just logs what it would have sent instead of erroring, which is
+   fine for local dev but means no real emails go out in that state.
+2. **Apply the migration and restart:**
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/007_email_verification.sql
+   docker compose up -d --build api
+   ```
+   This backfills every *existing* account as already-verified — only new
+   signups from here on need to click the link.
+3. **Test it end to end**: sign up a new test account with email/password,
+   confirm the verification email actually arrives (check spam too — a
+   fresh sending domain has no reputation yet), click the link, and land on
+   `/verify-email.html` showing "Email verified." Then confirm: (a) before
+   clicking it, trying to create or redeem an invite returns the
+   "verify your email" error with a link back to the dashboard's resend
+   button; (b) the dashboard's resend button actually sends a new email
+   (and that hammering it twice in a row gets the 60-second cooldown
+   response instead of spamming the inbox).
+
+## 15. Stale-account lifecycle
+
+Flags accounts nobody's used in a while so they don't quietly keep billing
+or holding a buddy's disk space forever — but **never deletes anything on
+its own**. Two emails, both best-effort and logged on failure rather than
+retried into a loop:
+
+1. **Warning** (`jobs/stale-account-cleanup.js`, runs daily): any account
+   with no device check-in (`devices.last_seen_at`) in 30 days gets an
+   email saying so. If the account comes back to life (a client starts
+   checking in again) before the next step, this clears itself
+   automatically — no admin action needed either way at this stage.
+2. **Digest** (`jobs/stale-account-digest.js`, runs roughly monthly): any
+   account still showing no activity 30 days *after* its warning is
+   listed, by email, address, days inactive, and whether it has a live
+   Stripe subscription, in one email to every address in `ADMIN_EMAILS`.
+   Deleting (and, separately, cancelling any subscription in the Stripe
+   dashboard — `/admin.html`'s delete action doesn't do that part for you,
+   same as any other admin delete) is then a deliberate action you take
+   from `/admin.html`, same as using that page for any other reason.
+
+Off by default — turning it on starts emailing real signups the moment
+someone's inactive for a month, so don't flip it on until SMTP (section 14)
+is actually working.
+
+1. **Apply the migration and restart:**
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/008_stale_account_cleanup.sql
+   docker compose up -d --build api
+   ```
+2. **Exempt any accounts you want left alone regardless of activity** —
+   e.g. `testa`/`testb` if you keep those around for troubleshooting
+   (see section 12) — in `.env`:
+   ```
+   STALE_CLEANUP_EXEMPT_EMAILS=testa@example.com,testb@example.com
+   ```
+   Your own `ADMIN_EMAILS` accounts are always exempt automatically, no
+   need to list them here too.
+3. **Turn it on:**
+   ```
+   STALE_ACCOUNT_CLEANUP_ENABLED=true
+   ```
+   ```bash
+   docker compose up -d --build api
+   ```
+4. **Test it** (test mode, with a disposable test account): backdate that
+   account's `created_at` and make sure it has no `devices` row (or an old
+   `last_seen_at`) so it already qualifies as stale —
+   ```bash
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     -c "UPDATE accounts SET created_at = now() - interval '35 days' WHERE email = 'your-test-account@example.com';"
+   ```
+   — then either wait for the next daily run or restart the API (it also
+   runs 5 minutes after boot) and confirm the warning email arrives. To
+   test the digest without waiting 30 more days, also backdate
+   `stale_warning_sent_at`:
+   ```bash
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     -c "UPDATE accounts SET stale_warning_sent_at = now() - interval '35 days' WHERE email = 'your-test-account@example.com';"
+   ```
+   then restart the API (it also runs 10 minutes after boot) and confirm
+   the digest arrives at every `ADMIN_EMAILS` address, listing that
+   account. Clean up the test account from `/admin.html` afterward.
