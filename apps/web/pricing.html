@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pricing &amp; billing — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="alternate icon" href="/assets/favicon.ico">
+  <link rel="apple-touch-icon" href="/assets/favicon-180.png">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/"><img src="/assets/mark.svg" alt="" class="logo-mark">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/pricing.html" class="current">Pricing &amp; billing</a>
+      <a href="/getting-started.html">Getting started</a>
+      <a href="/setup.html">Client setup</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/terms.html">Terms</a>
+      <a href="/login.html">Log in</a>
+      <a href="/signup.html">Sign up</a>
+    </nav>
+  </header>
+
+  <main class="about-main">
+    <section class="hero" style="padding-top:1.5rem">
+      <h1>Pricing &amp; billing</h1>
+      <p>
+        The first 50GB you pledge to buddies is free, forever. Past that,
+        storage is $3 per TB per month, and relay bandwidth — only charged
+        on paid accounts, and only for the bytes that couldn't make a direct
+        connection — is $0.02 per GB. Everything you owe in a month lands on
+        one invoice and one card charge.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>The two things you can be billed for</h2>
+      <p class="muted">
+        There's no flat subscription fee by itself — what you pay for is
+        the storage you've committed to (pledged) and, only once you're
+        already paying for storage, any bandwidth that had to go through
+        our relay instead of directly between devices.
+      </p>
+      <div class="split-table">
+        <div class="split-col">
+          <h3>Storage</h3>
+          <ul>
+            <li>First 50GB pledged across all your buddy pairings: free, no subscription needed</li>
+            <li>Beyond 50GB: $3 / TB / month ($0.0029/GB/month)</li>
+            <li>Billed on what you've <em>pledged</em>, not what's actually been backed up yet</li>
+            <li>Your subscription quantity updates automatically — and prorates — the moment a pairing is created or ends</li>
+          </ul>
+        </div>
+        <div class="split-col">
+          <h3>Relay bandwidth</h3>
+          <ul>
+            <li>Only billed once you already have a paid storage subscription — free accounts are never charged for relay use</li>
+            <li>$0.02 / GB ($0.00001953/MB), metered on actual bytes relayed</li>
+            <li>Most transfers go directly, peer-to-peer, between your device and your buddy's — those never cost anything</li>
+            <li>The relay only steps in when a direct connection can't be made (strict NAT, corporate firewall, some carrier networks)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <h2>How pledged storage is counted</h2>
+      <p class="muted">
+        A "pledge" is the amount you've agreed to store on your buddy's
+        behalf — set when an invite is created and redeemed. Your billable
+        total is the sum of every active pairing you're part of, whichever
+        side of it you're on:
+      </p>
+      <ol class="steps">
+        <li>
+          <strong>You pair with a buddy for, say, 500GB.</strong>
+          That pairing now counts 500GB toward both of your pledged totals
+          — it's the same number on both sides, since you're each agreeing
+          to store that much for the other.
+        </li>
+        <li>
+          <strong>The first 50GB of your total is free.</strong>
+          If all your pairings add up to 50GB or less, you never need a
+          subscription at all.
+        </li>
+        <li>
+          <strong>Anything past 50GB needs an active subscription.</strong>
+          Pledging more than the free allowance (via a new invite or
+          redeeming one) requires a paid account — this is enforced at the
+          moment the pledge is made, not discovered later.
+        </li>
+        <li>
+          <strong>The subscription quantity tracks your pledges automatically.</strong>
+          Add a new buddy, or one of your pairings ends, and your Stripe
+          subscription's storage quantity — and your prorated charge for
+          the rest of the billing period — updates right away.
+        </li>
+      </ol>
+    </section>
+
+    <section class="about-section">
+      <h2>How relay usage is measured and billed</h2>
+      <ol class="steps">
+        <li>
+          <strong>Your client tracks every byte's path.</strong>
+          For each transfer, it knows whether the data went directly to
+          your buddy's device or had to be relayed.
+        </li>
+        <li>
+          <strong>It reports relay usage roughly every 30 seconds.</strong>
+          Just the megabytes relayed since the last report — never file
+          contents, since the relay itself never sees anything but
+          already-encrypted ciphertext.
+        </li>
+        <li>
+          <strong>Usage is only recorded for paid accounts.</strong>
+          If you're on the free tier, your client still reports it, but the
+          server discards it — it's never billed and never shows up as a
+          charge.
+        </li>
+        <li>
+          <strong>We sync usage to Stripe every 15 minutes.</strong>
+          This just records a "meter event" — a data point, not a charge.
+          Nothing happens to your card at this point.
+        </li>
+        <li>
+          <strong>Once a month, at your normal renewal date, it's all totaled up.</strong>
+          Stripe adds up every meter event from that billing period into a
+          single relay-bandwidth line item, alongside your storage line
+          item, on one invoice.
+        </li>
+        <li>
+          <strong>Your card is charged once.</strong>
+          Never per report, never per relay session — one combined charge
+          per month, same as any ordinary subscription renewal.
+        </li>
+      </ol>
+    </section>
+
+    <section class="about-section">
+      <h2>Worked example</h2>
+      <p class="muted">
+        Say you pledge 500GB to a buddy (so they're pledging 500GB back to
+        you too — one pairing, same number both ways), and over the course
+        of a month your network's NAT blocks direct connections often
+        enough that about 2.5GB of your transfers that month went through
+        the relay instead.
+      </p>
+
+      <div class="diagram-wrap">
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Amount</th>
+              <th>Rate</th>
+              <th>Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Pledged storage</td>
+              <td>500 GB</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td>Free allowance</td>
+              <td>&minus;50 GB</td>
+              <td>$0 / GB</td>
+              <td>$0.00</td>
+            </tr>
+            <tr>
+              <td>Billable storage</td>
+              <td>450 GB</td>
+              <td>$3 / TB / mo</td>
+              <td>$1.32</td>
+            </tr>
+            <tr>
+              <td>Relay bandwidth</td>
+              <td>2.5 GB</td>
+              <td>$0.02 / GB</td>
+              <td>$0.05</td>
+            </tr>
+            <tr class="total-row">
+              <td colspan="3">Total charged this month</td>
+              <td>$1.37</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="muted" style="margin-top:1rem">
+        That $1.37 is a single charge on your card at your subscription's
+        normal monthly renewal date — the two line items (storage and
+        relay) appear separately on the invoice for transparency, but
+        they're never billed separately. If that same month your direct
+        connection had worked for every transfer, the relay line would
+        simply read 0&nbsp;GB / $0.00, and you'd pay $1.32.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>What never costs anything</h2>
+      <ul class="tech-list">
+        <li><strong>Pledges of 50GB or less, total.</strong> No subscription, no card on file, nothing.</li>
+        <li><strong>Direct peer-to-peer traffic.</strong> The normal case for most home and office networks — only bytes that go through the relay are ever metered.</li>
+        <li><strong>Backing up, restoring, and checking buddy status.</strong> These aren't separately billed actions — they're just what pledged storage and relay bandwidth (if used) already cover.</li>
+        <li><strong>Relay use on a free account.</strong> Tracked for diagnostics only, never billed, until you have an active paid subscription.</li>
+      </ul>
+    </section>
+
+    <section class="hero" style="padding-top:1rem">
+      <a class="btn" href="/signup.html">Get started</a>
+      <a class="btn btn-secondary" href="/about.html">How it works</a>
+    </section>
+  </main>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>
