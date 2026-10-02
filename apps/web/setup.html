@@ -144,8 +144,8 @@ cd backup-buddies-client</code></pre>
             <li>Mirrors deletions too, so your buddy's copy matches yours rather than only ever growing</li>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
             <li>Connects directly to your buddy's device when possible, falling back to the relay automatically when it's not</li>
-            <li>Keeps multiple versions of a file, not just the latest — you can browse and restore an earlier version, not only what's currently there</li>
-            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser, and one-click restore</li>
+            <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
           </ul>
         </div>

@@ -89,19 +89,27 @@
       <p class="muted">
         Once both clients are running, your dashboard's Devices card will
         show each device as connected, and the client's own logs will show
-        a successful connectivity check roughly every 30 seconds. See the
+        either "backup cycle complete" (if you pointed it at a folder to
+        back up) or a successful connectivity check roughly every 30
+        seconds (for a device that's only receiving). Either way, your
+        buddy actually ends up holding an encrypted, restorable copy of
+        your files — not just a connection test. See the
         <a href="/setup.html">Client setup</a> page's troubleshooting
         section if that's not happening.
       </p>
     </section>
 
     <section class="about-section">
-      <h2>What's not built yet</h2>
+      <h2>What the client actually does</h2>
       <p class="muted">
-        Right now the client proves the connection works end to end with
-        real encryption — it doesn't yet watch a folder and back it up
-        automatically, or let you restore files. That's the next thing
-        being built. This page will be updated as that lands.
+        This is a real backup client, not a demo: it watches your folder,
+        encrypts and sends new or changed files automatically, mirrors
+        deletions, and lets you restore everything — or a specific earlier
+        version of a file you've since overwritten — from its local
+        dashboard or the restore command. See the
+        <a href="/setup.html">Client setup</a> page's "What this version
+        actually does" section for the full rundown, including its current
+        limits.
       </p>
     </section>
   </main>
