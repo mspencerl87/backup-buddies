@@ -14,9 +14,12 @@
 #                                    time — a few minutes — then starts it)
 #   3. docker compose logs -f   — you should see "registered this device's
 #      node id with the API", then (once your buddy's client is also
-#      running and BACKUP_DIR_HOST is set) "backup cycle complete", or
-#      "connectivity check succeeded" if this device isn't backing
-#      anything up itself.
+#      running) a cycle line roughly every 30 seconds: "backup cycle
+#      complete" if there's something to send, or "nothing new to back up"
+#      if not. BACKUP_DIR is always set below (it just points at an empty
+#      folder when BACKUP_DIR_HOST isn't), so a receive-only device will
+#      show "nothing new to back up" every cycle rather than a separate
+#      "connectivity check" message — that's expected.
 #
 # To restore what a buddy is holding for you:
 #   docker compose run --rm client restore <buddy's node id> /data/restored

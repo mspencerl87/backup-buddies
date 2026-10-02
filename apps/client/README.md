@@ -7,14 +7,17 @@ website, your account, billing, pairing with a buddy — is just
 bookkeeping; this is the piece that does the real work.
 
 **Current status:** real backup and restore. Every 30 seconds it asks the
-API who your paired buddies' devices are, then — for any buddy it has a
-`BACKUP_DIR` configured for — scans that folder, encrypts anything new or
-changed with `BACKUP_PASSPHRASE`, and sends just the diff to that buddy's
-device. Deleted files are told apart too, so your buddy's copy mirrors
-yours rather than only ever growing. A buddy you're not backing anything
-up to still gets a lightweight connectivity ping on the same schedule, so
-"is this still working" never depends on actually having something to
-send.
+API who your paired buddies' devices are, then — if this device has
+`BACKUP_DIR` set (which `docker-compose.yml` always does; it just points
+at an empty, read-only folder when you haven't set `BACKUP_DIR_HOST`) —
+scans that folder, encrypts anything new or changed with
+`BACKUP_PASSPHRASE`, and sends just the diff to each buddy's device.
+Deleted files are told apart too, so your buddy's copy mirrors yours
+rather than only ever growing. A receive-only device (no `BACKUP_DIR_HOST`
+set) still runs this same cycle against its empty folder every 30
+seconds — you'll see "nothing new to back up" instead of "backup cycle
+complete" every time, not a separate connectivity-only message, so "is
+this still working" never depends on actually having something to send.
 
 ## What it does and doesn't do
 
@@ -63,8 +66,10 @@ docker compose logs -f
 
 You should see a line confirming your device registered with the API.
 Once your buddy's client is also running (and your pairing is active),
-you'll see either "backup cycle complete" (if you set `BACKUP_DIR_HOST`)
-or "connectivity check succeeded" roughly every 30 seconds.
+you'll see a cycle line roughly every 30 seconds: "backup cycle complete"
+if there was something to send, or "nothing new to back up" if not
+(which is what you'll see every time if you haven't set
+`BACKUP_DIR_HOST`) — either way, it confirms the connection is working.
 
 Before any of that, the client checks its own setup and refuses to start
 with a clear error rather than failing confusingly later — a `BACKUP_DIR`

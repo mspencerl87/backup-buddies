@@ -105,7 +105,7 @@ docker compose logs -f</code></pre>
         </li>
         <li>
           <strong>Confirm it found your buddy</strong>
-          Once your buddy's client is running too, you'll see a "connectivity test succeeded" line in the logs roughly every 30 seconds. That confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible.
+          Once your buddy's client is running too, you'll see a cycle line in the logs roughly every 30 seconds: "backup cycle complete" if there was something to send, or "nothing new to back up" if not — both mean the cycle actually ran and reached your buddy. This happens even on a device with no <code>BACKUP_DIR_HOST</code> set, since it's still running a cycle against an empty folder (so you'll just see "nothing new to back up" every time, which is expected and confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible).
         </li>
       </ol>
 
@@ -177,7 +177,7 @@ cd backup-buddies-client</code></pre>
       <h2>Troubleshooting</h2>
       <ul class="tech-list">
         <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>.</li>
-        <li><strong>Registered, but no connectivity test:</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
+        <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
         <li><strong>Lost your device token:</strong> remove the device on your dashboard and add it again — tokens can't be retrieved after creation, only replaced.</li>
       </ul>
     </section>
