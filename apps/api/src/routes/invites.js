@@ -9,11 +9,20 @@ export const invitesRouter = Router();
 
 // Pledges are constrained to clean, even steps rather than an arbitrary
 // byte count — easier to reason about across pairings/billing, and avoids
-// someone fat-fingering "5000000" instead of "50". 500GB steps, 500GB to
+// someone fat-fingering "5000000" instead of "50". 5GB steps, 5GB to
 // 20,000GB (20TB) — the same GB basis (1024**3 bytes) the dashboard already
 // displays everywhere, just capped and quantized.
+//
+// The step used to be 500GB, which silently broke the free tier: FREE_GB
+// below is 50, and every pledge has to be at least one step, so nobody on
+// the free tier could ever create a pairing at all — the smallest
+// possible pledge was already 10x over their entire free allowance,
+// forcing "subscribe first" on literally the first thing a new account
+// tried to do. 5GB steps mean the free allowance actually fits ten of
+// them, so trying the product without a card attached works the way it's
+// meant to.
 const GB = 1024 ** 3;
-const PLEDGE_STEP_BYTES = 500 * GB;
+const PLEDGE_STEP_BYTES = 5 * GB;
 const PLEDGE_MAX_BYTES = 20_000 * GB;
 
 // Short, URL-safe, hard to guess by brute force but easy to read aloud or
@@ -38,7 +47,7 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
     pledgedBytes % PLEDGE_STEP_BYTES !== 0
   ) {
     return res.status(400).json({
-      error: `pledged_bytes must be a multiple of ${PLEDGE_STEP_BYTES} (500GB) between ${PLEDGE_STEP_BYTES} and ${PLEDGE_MAX_BYTES} (20TB)`,
+      error: `pledged_bytes must be a multiple of ${PLEDGE_STEP_BYTES / GB}GB, between ${PLEDGE_STEP_BYTES / GB}GB and ${PLEDGE_MAX_BYTES / GB}GB`,
     });
   }
   if (note !== undefined && note !== null && typeof note !== 'string') {

@@ -91,7 +91,17 @@
       <form id="invite-form">
         <label for="pledged-gb">Storage to pledge</label>
         <select id="pledged-gb" required>
-          <option value="500" selected>500 GB</option>
+          <option value="5">5 GB</option>
+          <option value="10">10 GB</option>
+          <option value="15">15 GB</option>
+          <option value="20">20 GB</option>
+          <option value="25">25 GB</option>
+          <option value="30">30 GB</option>
+          <option value="35">35 GB</option>
+          <option value="40">40 GB</option>
+          <option value="45">45 GB</option>
+          <option value="50" selected>50 GB (full free allowance)</option>
+          <option value="500">500 GB</option>
           <option value="1000">1 TB</option>
           <option value="1500">1.5 TB</option>
           <option value="2000">2 TB</option>
@@ -504,9 +514,9 @@
       emptyEl.style.display = 'none';
 
       // Group by pledge size so the list reads as a handful of expandable
-      // tiers (500GB, 1TB, …) rather than every single node at once — the
-      // flat list this replaced would get unreadable once there were more
-      // than a few dozen public listings.
+      // tiers (5GB, 50GB, 500GB, …) rather than every single node at once —
+      // the flat list this replaced would get unreadable once there were
+      // more than a few dozen public listings.
       const bySize = new Map();
       for (const listing of data.listings) {
         const bytes = Number(listing.pledged_bytes);
