@@ -828,8 +828,8 @@ function formatDiskSummary(stats) {
   return { text, color: overCommitted ? "var(--danger)" : "var(--text-muted)" };
 }
 
-function applyBuddyDisk(nodeId) {
-  const el = document.querySelector('.buddy-disk[data-node-id="' + CSS.escape(nodeId) + '"]');
+function applyBuddyDisk(nodeId, root = document) {
+  const el = root.querySelector('.buddy-disk[data-node-id="' + CSS.escape(nodeId) + '"]');
   if (!el) return;
   const cached = buddyDiskCache.get(nodeId);
   if (!cached) {
@@ -1371,7 +1371,12 @@ function renderBuddy(b) {
     buddyDiskLastFetched.set(b.node_id, Date.now());
     fetchBuddyDisk(b.node_id);
   });
-  applyBuddyDisk(b.node_id);
+  // Scoped to `div` itself, not `document` — at this point renderBuddy's
+  // caller (refresh()) hasn't appended it to the page yet, so a
+  // document-wide query would find nothing and silently no-op, leaving
+  // the span stuck on its literal "checking…" template text even when
+  // buddyDiskCache already has a real value from an earlier fetch.
+  applyBuddyDisk(b.node_id, div);
   const lastFetched = buddyDiskLastFetched.get(b.node_id);
   if (!lastFetched || Date.now() - lastFetched > BUDDY_DISK_RECHECK_MS) {
     buddyDiskLastFetched.set(b.node_id, Date.now());
