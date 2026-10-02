@@ -208,6 +208,22 @@ it, every connection relays no matter how good either side's network
 otherwise is, since nothing can ever reach this device from outside to
 hole-punch with. Forwarding it is entirely optional — nothing breaks if
 you skip it, transfers just relay instead, same as before this existed.
+Note that two buddies behind the *same* NAT/public IP (e.g. both on the
+same home network as this host) are a case port forwarding can't help —
+most routers won't let a device reach another device behind the same NAT
+via the NAT's own public address ("hairpinning"), regardless of what's
+forwarded.
+
+For buddies who genuinely are on the same local network — two NAS boxes
+in the same house, say — the client also runs local discovery over mDNS
+(same idea as Syncthing's LAN discovery): each client broadcasts/listens
+on the LAN and, if it finds its buddy there, connects over the private
+network directly. This sidesteps the relay and the router's NAT/hairpin
+behavior entirely rather than trying to traverse it, and needs no port
+forwarding or configuration — it's always on, and does nothing (falls
+back to the relay/direct-over-internet path above) when a buddy isn't on
+the same LAN. Look for `"found a buddy on the local network (mDNS)"` in
+the logs to confirm it's working.
 
 There's no live, mid-transfer rate (e.g. "currently uploading at 2MB/s") —
 cycles run every 30s and are usually short, so a last-cycle average is

@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use iroh::{
     endpoint::presets::Minimal, Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
 };
+use iroh_mdns_address_lookup::{DiscoveryEvent, MdnsAddressLookup};
 use serde::Deserialize;
 
 use receive::{PledgeBook, PledgeState};
@@ -182,6 +183,18 @@ async fn main() -> Result<()> {
     // docker-compose.yml can only publish a UDP port it knows ahead of
     // time, and a published port is what makes direct connections
     // possible at all.
+    // Same idea as Syncthing's local discovery: broadcast/listen on the LAN
+    // (mDNS, via swarm-discovery) so two buddies on the same local network
+    // — two NAS boxes in the same house, say — find each other's private
+    // address and connect directly over the LAN, never touching the relay
+    // or caring about the router's NAT/hairpin behavior at all. Built
+    // up-front (rather than via the builder's `.address_lookup()` taking
+    // just a builder type) so we keep a handle to subscribe to its
+    // discovery events below, for visibility in the logs.
+    let mdns = MdnsAddressLookup::builder()
+        .build(endpoint_id)
+        .context("failed to start local-network (mDNS) address lookup")?;
+
     let endpoint = Endpoint::builder(Minimal)
         .secret_key(secret_key)
         .alpns(vec![protocol::ALPN.to_vec()])
@@ -199,11 +212,43 @@ async fn main() -> Result<()> {
             iroh::endpoint::BindOpts::default().set_is_required(false),
         )
         .context("failed to configure IPv6 sync port")?
+        // Purely additive: if a buddy isn't on the same LAN (the normal
+        // case), mDNS finds nothing and we fall back to the
+        // relay/direct-over-internet path exactly as before.
+        .address_lookup(mdns.clone())
         .bind()
         .await
         .context("failed to bind Iroh endpoint")?;
 
     tracing::info!(node_id = %endpoint_id, "backup-buddies client starting");
+
+    // Log what mDNS actually sees, so this is visible/debuggable from the
+    // container logs rather than a silent background mechanism — doesn't
+    // affect connection behavior either way, iroh uses the address lookup
+    // service's results on its own regardless of whether anyone's
+    // listening on this stream.
+    {
+        let mut events = mdns.subscribe().await;
+        tokio::spawn(async move {
+            use n0_future::StreamExt;
+            while let Some(event) = events.next().await {
+                match event {
+                    DiscoveryEvent::Discovered { endpoint_info, .. } => {
+                        tracing::info!(
+                            endpoint_id = %endpoint_info.endpoint_id,
+                            "found a buddy on the local network (mDNS) — direct LAN connection possible"
+                        );
+                    }
+                    DiscoveryEvent::Expired { endpoint_id } => {
+                        tracing::debug!(%endpoint_id, "mDNS-discovered buddy no longer visible on the local network");
+                    }
+                    // DiscoveryEvent is #[non_exhaustive] — future variants
+                    // just get ignored here rather than breaking the build.
+                    _ => {}
+                }
+            }
+        });
+    }
 
     // `restore <buddy node id> [restore_dir]` pulls everything that buddy
     // is holding for us and exits — a one-shot operation, not part of the

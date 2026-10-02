@@ -45,6 +45,46 @@ are virtually always on two different networks.
       the whole reason that override exists; untested against a real
       no-IPv6 host)
 
+## Needs testing — local-network (mDNS) discovery
+
+Added after confirming testa/testb's same-host NAT hairpin makes the
+SYNC_PORT fix above untestable there, and the realization that it was
+solving the wrong case anyway for same-LAN buddies: two customer NAS
+boxes on one home/office network would relay unnecessarily even with
+SYNC_PORT working perfectly, forcing every byte through our relay server
+(cost + scaling concern) for traffic that never needed to leave the LAN.
+Added `iroh-mdns-address-lookup` (same mechanism Syncthing uses for LAN
+discovery) via `Endpoint::builder().address_lookup(mdns.clone())` in
+`apps/client/src/main.rs`; purely additive — falls back to relay/direct
+-over-internet exactly as before when a buddy isn't on the same LAN.
+Logs `"found a buddy on the local network (mDNS) — direct LAN connection
+possible"` on discovery. `cargo build`/`test`/`clippy --all-targets` all
+clean. Not yet tested against real traffic.
+
+- [ ] testa/testb are both on the same host, which may or may not count
+      as "same LAN" for mDNS purposes depending on the container network
+      driver — confirm mDNS multicast actually reaches between the two
+      containers at all before reading anything into the result either
+      way (bridge networking can silently drop multicast between
+      containers on the same Docker bridge)
+- [ ] Real test: two clients on an actual shared LAN (e.g. two machines
+      on the same home wifi, not same-host containers) — confirm the
+      `"found a buddy on the local network"` log line appears on both
+      sides and the dashboard's buddy card shows direct, not relay
+- [ ] Confirm two buddies on *different* networks still behave exactly
+      as before this change (mDNS finds nothing, falls through to
+      relay/SYNC_PORT direct-over-internet) — must be a strict addition,
+      never a regression
+- [ ] Confirm container restart doesn't leave stale mDNS records
+      (re-advertise cleanly on startup, old record expires on the other
+      side within a reasonable time — `DiscoveryEvent::Expired`)
+- [ ] Check whether `docker-compose.yml` needs any changes for mDNS to
+      work at all — multicast UDP (224.0.0.251:5353) typically needs
+      either host networking or an explicit port/network config; the
+      default Docker bridge network may block it silently, in which case
+      this feature does nothing without a compose change we haven't made
+      yet
+
 ## Verified working (2026-10-02)
 
 - [x] Backup cycle: testa → testb, new/changed files detected and sent
