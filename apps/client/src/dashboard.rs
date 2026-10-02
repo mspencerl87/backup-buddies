@@ -545,22 +545,44 @@ const INDEX_HTML: &str = r#"<!doctype html>
     --bg: #0f1115; --surface: #171a21; --border: #2a2e38; --text: #e8e9ec;
     --text-muted: #9499a6; --accent: #4f8cff; --accent-text: #0f1115;
     --danger: #ff6b6b; --ok: #4caf7d; --radius: 10px;
+    /* Echoes the blue→teal gradient in /mark.svg, matching the main site's
+       apps/web/style.css so the client's own dashboard reads as the same
+       brand instead of flat solid blue. */
+    --accent-grad: linear-gradient(135deg, #2ec5ff, #42e6a4);
+    --accent-glow: rgba(79, 140, 255, 0.35);
+    --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.5;
+    background:
+      radial-gradient(900px 480px at 12% -10%, rgba(46, 197, 255, 0.08), transparent 60%),
+      radial-gradient(800px 420px at 100% 0%, rgba(66, 230, 164, 0.06), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text); line-height: 1.5;
   }
   header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); }
   header .title-row { display: flex; align-items: center; gap: 0.6rem; }
-  header .title-row img { width: 26px; height: 26px; display: block; }
-  header h1 { font-size: 1.1rem; margin: 0; }
+  header .title-row img { width: 26px; height: 26px; display: block; transition: transform 0.25s var(--ease); }
+  header .title-row:hover img { transform: rotate(-8deg) scale(1.08); }
+  header h1 {
+    font-size: 1.1rem; margin: 0;
+    background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
   header .sub { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; }
   main { max-width: 920px; margin: 0 auto; padding: 1.5rem; }
   .card {
+    position: relative; overflow: hidden;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 1.25rem 1.5rem; margin-bottom: 1.25rem;
+    transition: border-color 0.2s var(--ease);
   }
+  .card::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: var(--accent-grad); opacity: 0.6;
+  }
+  .card:hover { border-color: #394055; }
   .card h2 { margin: 0 0 0.75rem; font-size: 1rem; }
   .row { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
   .pill {
@@ -572,7 +594,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .pill-pending { background: rgba(148,153,166,0.15); color: var(--text-muted); }
   .muted { color: var(--text-muted); font-size: 0.85rem; }
   .bar-track { background: #11141a; border-radius: 6px; height: 6px; overflow: hidden; margin-top: 0.4rem; }
-  .bar-fill { background: var(--accent); height: 100%; }
+  .bar-fill { background: var(--accent-grad); height: 100%; transition: width 0.3s var(--ease); }
   .bar-fill-warn { background: var(--danger); }
   .disk-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
   .disk-stats .stat .label { color: var(--text-muted); font-size: 0.78rem; }
@@ -583,14 +605,22 @@ const INDEX_HTML: &str = r#"<!doctype html>
   }
   .buddy-disk-recheck { margin-left: 0.4rem; padding: 0.15rem 0.5rem; font-size: 0.72rem; }
   button {
-    background: var(--accent); color: var(--accent-text); border: none; border-radius: 8px;
+    background: var(--accent-grad); color: var(--accent-text); border: none; border-radius: 8px;
     padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s var(--ease);
   }
+  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px -6px var(--accent-glow); }
+  button:active:not(:disabled) { transform: translateY(0); }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   .restore-result { font-size: 0.8rem; margin-top: 0.5rem; }
   code { background: #11141a; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
   #empty { color: var(--text-muted); }
-  button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  button.secondary {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none;
+  }
+  button.secondary:hover:not(:disabled) {
+    border-color: var(--accent); background: rgba(79, 140, 255, 0.08); box-shadow: none;
+  }
   .modal-backdrop {
     display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
     align-items: center; justify-content: center; padding: 2rem; z-index: 10;
@@ -608,6 +638,10 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .modal-search input {
     width: 100%; background: #11141a; border: 1px solid var(--border); border-radius: 8px;
     color: var(--text); padding: 0.5rem 0.7rem; font-size: 0.85rem;
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  }
+  .modal-search input:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow);
   }
   .browse-breadcrumb {
     display: flex; align-items: center; gap: 0.3rem; margin-top: 0.6rem;
@@ -624,7 +658,9 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .file-row {
     display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.1rem;
     border-bottom: 1px solid var(--border); font-size: 0.82rem;
+    transition: background-color 0.15s var(--ease);
   }
+  .file-row:hover { background-color: rgba(255, 255, 255, 0.025); }
   .file-row .path { flex: 1; word-break: break-all; }
   .file-row .size { color: var(--text-muted); white-space: nowrap; }
   .file-row button { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
