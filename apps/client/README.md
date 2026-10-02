@@ -61,6 +61,23 @@ Once your buddy's client is also running (and your pairing is active),
 you'll see either "backup cycle complete" (if you set `BACKUP_DIR_HOST`)
 or "connectivity check succeeded" roughly every 30 seconds.
 
+## Status dashboard
+
+This device also serves its own small status page — not to be confused
+with your account dashboard on the website — at
+**http://localhost:8080** (or whatever `DASHBOARD_PORT` you set), once
+`docker compose up -d` is running. It shows, per buddy: their pledge to
+you and how much of it is used, how many files you've sent each other and
+how much that totals to, and the result of the last backup cycle (or
+ping, for a buddy you're not backing anything up to). There's also a
+"Restore from this buddy" button, which does the same thing as the
+`restore` command below but writes to `data/restored/<their node id>/`
+and shows you the result right there instead of needing a terminal.
+
+It's bound to `127.0.0.1` only (see `docker-compose.yml`) — reachable
+from this machine, not your network — because it has no login of its own
+and that restore button is a real action, not just a read-only view.
+
 ## Restoring
 
 To pull everything a buddy is holding for you back down and decrypt it:

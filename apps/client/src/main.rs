@@ -1,4 +1,5 @@
 mod backup;
+mod dashboard;
 mod manifest;
 mod protocol;
 mod receive;
@@ -31,6 +32,12 @@ struct Config {
     // the periodic backup cycle is skipped entirely, but this device still
     // accepts and stores whatever its buddy sends it.
     backup_dir: Option<PathBuf>,
+    // Local status/restore dashboard's bind address. Defaults to
+    // 0.0.0.0:8080 *inside the container* — safe by default in practice
+    // only because docker-compose.yml publishes it bound to 127.0.0.1 on
+    // the host side; binding to loopback here instead would make it
+    // unreachable through Docker's port mapping at all.
+    dashboard_bind: String,
 }
 
 impl Config {
@@ -46,6 +53,8 @@ impl Config {
             .context("RELAY_URL is not a valid URL")?;
         let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "/data".to_string()).into();
         let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
+        let dashboard_bind =
+            std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
 
         Ok(Self {
             api_url,
@@ -54,6 +63,7 @@ impl Config {
             relay_url,
             data_dir,
             backup_dir,
+            dashboard_bind,
         })
     }
 }
@@ -141,6 +151,39 @@ async fn main() -> Result<()> {
             .collect(),
     ));
 
+    // What the outbound loop below did on its last pass per buddy — the
+    // dashboard reads this directly rather than probing anything itself.
+    let cycle_stats: dashboard::CycleBook = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    let dashboard_task = {
+        let endpoint = endpoint.clone();
+        let config_dashboard_bind = config.dashboard_bind.clone();
+        let node_id_str = endpoint_id.to_string();
+        let data_dir = config.data_dir.clone();
+        let backup_dir = config.backup_dir.clone();
+        let pledge_book = pledge_book.clone();
+        let cycle_stats = cycle_stats.clone();
+        let relay_url = config.relay_url.clone();
+        let passphrase = config.passphrase.clone();
+        tokio::spawn(async move {
+            if let Err(err) = dashboard::run(
+                &config_dashboard_bind,
+                node_id_str,
+                data_dir,
+                backup_dir,
+                pledge_book,
+                cycle_stats,
+                endpoint,
+                relay_url,
+                passphrase,
+            )
+            .await
+            {
+                tracing::warn!(?err, "dashboard server stopped");
+            }
+        })
+    };
+
     // Accept loop: our buddy's client may connect to *us* first. Runs for
     // the life of the process alongside the periodic outbound cycle below.
     let accept_task = {
@@ -169,6 +212,7 @@ async fn main() -> Result<()> {
         let endpoint = endpoint.clone();
         let http = http.clone();
         let pledge_book = pledge_book.clone();
+        let cycle_stats = cycle_stats.clone();
         async move {
             loop {
                 match fetch_buddy_devices(&http, &config).await {
@@ -204,7 +248,7 @@ async fn main() -> Result<()> {
                             let label = buddy.label.clone().unwrap_or_else(|| buddy.account_id.clone());
 
                             if let Some(backup_dir) = &config.backup_dir {
-                                match backup::run_backup_cycle(
+                                let result = backup::run_backup_cycle(
                                     &endpoint,
                                     &config.relay_url,
                                     &config.passphrase,
@@ -212,8 +256,38 @@ async fn main() -> Result<()> {
                                     backup_dir,
                                     buddy_id,
                                 )
-                                .await
-                                {
+                                .await;
+                                let record = match &result {
+                                    Ok((0, 0)) => dashboard::CycleRecord {
+                                        label: label.clone(),
+                                        at: dashboard::unix_now(),
+                                        kind: "backup",
+                                        ok: true,
+                                        detail: "nothing new to back up".to_string(),
+                                        files_sent: Some(0),
+                                        files_deleted: Some(0),
+                                    },
+                                    Ok((put, deleted)) => dashboard::CycleRecord {
+                                        label: label.clone(),
+                                        at: dashboard::unix_now(),
+                                        kind: "backup",
+                                        ok: true,
+                                        detail: "backup cycle complete".to_string(),
+                                        files_sent: Some(*put),
+                                        files_deleted: Some(*deleted),
+                                    },
+                                    Err(err) => dashboard::CycleRecord {
+                                        label: label.clone(),
+                                        at: dashboard::unix_now(),
+                                        kind: "backup",
+                                        ok: false,
+                                        detail: err.to_string(),
+                                        files_sent: None,
+                                        files_deleted: None,
+                                    },
+                                };
+                                dashboard::record_cycle(&cycle_stats, node_id_str, record);
+                                match result {
                                     Ok((0, 0)) => tracing::debug!(buddy = %label, "nothing new to back up"),
                                     Ok((put, deleted)) => tracing::info!(
                                         buddy = %label,
@@ -224,7 +298,21 @@ async fn main() -> Result<()> {
                                     Err(err) => tracing::warn!(buddy = %label, ?err, "backup cycle failed"),
                                 }
                             } else {
-                                match ping(&endpoint, &config.relay_url, buddy_id).await {
+                                let result = ping(&endpoint, &config.relay_url, buddy_id).await;
+                                let record = dashboard::CycleRecord {
+                                    label: label.clone(),
+                                    at: dashboard::unix_now(),
+                                    kind: "ping",
+                                    ok: result.is_ok(),
+                                    detail: match &result {
+                                        Ok(()) => "connectivity check succeeded".to_string(),
+                                        Err(err) => err.to_string(),
+                                    },
+                                    files_sent: None,
+                                    files_deleted: None,
+                                };
+                                dashboard::record_cycle(&cycle_stats, node_id_str, record);
+                                match result {
                                     Ok(()) => tracing::info!(buddy = %label, "connectivity check succeeded"),
                                     Err(err) => {
                                         tracing::warn!(buddy = %label, ?err, "connectivity check failed")
@@ -244,6 +332,7 @@ async fn main() -> Result<()> {
     tokio::select! {
         _ = accept_task => {}
         _ = outbound_task => {}
+        _ = dashboard_task => {}
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("shutting down");
         }

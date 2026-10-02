@@ -22,6 +22,12 @@
 #   docker compose run --rm client restore <buddy's node id> /data/restored
 # (find their node id on your dashboard's Buddies card). Files land under
 # DATA_DIR_HOST/restored on this machine.
+#
+# A local status page — per-buddy pledge usage, what's been sent/received,
+# last backup cycle, and a one-click restore — is served at
+# http://localhost:8080 once the container is up (change DASHBOARD_PORT in
+# .env to use a different port). It's only reachable from this machine,
+# not your network, by design — see the port mapping below.
 
 services:
   client:
@@ -35,6 +41,13 @@ services:
       # Fixed mount point inside the container — BACKUP_DIR_HOST in .env
       # controls what's mounted there on the host side, below.
       - BACKUP_DIR=/backup
+    ports:
+      # Bound to 127.0.0.1 specifically — not just "8080:8080" — so the
+      # dashboard (no login of its own; it can trigger a restore) isn't
+      # reachable from anywhere but this machine. If you need to reach it
+      # from elsewhere on your network, change this deliberately and know
+      # that's what you're opting into.
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
     volumes:
       # A real, visible folder on this machine — not an opaque
       # Docker-managed volume — so it's easy to find, move, or point your

@@ -284,10 +284,19 @@ async fn handle_delete(
 }
 
 async fn handle_list(send: &mut iroh::endpoint::SendStream, sender_dir: &Path) -> Result<()> {
-    let mut files = Vec::new();
-    collect_files(sender_dir, sender_dir, &mut files).await;
+    let files = list_sender_files(sender_dir).await;
     protocol::write_frame(send, &ListResponse { files }).await?;
     Ok(())
+}
+
+/// Everything stored under one sender's directory (received/<node id>/),
+/// as the same ListEntry shape the List protocol request returns. Shared
+/// with dashboard.rs so the local status page can show "what have they
+/// backed up with us" without duplicating the directory walk.
+pub async fn list_sender_files(sender_dir: &Path) -> Vec<ListEntry> {
+    let mut files = Vec::new();
+    collect_files(sender_dir, sender_dir, &mut files).await;
+    files
 }
 
 // Recursive async fn needs boxing in stable Rust.

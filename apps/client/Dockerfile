@@ -36,4 +36,9 @@ COPY --from=builder /build/target/release/backup-buddies-client /usr/local/bin/b
 VOLUME ["/data"]
 ENV DATA_DIR=/data
 
+# Local status/restore dashboard (see dashboard.rs). Documentation only —
+# docker-compose.yml's `ports:` is what actually publishes it, bound to
+# 127.0.0.1 on the host.
+EXPOSE 8080
+
 ENTRYPOINT ["/usr/local/bin/backup-buddies-client"]
