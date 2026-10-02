@@ -25,6 +25,9 @@ instead of re-deriving the list from scratch each session.
       (`bigfile.bin`, 2.0 MB in 3.5s via relay)
 - [x] "Restore all" on a buddy with a mix of live files — confirmed
       (7 files, 2.0 MB in 17.6s via relay)
+- [x] Live restore progress + ETA (file N of M, bytes so far, ~time
+      remaining) instead of one frozen "Restoring…" — added in commit
+      `d7cf342`, confirmed showing live updates during a restore
 
 ## Not yet exercised
 
@@ -58,13 +61,10 @@ file) is now fully exercised. Remaining:
 
 ## Flagged, not yet scoped
 
-- [ ] Restore UX for large transfers: a restore blocks the "Files from
-      <buddy>" modal with a single "Restoring…" message and no
-      per-file/byte progress until the whole batch finishes — fine for
-      a 2MB test, but gives no feedback on a multi-GB/TB restore and no
-      way to tell it's still working vs. stuck. Raised 2026-10-02.
-      Worth deciding: does the restore need to keep running if the
-      modal is closed (it already does — closing the modal doesn't
-      cancel the in-flight fetch, it just stops showing the result),
-      and does it need actual progress (file N of M, bytes so far) or
-      just a way to walk away and check back without losing that state?
+- [ ] Restore progress is now live, but the modal itself still has to
+      stay open to see it (closing it doesn't cancel the restore,
+      which keeps running server-side, but you lose the progress view
+      and have to reopen "Files from <buddy>" to pick it back up — the
+      progress endpoint would still answer correctly if it did).
+      Worth a small persistent indicator elsewhere on the dashboard
+      (e.g. on the buddy's card) if that's annoying in practice.
