@@ -27,7 +27,20 @@
 
     <div id="admin-content" style="display:none">
       <h2>All accounts</h2>
+      <div class="admin-controls" id="accounts-controls" style="display:none">
+        <input type="text" id="accounts-search" placeholder="Search by email or username…">
+        <select id="accounts-sort">
+          <option value="created_desc">Newest first</option>
+          <option value="created_asc">Oldest first</option>
+          <option value="email_asc">Email (A–Z)</option>
+          <option value="email_desc">Email (Z–A)</option>
+          <option value="buddies_desc">Most buddies</option>
+          <option value="devices_desc">Most devices</option>
+        </select>
+        <span class="muted" id="accounts-matched"></span>
+      </div>
       <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
+      <p class="muted" id="accounts-no-match" style="display:none">No accounts match that search.</p>
       <p class="error" id="accounts-error"></p>
       <div class="admin-columns" id="accounts-columns" style="display:none">
         <div class="admin-column">
@@ -136,39 +149,54 @@
       `;
     }
 
-    async function loadAccounts() {
+    // The full list from the last fetch — search and sort both work
+    // against this in memory rather than re-fetching, so typing in the
+    // search box or switching the sort order is instant. Fine at the
+    // account counts this is actually built for; if that ever grows into
+    // the tens of thousands, this is the spot that would need to become a
+    // server-side search/paginated query instead.
+    let allAccounts = [];
+
+    const SORTERS = {
+      created_desc: (a, b) => new Date(b.created_at) - new Date(a.created_at),
+      created_asc: (a, b) => new Date(a.created_at) - new Date(b.created_at),
+      email_asc: (a, b) => a.email.localeCompare(b.email),
+      email_desc: (a, b) => b.email.localeCompare(a.email),
+      buddies_desc: (a, b) => b.buddies.length - a.buddies.length,
+      devices_desc: (a, b) => Number(b.device_count) - Number(a.device_count),
+    };
+
+    function matchesSearch(a, query) {
+      if (!query) return true;
+      const haystack = `${a.email} ${a.nickname || ''}`.toLowerCase();
+      return haystack.includes(query);
+    }
+
+    function renderAccounts() {
       const columns = document.getElementById('accounts-columns');
-      const empty = document.getElementById('accounts-empty');
-      const errorEl = document.getElementById('accounts-error');
-      errorEl.textContent = '';
+      const noMatch = document.getElementById('accounts-no-match');
+      const matchedEl = document.getElementById('accounts-matched');
+      const query = document.getElementById('accounts-search').value.trim().toLowerCase();
+      const sortKey = document.getElementById('accounts-sort').value;
+      const sorter = SORTERS[sortKey] || SORTERS.created_desc;
 
-      let data;
-      try {
-        const res = await fetch('/api/admin/accounts', { credentials: 'same-origin' });
-        data = await parseJsonResponse(res);
-        if (!res.ok) {
-          errorEl.textContent = data.error || 'Could not load accounts.';
-          return;
-        }
-      } catch (err) {
-        errorEl.textContent = err.message || 'Could not load accounts.';
-        return;
-      }
+      const matched = allAccounts.filter((a) => matchesSearch(a, query)).sort(sorter);
+      matchedEl.textContent =
+        query ? `${matched.length} of ${allAccounts.length} account(s) match` : '';
 
-      if (data.accounts.length === 0) {
+      if (matched.length === 0) {
         columns.style.display = 'none';
-        empty.style.display = 'block';
+        noMatch.style.display = 'block';
         return;
       }
-
       columns.style.display = 'flex';
-      empty.style.display = 'none';
+      noMatch.style.display = 'none';
 
       // Free vs. paid, not a height-balanced split — see the
       // .admin-columns CSS comment for why this differs from the
-      // dashboard's masonry layout.
-      const free = data.accounts.filter((a) => a.tier === 'free');
-      const paid = data.accounts.filter((a) => a.tier !== 'free');
+      // dashboard's masonry layout. Sort order applies within each column.
+      const free = matched.filter((a) => a.tier === 'free');
+      const paid = matched.filter((a) => a.tier !== 'free');
 
       document.getElementById('free-count').textContent = free.length;
       document.getElementById('paid-count').textContent = paid.length;
@@ -217,6 +245,45 @@
         });
       });
     }
+
+    async function loadAccounts() {
+      const controls = document.getElementById('accounts-controls');
+      const columns = document.getElementById('accounts-columns');
+      const empty = document.getElementById('accounts-empty');
+      const noMatch = document.getElementById('accounts-no-match');
+      const errorEl = document.getElementById('accounts-error');
+      errorEl.textContent = '';
+
+      let data;
+      try {
+        const res = await fetch('/api/admin/accounts', { credentials: 'same-origin' });
+        data = await parseJsonResponse(res);
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not load accounts.';
+          return;
+        }
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load accounts.';
+        return;
+      }
+
+      allAccounts = data.accounts;
+
+      if (allAccounts.length === 0) {
+        controls.style.display = 'none';
+        columns.style.display = 'none';
+        noMatch.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      controls.style.display = 'flex';
+      empty.style.display = 'none';
+      renderAccounts();
+    }
+
+    document.getElementById('accounts-search').addEventListener('input', renderAccounts);
+    document.getElementById('accounts-sort').addEventListener('change', renderAccounts);
 
     async function loadAccountDetail(accountId) {
       const card = document.getElementById('detail-card');
