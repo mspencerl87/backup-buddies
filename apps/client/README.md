@@ -27,6 +27,11 @@ send.
   skipped by comparing their hash against what this client last told a
   given buddy it sent them (see "Data directory" below), not re-sent in
   full every 30 seconds.
+- **Does:** keep a short backstop when a file is overwritten or deleted —
+  the live copy plus its last 2 replaced versions are kept on your
+  buddy's disk, browsable and individually restorable from the local
+  dashboard (see "File versions" below). Not full version history, just
+  protection against a bad overwrite or an accidental delete.
 - **Does not:** send your passphrase anywhere. It's used locally to
   derive an encryption key and never appears in any API call, log line,
   or network request. If you lose it, data stored with your buddy cannot
