@@ -68,9 +68,11 @@
 
     <div class="card" id="find-a-buddy">
       <h2>Find a buddy</h2>
-      <p class="muted">Don't have anyone to pair with yet? Browse people who've listed storage publicly, or list your own below.</p>
+      <p class="muted">Don't have anyone to pair with yet? Browse people who've listed the same amount of storage you want to trade, or list your own below.</p>
+      <label for="marketplace-size">Show listings pledging</label>
+      <select id="marketplace-size"></select>
       <div id="marketplace-list"></div>
-      <p id="marketplace-empty" class="muted" style="display:none">No public listings right now — be the first to list below.</p>
+      <p id="marketplace-empty" class="muted" style="display:none">No public listings at this size right now — be the first to list it below, or try a different size.</p>
       <p class="error" id="marketplace-error"></p>
     </div>
 
@@ -90,58 +92,7 @@
       <p class="muted">Pick how much storage you're willing to trade, generate a code, and send it to the person you want as your backup buddy.</p>
       <form id="invite-form">
         <label for="pledged-gb">Storage to pledge</label>
-        <select id="pledged-gb" required>
-          <option value="5">5 GB</option>
-          <option value="10">10 GB</option>
-          <option value="15">15 GB</option>
-          <option value="20">20 GB</option>
-          <option value="25">25 GB</option>
-          <option value="30">30 GB</option>
-          <option value="35">35 GB</option>
-          <option value="40">40 GB</option>
-          <option value="45">45 GB</option>
-          <option value="50" selected>50 GB (full free allowance)</option>
-          <option value="500">500 GB</option>
-          <option value="1000">1 TB</option>
-          <option value="1500">1.5 TB</option>
-          <option value="2000">2 TB</option>
-          <option value="2500">2.5 TB</option>
-          <option value="3000">3 TB</option>
-          <option value="3500">3.5 TB</option>
-          <option value="4000">4 TB</option>
-          <option value="4500">4.5 TB</option>
-          <option value="5000">5 TB</option>
-          <option value="5500">5.5 TB</option>
-          <option value="6000">6 TB</option>
-          <option value="6500">6.5 TB</option>
-          <option value="7000">7 TB</option>
-          <option value="7500">7.5 TB</option>
-          <option value="8000">8 TB</option>
-          <option value="8500">8.5 TB</option>
-          <option value="9000">9 TB</option>
-          <option value="9500">9.5 TB</option>
-          <option value="10000">10 TB</option>
-          <option value="10500">10.5 TB</option>
-          <option value="11000">11 TB</option>
-          <option value="11500">11.5 TB</option>
-          <option value="12000">12 TB</option>
-          <option value="12500">12.5 TB</option>
-          <option value="13000">13 TB</option>
-          <option value="13500">13.5 TB</option>
-          <option value="14000">14 TB</option>
-          <option value="14500">14.5 TB</option>
-          <option value="15000">15 TB</option>
-          <option value="15500">15.5 TB</option>
-          <option value="16000">16 TB</option>
-          <option value="16500">16.5 TB</option>
-          <option value="17000">17 TB</option>
-          <option value="17500">17.5 TB</option>
-          <option value="18000">18 TB</option>
-          <option value="18500">18.5 TB</option>
-          <option value="19000">19 TB</option>
-          <option value="19500">19.5 TB</option>
-          <option value="20000">20 TB</option>
-        </select>
+        <select id="pledged-gb" required></select>
         <label class="checkbox-row" for="invite-public" style="margin-left:0">
           <input type="checkbox" id="invite-public">
           <span>List this publicly in "Find a buddy" instead of only sharing the code directly</span>
@@ -201,6 +152,37 @@
     function formatDate(iso) {
       return new Date(iso).toLocaleDateString();
     }
+
+    // Single source of truth for pledge sizes, in GB — must match the API's
+    // PLEDGE_STEP_BYTES/PLEDGE_MAX_BYTES (apps/api/src/routes/invites.js).
+    // Shared by the "Storage to pledge" (create) and "Show listings
+    // pledging" (browse) dropdowns, which both need the exact same list of
+    // sizes: creating a listing and finding one are two sides of the same
+    // exact-size match (see "Find a buddy" below), so letting either
+    // dropdown drift out of sync with the other, or with the API's actual
+    // step, would silently break that.
+    const PLEDGE_GB_OPTIONS = [];
+    for (let gb = 5; gb <= 50; gb += 5) PLEDGE_GB_OPTIONS.push(gb);
+    for (let gb = 500; gb <= 20000; gb += 500) PLEDGE_GB_OPTIONS.push(gb);
+
+    function pledgeOptionLabel(gb) {
+      if (gb === 50) return '50 GB (full free allowance)';
+      return gb >= 1000 ? `${(gb / 1000).toFixed(gb % 1000 === 0 ? 0 : 1)} TB` : `${gb} GB`;
+    }
+
+    function populatePledgeSelect(selectEl, defaultGb) {
+      selectEl.innerHTML = '';
+      for (const gb of PLEDGE_GB_OPTIONS) {
+        const option = document.createElement('option');
+        option.value = String(gb);
+        option.textContent = pledgeOptionLabel(gb);
+        if (gb === defaultGb) option.selected = true;
+        selectEl.appendChild(option);
+      }
+    }
+
+    populatePledgeSelect(document.getElementById('pledged-gb'), 50);
+    populatePledgeSelect(document.getElementById('marketplace-size'), 50);
 
     // Shared by every place an API call can come back blocked by the free
     // storage allowance (invite creation, direct redeem, marketplace
@@ -493,9 +475,18 @@
       const errorEl = document.getElementById('marketplace-error');
       errorEl.textContent = '';
 
+      // Pairs trade like-for-like: redeeming a listing commits the
+      // redeemer to the SAME pledged_bytes back (see the comment on
+      // GET /invites/public), so this always asks the API for one exact
+      // size rather than everything — there is no "browse all sizes" mode.
+      const pledgedGb = Number(document.getElementById('marketplace-size').value);
+      const pledgedBytes = Math.round(pledgedGb * 1024 ** 3);
+
       let data;
       try {
-        const res = await fetch('/api/invites/public', { credentials: 'same-origin' });
+        const res = await fetch(`/api/invites/public?pledged_bytes=${pledgedBytes}`, {
+          credentials: 'same-origin',
+        });
         if (!res.ok) {
           errorEl.textContent = 'Could not load the marketplace.';
           return;
@@ -513,44 +504,17 @@
       }
       emptyEl.style.display = 'none';
 
-      // Group by pledge size so the list reads as a handful of expandable
-      // tiers (5GB, 50GB, 500GB, …) rather than every single node at once —
-      // the flat list this replaced would get unreadable once there were
-      // more than a few dozen public listings.
-      const bySize = new Map();
       for (const listing of data.listings) {
-        const bytes = Number(listing.pledged_bytes);
-        if (!bySize.has(bytes)) bySize.set(bytes, []);
-        bySize.get(bytes).push(listing);
-      }
-      const tiers = Array.from(bySize.keys()).sort((a, b) => a - b);
-
-      for (const bytes of tiers) {
-        const listings = bySize.get(bytes);
-        const details = document.createElement('details');
-        details.className = 'marketplace-tier';
-        // Open the smallest couple of tiers by default so the list isn't
-        // fully collapsed on first load; everything else starts closed.
-        if (tiers.indexOf(bytes) < 2) details.open = true;
-
-        const summary = document.createElement('summary');
-        summary.innerHTML = `${formatBytes(bytes)} <span class="muted">· ${listings.length} available</span>`;
-        details.appendChild(summary);
-
-        for (const listing of listings) {
-          const row = document.createElement('div');
-          row.className = 'marketplace-row';
-          row.innerHTML = `
-            <div>
-              <strong>${listing.inviter_label}</strong>
-              ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
-            </div>
-            <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
-          `;
-          details.appendChild(row);
-        }
-
-        listEl.appendChild(details);
+        const row = document.createElement('div');
+        row.className = 'marketplace-row';
+        row.innerHTML = `
+          <div>
+            <strong>${listing.inviter_label}</strong>
+            ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
+          </div>
+          <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
+        `;
+        listEl.appendChild(row);
       }
 
       listEl.querySelectorAll('.request-pairing-btn').forEach((btn) => {
@@ -561,6 +525,8 @@
             const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
               method: 'POST',
               credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pledged_bytes: pledgedBytes }),
             });
             const data = await parseJsonResponse(res);
             if (!res.ok) {
@@ -576,6 +542,10 @@
         });
       });
     }
+
+    document.getElementById('marketplace-size').addEventListener('change', () => {
+      loadMarketplace();
+    });
 
     document.getElementById('invite-public').addEventListener('change', (e) => {
       document.getElementById('invite-note-row').style.display = e.target.checked ? 'block' : 'none';

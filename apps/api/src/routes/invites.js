@@ -114,7 +114,7 @@ async function pledgedGBForAccountTx(client, accountId) {
 // buddy_pairings row, and marks the invite redeemed — all in one
 // transaction, so an invite can never end up marked redeemed without a
 // matching pairing existing, or vice versa.
-async function redeemInvite({ lockQuery, lockParam, redeemerAccountId }) {
+async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedPledgedBytes }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -133,6 +133,27 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId }) {
     if (invite.inviter_account_id === redeemerAccountId) {
       await client.query('ROLLBACK');
       return { status: 400, body: { error: "you can't redeem your own invite" } };
+    }
+
+    // Marketplace listings are matched by exact pledge size — see
+    // "Find a buddy" in dashboard.html, which only ever shows the redeemer
+    // one size tier at a time and sends that size back here. This re-checks
+    // it server-side (inside the same lock as everything else) so a stale
+    // page — the listing's size can never actually change post-creation,
+    // but a *different* listing at the id could in principle, or the UI
+    // filter could simply be out of date — can't slip someone into a
+    // pairing at a size they never saw or agreed to.
+    if (
+      expectedPledgedBytes !== undefined &&
+      Number(invite.pledged_bytes) !== expectedPledgedBytes
+    ) {
+      await client.query('ROLLBACK');
+      return {
+        status: 409,
+        body: {
+          error: `this listing pledges ${Math.ceil(Number(invite.pledged_bytes) / GB)}GB, not ${Math.ceil(expectedPledgedBytes / GB)}GB — refresh "Find a buddy" and try again`,
+        },
+      };
     }
 
     // The real enforcement of the free allowance: creating this pairing is
@@ -227,7 +248,22 @@ invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, a
 // (falling back to a short, non-reversible label) instead of the
 // inviter's email — nothing here reveals who someone is unless they've
 // chosen to set a nickname.
+//
+// Pairs are meant to trade like-for-like: someone who needs 5GB redeeming
+// a 20TB listing isn't a match, it's a 20TB obligation (pledged_bytes is
+// shared by both sides of the resulting pairing — see redeemInvite) that
+// nobody asked for. So this always filters to one exact size rather than
+// returning every listing — ?pledged_bytes=<bytes> picks which size tier
+// to show, same as the "Storage to pledge" dropdown's values. It's
+// required, not optional, because an unfiltered "browse everything" view
+// is exactly the mismatch this is meant to prevent; the dashboard always
+// sends it.
 invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
+  const pledgedBytes = Number(req.query.pledged_bytes);
+  if (!Number.isInteger(pledgedBytes) || pledgedBytes <= 0) {
+    return res.status(400).json({ error: 'pledged_bytes query parameter is required' });
+  }
+
   const result = await pool.query(
     `SELECT invites.id, invites.pledged_bytes, invites.note, invites.created_at,
             COALESCE(accounts.nickname, 'Buddy #' || substring(accounts.id::text, 1, 8)) AS inviter_label
@@ -236,20 +272,29 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
       WHERE invites.is_public = true
         AND invites.status = 'pending'
         AND invites.inviter_account_id <> $1
+        AND invites.pledged_bytes = $2
       ORDER BY invites.created_at DESC`,
-    [req.account.id],
+    [req.account.id, pledgedBytes],
   );
-  res.json({ listings: result.rows });
+  res.json({ listings: result.rows, pledged_bytes: pledgedBytes });
 });
 
 // Request a pairing from a public listing — same effect as redeeming a
 // code, just looked up by listing id instead of needing the code texted
-// to you directly.
+// to you directly. pledged_bytes in the body is what the redeemer saw and
+// clicked on in "Find a buddy"; redeemInvite re-checks it against the
+// invite's actual size before pairing (see the comment there).
 invitesRouter.post('/invites/public/:id/redeem', requireAuth, requireEmailVerified, async (req, res) => {
+  const expectedPledgedBytes = Number(req.body?.pledged_bytes);
+  if (!Number.isInteger(expectedPledgedBytes) || expectedPledgedBytes <= 0) {
+    return res.status(400).json({ error: 'pledged_bytes is required in the request body' });
+  }
+
   const result = await redeemInvite({
     lockQuery: `SELECT * FROM invites WHERE id = $1 AND is_public = true FOR UPDATE`,
     lockParam: req.params.id,
     redeemerAccountId: req.account.id,
+    expectedPledgedBytes,
   });
   res.status(result.status).json(result.body);
 });

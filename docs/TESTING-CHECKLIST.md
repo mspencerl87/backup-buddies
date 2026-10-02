@@ -28,6 +28,40 @@ instead of re-deriving the list from scratch each session.
 - [x] Live restore progress + ETA (file N of M, bytes so far, ~time
       remaining) instead of one frozen "Restoring…" — added in commit
       `d7cf342`, confirmed showing live updates during a restore
+- [x] Free-tier accounts can actually create a pledge/pairing — was
+      impossible (`PLEDGE_STEP_BYTES` floor of 500GB vs. `FREE_GB` of 50
+      meant the smallest legal pledge was already 10x the entire free
+      allowance). Lowered the step to 5GB in commit `3b76eab`; confirmed
+      deployed (`deploy.yml` run succeeded against `3b76eab`).
+
+## Needs testing (new — not yet exercised on testa/testb)
+
+Added by the exact-size marketplace matching fix (not yet committed as of
+this writing — see "Marketplace size-matching" below for what changed):
+
+- [ ] "Find a buddy" only ever shows one pledge size at a time (the
+      `marketplace-size` dropdown) — confirm switching it actually
+      re-queries and swaps the listed buddies, including the
+      now-you-see-it/now-you-don't case of a size with zero listings
+      (the empty-state message)
+- [ ] Redeeming a listing sends the selected size back to the API
+      (`pledged_bytes` in the POST body) and the resulting pairing's
+      `pledged_bytes` matches exactly — confirm end-to-end on
+      testa/testb, not just by reading the code
+- [ ] `GET /invites/public` without a `pledged_bytes` query param returns
+      400 — confirm the dashboard never calls it that way and that a
+      direct/manual API call gets the expected rejection
+- [ ] The redeem-time mismatch guard (`expectedPledgedBytes` check in
+      `redeemInvite`) actually fires on a 409 if forced — this needs a
+      deliberate test (e.g. two browser tabs, or a raw `curl` with a
+      `pledged_bytes` that doesn't match the listing id) since the normal
+      UI flow can't produce a mismatch on its own
+- [ ] The `pledged-gb` (create) and `marketplace-size` (browse) dropdowns
+      still show the same set of sizes after any future
+      `PLEDGE_STEP_BYTES`/`PLEDGE_MAX_BYTES` change — they're generated
+      from one shared `PLEDGE_GB_OPTIONS` list in `dashboard.html` now,
+      but that list is hand-maintained and not pulled from the API, so a
+      future API-side step/max change needs the same edit made here too
 
 ## Not yet exercised
 
@@ -45,13 +79,42 @@ file) is now fully exercised. Remaining:
 
 ## Housekeeping (not bugs)
 
-- [ ] testb's `.env` pledge is 500GB against a ~47.9GB real disk — fine
-      for what's been tested so far, but needs to be realistic (under
-      ~37GB free) to actually exercise the pledge-rejection path above
+- [ ] Pledges aren't set via `.env` at all — they're created through the
+      website's invite/redeem flow (`buddy_pairings.pledged_bytes`,
+      fixed once a pairing is created, no update route). To actually
+      exercise the disk-space-floor / pledge-enforcement rejection paths
+      on testa/testb: delete the existing pairing from the website and
+      re-invite at a small size (now possible — 5GB and up — instead of
+      the old 500GB floor) that's realistic against the ~47.9GB real
+      disk (under ~37GB free, say 30-35GB)
 - [ ] `apps/api/src/routes/stripe-webhook.js` — open product decision
       (not a bug): on `invoice.payment_failed`, relay access is paused
       immediately. TODO in that file asks whether a grace period should
       come first.
+
+## Design note: marketplace size-matching
+
+"Find a buddy" used to show every public listing (grouped into
+expandable size tiers just for readability). That meant someone who only
+needed 5GB could end up redeeming a 500GB-20TB listing — `pledged_bytes`
+is shared by both sides of the resulting pairing, so that's not a
+convenience, it's an unwanted obligation on both ends. Fixed by always
+filtering to one exact size:
+
+- `GET /invites/public` now requires a `pledged_bytes` query param and
+  only returns listings at that exact size (400 if missing/invalid)
+- The dashboard's "Find a buddy" card has its own "Show listings
+  pledging" dropdown (defaults to 50GB) instead of browsing everything
+- `POST /invites/public/:id/redeem` now requires `pledged_bytes` in the
+  body and rejects (409) if it doesn't match the listing's actual size —
+  a server-side belt-and-suspenders check in case the dashboard's filter
+  is ever stale, not just a client-side convenience
+- Direct code-based redeem (`/invites/:code/redeem`) is unchanged — two
+  people already agreed on a size out of band when one sent the other a
+  code, so there's nothing to match there
+
+Not yet committed/pushed as of this writing — see "Needs testing" above
+for what to confirm on testa/testb before and after it ships.
 
 ## Documented, intentional limits (no action needed unless priorities change)
 
