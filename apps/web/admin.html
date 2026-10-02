@@ -44,6 +44,10 @@
       <p class="error" id="accounts-error"></p>
       <div class="admin-columns" id="accounts-columns" style="display:none">
         <div class="admin-column">
+          <h2>Admins — <span class="count" id="admin-count">0</span></h2>
+          <div id="admin-accounts"></div>
+        </div>
+        <div class="admin-column">
           <h2>Free — <span class="count" id="free-count">0</span></h2>
           <div id="free-accounts"></div>
         </div>
@@ -131,12 +135,17 @@
       const buddiesHtml = a.buddies.length
         ? a.buddies.map(buddyRowHtml).join('')
         : '<div class="muted" style="font-size:0.85rem;">No buddies yet.</div>';
+      // is_admin (ADMIN_EMAILS allowlist, from routes/admin.js) gets its
+      // own badge on top of the free/paid one — it's a separate axis, not
+      // a replacement, since an admin account can also have a real
+      // subscription.
+      const adminBadge = a.is_admin ? '<span class="tier-badge admin">admin</span>' : '';
 
       return `
         <div class="account-card">
           <div class="row">
             <strong>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</strong>
-            <span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span>
+            <span style="display:inline-flex; gap:0.35rem">${adminBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span>
           </div>
           <p class="muted" style="margin:0.3rem 0 0;">
             ${a.device_count} device${Number(a.device_count) === 1 ? '' : 's'} · joined ${formatDate(a.created_at)}
@@ -196,16 +205,21 @@
       columns.style.display = 'flex';
       noMatch.style.display = 'none';
 
-      // Free vs. paid, not a height-balanced split — see the
+      // Admin / free / paid, not a height-balanced split — see the
       // .admin-columns CSS comment for why this differs from the
       // dashboard's masonry layout. Sort order applies within each column.
+      // Admins get their own column regardless of subscription status —
+      // pulled out first so one never also shows up under free/paid too.
       // Split on has_subscription, not tier — see accountCardHtml's
       // comment on why tier can't be trusted for this.
-      const free = matched.filter((a) => !a.has_subscription);
-      const paid = matched.filter((a) => a.has_subscription);
+      const admins = matched.filter((a) => a.is_admin);
+      const free = matched.filter((a) => !a.is_admin && !a.has_subscription);
+      const paid = matched.filter((a) => !a.is_admin && a.has_subscription);
 
+      document.getElementById('admin-count').textContent = admins.length;
       document.getElementById('free-count').textContent = free.length;
       document.getElementById('paid-count').textContent = paid.length;
+      document.getElementById('admin-accounts').innerHTML = admins.map(accountCardHtml).join('');
       document.getElementById('free-accounts').innerHTML = free.map(accountCardHtml).join('');
       document.getElementById('paid-accounts').innerHTML = paid.map(accountCardHtml).join('');
 

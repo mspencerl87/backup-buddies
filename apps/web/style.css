@@ -384,6 +384,10 @@ footer a {
   background: rgba(76, 175, 125, 0.15);
   color: #4caf7d;
 }
+.tier-badge.admin {
+  background: rgba(79, 140, 255, 0.15);
+  color: var(--accent);
+}
 
 .account-card .buddies {
   margin-top: 0.7rem;

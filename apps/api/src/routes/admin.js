@@ -3,6 +3,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireAdmin } from '../middleware/require-admin.js';
 import { syncSubscriptionQuantity } from './billing.js';
+import { isAdminEmail } from '../lib/admin.js';
 
 export const adminRouter = Router();
 
@@ -46,7 +47,12 @@ adminRouter.get('/admin/accounts', async (req, res) => {
        ) buddies ON true
       ORDER BY accounts.created_at DESC`,
   );
-  res.json({ accounts: result.rows });
+  // is_admin comes from ADMIN_EMAILS (lib/admin.js), not a database column
+  // — same "allowlist, not a role" model /me already uses — computed here
+  // rather than in SQL so the admin UI can give these accounts their own
+  // column instead of lumping them into free/paid like everyone else.
+  const accounts = result.rows.map((row) => ({ ...row, is_admin: isAdminEmail(row.email) }));
+  res.json({ accounts });
 });
 
 // One account's full detail — everything you'd need on a support ticket:
