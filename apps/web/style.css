@@ -8,6 +8,11 @@
   --accent-text: #0f1115;
   --danger: #ff6b6b;
   --radius: 10px;
+  /* Echoes the blue→teal gradient in assets/mark.svg, so accents in the UI
+     read as the same brand rather than a flat, unrelated blue. */
+  --accent-grad: linear-gradient(135deg, #2ec5ff, #42e6a4);
+  --accent-glow: rgba(79, 140, 255, 0.35);
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 * {
@@ -17,13 +22,22 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-  background: var(--bg);
+  background:
+    radial-gradient(900px 480px at 12% -10%, rgba(46, 197, 255, 0.08), transparent 60%),
+    radial-gradient(800px 420px at 100% 0%, rgba(66, 230, 164, 0.06), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   line-height: 1.5;
 }
 
 a {
   color: var(--accent);
+  transition: color 0.15s var(--ease);
+}
+
+a:hover {
+  color: #7db2ff;
 }
 
 header {
@@ -46,10 +60,19 @@ header .logo {
   color: var(--text);
 }
 
+header .logo:hover {
+  color: var(--text);
+}
+
 header .logo-mark {
   width: 28px;
   height: 28px;
   display: block;
+  transition: transform 0.25s var(--ease);
+}
+
+header .logo:hover .logo-mark {
+  transform: rotate(-8deg) scale(1.08);
 }
 
 header nav {
@@ -84,6 +107,10 @@ main {
 .hero h1 {
   font-size: 2.1rem;
   margin-bottom: 0.75rem;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .hero p {
@@ -97,13 +124,23 @@ main {
   display: inline-block;
   padding: 0.65rem 1.4rem;
   border-radius: var(--radius);
-  background: var(--accent);
+  background: var(--accent-grad);
   color: var(--accent-text);
   text-decoration: none;
   font-weight: 600;
   border: none;
   cursor: pointer;
   font-size: 0.95rem;
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px -6px var(--accent-glow);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .btn:disabled {
@@ -115,6 +152,13 @@ main {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.08);
+  box-shadow: none;
 }
 
 .features {
@@ -129,6 +173,13 @@ main {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.25rem;
+  transition: transform 0.2s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.feature:hover {
+  transform: translateY(-2px);
+  border-color: #394055;
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.5);
 }
 
 .feature h3 {
@@ -172,11 +223,14 @@ select {
   background: #11141a;
   color: var(--text);
   font-size: 0.95rem;
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 
 input:focus,
 select:focus {
-  outline: 1px solid var(--accent);
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 form .btn {
@@ -198,10 +252,12 @@ form .btn {
   font-weight: 600;
   font-size: 0.95rem;
   border: 1px solid var(--border);
+  transition: background-color 0.15s var(--ease), transform 0.15s var(--ease);
 }
 
 .btn-google:hover {
   background: #f1f1f1;
+  transform: translateY(-1px);
 }
 
 .divider {
@@ -258,11 +314,24 @@ footer a {
 }
 
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.5rem;
   margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-grad);
+  opacity: 0.6;
 }
 
 /* Dashboard-only: a wider page split into two balanced columns instead of
@@ -355,6 +424,11 @@ footer a {
   border-radius: var(--radius);
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
+  transition: border-color 0.2s var(--ease);
+}
+
+.account-card:hover {
+  border-color: #394055;
 }
 
 .account-card .row {
@@ -383,10 +457,12 @@ footer a {
 .tier-badge.paid {
   background: rgba(76, 175, 125, 0.15);
   color: #4caf7d;
+  box-shadow: 0 0 0 1px rgba(76, 175, 125, 0.25) inset;
 }
 .tier-badge.admin {
   background: rgba(79, 140, 255, 0.15);
   color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.25) inset;
 }
 
 .account-card .buddies {
@@ -492,6 +568,14 @@ th, td {
   text-align: left;
   padding: 0.5rem 0.4rem;
   border-bottom: 1px solid var(--border);
+}
+
+tbody tr {
+  transition: background-color 0.15s var(--ease);
+}
+
+tbody tr:hover {
+  background-color: rgba(255, 255, 255, 0.025);
 }
 
 th {
