@@ -28,7 +28,12 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       id: req.account.id,
       email: req.account.email,
       nickname: req.account.nickname,
+      // tier is set once at signup and nothing ever updates it afterward —
+      // has_subscription (from stripe_subscription_id) is what actually
+      // reflects whether this account is paying, same field billing.js's
+      // /billing/summary already uses.
       tier: req.account.tier,
+      has_subscription: Boolean(req.account.stripe_subscription_id),
       relay_status: req.account.relay_status,
       created_at: req.account.created_at,
       has_password: Boolean(req.account.password_hash),

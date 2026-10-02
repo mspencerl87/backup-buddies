@@ -123,7 +123,11 @@
     }
 
     function accountCardHtml(a) {
-      const isPaid = a.tier !== 'free';
+      // has_subscription (stripe_subscription_id IS NOT NULL, from
+      // routes/admin.js) is the real signal — accounts.tier is set once at
+      // signup and nothing ever updates it afterward, so it can't be used
+      // to tell a paying account apart from a free one.
+      const isPaid = a.has_subscription;
       const buddiesHtml = a.buddies.length
         ? a.buddies.map(buddyRowHtml).join('')
         : '<div class="muted" style="font-size:0.85rem;">No buddies yet.</div>';
@@ -132,7 +136,7 @@
         <div class="account-card">
           <div class="row">
             <strong>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</strong>
-            <span class="tier-badge${isPaid ? ' paid' : ''}">${a.tier}${a.has_subscription ? ' · subscribed' : ''}</span>
+            <span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span>
           </div>
           <p class="muted" style="margin:0.3rem 0 0;">
             ${a.device_count} device${Number(a.device_count) === 1 ? '' : 's'} · joined ${formatDate(a.created_at)}
@@ -195,8 +199,10 @@
       // Free vs. paid, not a height-balanced split — see the
       // .admin-columns CSS comment for why this differs from the
       // dashboard's masonry layout. Sort order applies within each column.
-      const free = matched.filter((a) => a.tier === 'free');
-      const paid = matched.filter((a) => a.tier !== 'free');
+      // Split on has_subscription, not tier — see accountCardHtml's
+      // comment on why tier can't be trusted for this.
+      const free = matched.filter((a) => !a.has_subscription);
+      const paid = matched.filter((a) => a.has_subscription);
 
       document.getElementById('free-count').textContent = free.length;
       document.getElementById('paid-count').textContent = paid.length;
@@ -310,8 +316,11 @@
       const methods = [];
       if (account.has_password) methods.push('password');
       if (account.has_google) methods.push('Google');
+      // stripe_subscription_id presence (not tier — see accountCardHtml's
+      // comment) is what actually reflects whether this account is paying.
+      const planLabel = account.stripe_subscription_id ? 'subscribed' : 'free';
       document.getElementById('detail-summary').textContent =
-        `${account.email} — ${account.tier} tier, relay ${account.relay_status}` +
+        `${account.email} — ${planLabel}, relay ${account.relay_status}` +
         (methods.length ? ` — signs in via ${methods.join(' & ')}` : '') +
         ` — joined ${formatDate(account.created_at)}`;
 

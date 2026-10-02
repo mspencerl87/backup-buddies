@@ -234,8 +234,11 @@
       if (account.has_password) methods.push('password');
       if (account.has_google) methods.push('Google');
       const methodNote = methods.length ? ` (signed in via ${methods.join(' & ')})` : '';
+      // has_subscription (not tier — see routes/me.js) is what actually
+      // reflects whether this account is paying.
+      const planLabel = account.has_subscription ? 'subscribed' : 'free';
       document.getElementById('account-summary').textContent =
-        `${account.email} — ${account.tier} tier${methodNote}`;
+        `${account.email} — ${planLabel}${methodNote}`;
 
       // Google accounts are verified at signup (see routes/auth.js) and
       // never see this — only password accounts that haven't clicked their
