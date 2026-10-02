@@ -1,5 +1,10 @@
+mod backup;
+mod manifest;
+mod protocol;
+mod receive;
+mod restore;
+
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -11,10 +16,8 @@ use iroh::{
     endpoint::presets::Minimal, Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
 };
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
-const ALPN: &[u8] = b"backup-buddies/test/0";
-const MAX_TEST_PAYLOAD: usize = 10 * 1024 * 1024; // 10MB cap for this connectivity-proof transfer
+use receive::{PledgeBook, PledgeState};
 
 struct Config {
     api_url: String,
@@ -22,6 +25,12 @@ struct Config {
     passphrase: SecretString,
     relay_url: RelayUrl,
     data_dir: PathBuf,
+    // Where the real files to back up live. Optional — a client that's
+    // only ever meant to receive (e.g. this machine has lots of disk and
+    // is mainly someone else's buddy) doesn't need one. None here means
+    // the periodic backup cycle is skipped entirely, but this device still
+    // accepts and stores whatever its buddy sends it.
+    backup_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -36,6 +45,7 @@ impl Config {
             .parse()
             .context("RELAY_URL is not a valid URL")?;
         let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "/data".to_string()).into();
+        let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
 
         Ok(Self {
             api_url,
@@ -43,6 +53,7 @@ impl Config {
             passphrase: SecretString::from(passphrase),
             relay_url,
             data_dir,
+            backup_dir,
         })
     }
 }
@@ -62,44 +73,6 @@ struct BuddiesResponse {
     buddy_devices: Vec<BuddyDevice>,
 }
 
-// How much of a buddy's pledge we've used (received_bytes) against how
-// much they've actually pledged us (pledged_bytes). Keyed by the buddy's
-// Iroh node id (EndpointId's string form) in the map this is stored in.
-#[derive(Clone, Copy, Default)]
-struct PledgeState {
-    pledged_bytes: u64,
-    received_bytes: u64,
-}
-
-// Shared between the accept loop (which enforces the pledge on incoming
-// data) and the outbound poll loop (which refreshes pledged_bytes from the
-// API every 30s — pledges can change if a pairing is re-created). A plain
-// std::sync::Mutex is fine here: every critical section is a quick map
-// read/write with no .await inside it, never held across one.
-type PledgeBook = Arc<Mutex<HashMap<String, PledgeState>>>;
-
-// received_bytes must survive restarts — otherwise a buddy could get a
-// fresh budget just by waiting for us to redeploy. Persisted as plain JSON
-// at DATA_DIR/usage.json: { "<node_id>": <received_bytes> }. pledged_bytes
-// itself isn't persisted — it's re-learned from the API on every poll, so
-// there's no stale-pledge risk from a crash mid-write.
-async fn load_usage_ledger(data_dir: &Path) -> HashMap<String, u64> {
-    match tokio::fs::read(data_dir.join("usage.json")).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        Err(_) => HashMap::new(),
-    }
-}
-
-async fn save_usage_ledger(data_dir: &Path, book: &PledgeBook) -> Result<()> {
-    let snapshot: HashMap<String, u64> = {
-        let book = book.lock().unwrap();
-        book.iter().map(|(id, state)| (id.clone(), state.received_bytes)).collect()
-    };
-    let json = serde_json::to_vec(&snapshot)?;
-    tokio::fs::write(data_dir.join("usage.json"), json).await?;
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
@@ -113,13 +86,43 @@ async fn main() -> Result<()> {
 
     let endpoint = Endpoint::builder(Minimal)
         .secret_key(secret_key)
-        .alpns(vec![ALPN.to_vec()])
+        .alpns(vec![protocol::ALPN.to_vec()])
         .relay_mode(RelayMode::custom([config.relay_url.clone()]))
         .bind()
         .await
         .context("failed to bind Iroh endpoint")?;
 
     tracing::info!(node_id = %endpoint_id, "backup-buddies client starting");
+
+    // `restore <buddy node id> [restore_dir]` pulls everything that buddy
+    // is holding for us and exits — a one-shot operation, not part of the
+    // normal daemon loop below. e.g.:
+    //   docker compose run --rm client restore <node-id> /data/restored
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("restore") {
+        let buddy_id: EndpointId = args
+            .get(2)
+            .context("usage: restore <buddy node id> [restore_dir]")?
+            .parse()
+            .context("not a valid Iroh node id")?;
+        let restore_dir: PathBuf =
+            args.get(3).cloned().unwrap_or_else(|| "/data/restored".to_string()).into();
+        tokio::fs::create_dir_all(&restore_dir).await?;
+
+        tracing::info!(buddy = %buddy_id, dir = %restore_dir.display(), "starting restore");
+        let restored = restore::run_restore(
+            &endpoint,
+            &config.relay_url,
+            &config.passphrase,
+            buddy_id,
+            &restore_dir,
+        )
+        .await?;
+        tracing::info!(count = restored, dir = %restore_dir.display(), "restore complete");
+
+        endpoint.close().await;
+        return Ok(());
+    }
 
     let http = reqwest::Client::new();
 
@@ -131,7 +134,7 @@ async fn main() -> Result<()> {
     // meaningfully; until then, incoming data is rejected, which is the
     // safe default for an unknown pledge).
     let pledge_book: PledgeBook = Arc::new(Mutex::new(
-        load_usage_ledger(&config.data_dir)
+        receive::load_usage_ledger(&config.data_dir)
             .await
             .into_iter()
             .map(|(id, received_bytes)| (id, PledgeState { received_bytes, ..Default::default() }))
@@ -139,7 +142,7 @@ async fn main() -> Result<()> {
     ));
 
     // Accept loop: our buddy's client may connect to *us* first. Runs for
-    // the life of the process alongside the periodic outbound test below.
+    // the life of the process alongside the periodic outbound cycle below.
     let accept_task = {
         let endpoint = endpoint.clone();
         let data_dir = config.data_dir.clone();
@@ -149,7 +152,7 @@ async fn main() -> Result<()> {
                 let data_dir = data_dir.clone();
                 let pledge_book = pledge_book.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = handle_incoming(incoming, data_dir, pledge_book).await {
+                    if let Err(err) = receive::handle_incoming(incoming, data_dir, pledge_book).await {
                         tracing::warn!(?err, "incoming connection failed");
                     }
                 });
@@ -158,10 +161,10 @@ async fn main() -> Result<()> {
     };
 
     // Periodic loop: ask the control plane who our paired buddies' devices
-    // are, and try to prove connectivity to each by sending a small
-    // encrypted test payload. This is a connectivity proof, not real
-    // backup logic — it proves registration, discovery, NAT traversal via
-    // our relay, and client-side encryption all work end to end.
+    // are, refresh their pledge, and — if BACKUP_DIR is set — push up
+    // whatever's changed there since the last cycle. When there's nothing
+    // to back up (no BACKUP_DIR configured), this still serves as the
+    // connectivity check the old test-payload loop used to be, via Ping.
     let outbound_task = {
         let endpoint = endpoint.clone();
         let http = http.clone();
@@ -187,7 +190,7 @@ async fn main() -> Result<()> {
                             // cycle — a re-created pairing can change it,
                             // and this is also how a brand-new buddy first
                             // gets enforcement enabled for incoming data
-                            // (see the accept side's "unknown buddy" check).
+                            // (see receive.rs's "unknown buddy" handling).
                             let pledged_bytes = buddy
                                 .pledged_bytes
                                 .as_deref()
@@ -199,10 +202,33 @@ async fn main() -> Result<()> {
                             }
 
                             let label = buddy.label.clone().unwrap_or_else(|| buddy.account_id.clone());
-                            match send_test_payload(&endpoint, &config, buddy_id).await {
-                                Ok(()) => tracing::info!(buddy = %label, "connectivity test succeeded"),
-                                Err(err) => {
-                                    tracing::warn!(buddy = %label, ?err, "connectivity test failed")
+
+                            if let Some(backup_dir) = &config.backup_dir {
+                                match backup::run_backup_cycle(
+                                    &endpoint,
+                                    &config.relay_url,
+                                    &config.passphrase,
+                                    &config.data_dir,
+                                    backup_dir,
+                                    buddy_id,
+                                )
+                                .await
+                                {
+                                    Ok((0, 0)) => tracing::debug!(buddy = %label, "nothing new to back up"),
+                                    Ok((put, deleted)) => tracing::info!(
+                                        buddy = %label,
+                                        files_sent = put,
+                                        files_deleted = deleted,
+                                        "backup cycle complete"
+                                    ),
+                                    Err(err) => tracing::warn!(buddy = %label, ?err, "backup cycle failed"),
+                                }
+                            } else {
+                                match ping(&endpoint, &config.relay_url, buddy_id).await {
+                                    Ok(()) => tracing::info!(buddy = %label, "connectivity check succeeded"),
+                                    Err(err) => {
+                                        tracing::warn!(buddy = %label, ?err, "connectivity check failed")
+                                    }
                                 }
                             }
                         }
@@ -269,128 +295,23 @@ async fn fetch_buddy_devices(http: &reqwest::Client, config: &Config) -> Result<
     Ok(resp.buddy_devices)
 }
 
-// Encrypts a small test payload with OUR OWN passphrase (never sent to the
-// buddy or the server) and sends it to the buddy's device. The buddy's
-// client stores the ciphertext blindly — it has no way to decrypt it. We
-// then read back their ack (a hash of what they received) to confirm the
-// round trip worked, without the buddy ever seeing plaintext.
-async fn send_test_payload(endpoint: &Endpoint, config: &Config, buddy_id: EndpointId) -> Result<()> {
-    let plaintext = format!(
-        "backup-buddies connectivity test from {} at {}",
-        endpoint.id(),
-        chrono_now(),
-    );
-
-    let recipient = age::scrypt::Recipient::new(config.passphrase.clone());
-    let encrypted = age::encrypt(&recipient, plaintext.as_bytes())
-        .context("failed to encrypt test payload")?;
-    let expected_hash = hex::encode(Sha256::digest(&encrypted));
-
-    let addr = EndpointAddr::new(buddy_id).with_relay_url(config.relay_url.clone());
-    let conn = endpoint
-        .connect(addr, ALPN)
-        .await
-        .context("failed to connect to buddy over Iroh")?;
+// Connectivity check for a buddy we're not backing anything up to (no
+// BACKUP_DIR configured) — proves registration, discovery, NAT traversal
+// via our relay, and the Iroh connection all still work, the same thing
+// the old dedicated test-payload protocol proved, now just one variant of
+// the real sync protocol instead of a second one running alongside it.
+async fn ping(endpoint: &Endpoint, relay_url: &RelayUrl, buddy_id: EndpointId) -> Result<()> {
+    let addr = EndpointAddr::new(buddy_id).with_relay_url(relay_url.clone());
+    let conn = endpoint.connect(addr, protocol::ALPN).await.context("failed to connect to buddy over Iroh")?;
 
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
-    send.write_all(&encrypted).await.context("failed to send test payload")?;
+    protocol::write_frame(&mut send, &protocol::SyncRequest::Ping).await?;
     send.finish().context("failed to finish send stream")?;
 
-    let ack = recv
-        .read_to_end(1024)
-        .await
-        .context("failed to read ack from buddy")?;
-    let ack = String::from_utf8_lossy(&ack);
-
-    if ack.trim() != expected_hash {
-        anyhow::bail!("buddy's ack did not match — got {ack:?}, expected {expected_hash}");
+    let ack: protocol::SyncAck =
+        protocol::read_frame(&mut recv).await.context("failed to read ack from buddy")?;
+    if !ack.ok {
+        anyhow::bail!("buddy rejected ping: {}", ack.error.unwrap_or_default());
     }
-
     Ok(())
-}
-
-// Accept-side handler: stores whatever ciphertext arrives, verbatim, under
-// a filename keyed by the sender — never attempts to decrypt it, since
-// this device has no reason to ever hold the sender's passphrase.
-//
-// Pledge enforcement lives here: a sender only gets to store up to what
-// they've pledged us (buddy_pairings.pledged_bytes, refreshed into
-// pledge_book every 30s by the outbound poll loop). An unrecognized
-// sender — no pledge on file at all, e.g. the pairing was revoked, or we
-// haven't polled since they first appeared — is treated as pledging
-// nothing, so they're rejected rather than silently allowed through.
-async fn handle_incoming(
-    incoming: iroh::endpoint::Incoming,
-    data_dir: PathBuf,
-    pledge_book: PledgeBook,
-) -> Result<()> {
-    let connecting = incoming.accept()?;
-    let conn = connecting.await?;
-    let remote = conn.remote_id();
-    let remote_id = remote.to_string();
-
-    let (mut send, mut recv) = conn.accept_bi().await.context("failed to accept stream")?;
-    let data = recv
-        .read_to_end(MAX_TEST_PAYLOAD)
-        .await
-        .context("failed to read incoming payload")?;
-
-    // Decide accept/reject before writing anything or updating the
-    // ledger — a rejected payload leaves no trace on disk.
-    let decision = {
-        let mut book = pledge_book.lock().unwrap();
-        let state = book.entry(remote_id.clone()).or_default();
-        if state.received_bytes.saturating_add(data.len() as u64) > state.pledged_bytes {
-            Err((state.pledged_bytes, state.received_bytes))
-        } else {
-            state.received_bytes += data.len() as u64;
-            Ok(())
-        }
-    };
-
-    let Err((pledged_bytes, received_bytes)) = decision else {
-        // Accepted — fall through to the existing write-and-ack path below.
-        let hash = hex::encode(Sha256::digest(&data));
-        let out_path = data_dir
-            .join("received")
-            .join(format!("{}-test.age", remote.fmt_short()));
-        tokio::fs::write(&out_path, &data).await?;
-
-        if let Err(err) = save_usage_ledger(&data_dir, &pledge_book).await {
-            // Don't fail the whole exchange over a ledger write hiccup —
-            // worst case we under-persist by one payload's worth and a
-            // restart re-allows it, which is the safe direction to err in.
-            tracing::warn!(?err, "failed to persist usage ledger");
-        }
-
-        send.write_all(hash.as_bytes()).await?;
-        send.finish()?;
-        send.stopped().await.ok();
-
-        tracing::info!(from = %remote, bytes = data.len(), saved_to = %out_path.display(), "received encrypted test payload");
-        return Ok(());
-    };
-
-    tracing::warn!(
-        from = %remote,
-        attempted_bytes = data.len(),
-        pledged_bytes,
-        received_bytes,
-        "rejected incoming payload — would exceed this buddy's pledge"
-    );
-    // Distinct, readable ack instead of the real hash: the sender's
-    // hash-comparison error path (send_test_payload) surfaces this exact
-    // string in its own "ack did not match" message, so the rejection
-    // reason is visible on their side too, not just ours.
-    send.write_all(b"PLEDGE_EXCEEDED").await.ok();
-    send.finish().ok();
-    send.stopped().await.ok();
-    return Ok(());
-}
-
-fn chrono_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }

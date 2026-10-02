@@ -7,13 +7,21 @@
 #   curl -fsSL https://app.filegarden.net/client/install.sh | bash
 #
 # Quick start once you have this directory:
-#   1. Copy .env.example to .env and fill in the two values it asks for
-#      (from your dashboard's Devices card).
+#   1. Copy .env.example to .env and fill in the values it asks for (from
+#      your dashboard's Devices card), including BACKUP_DIR_HOST if you
+#      want this device to back files up, not just receive them.
 #   2. docker compose up -d        (builds the image locally the first
 #                                    time — a few minutes — then starts it)
 #   3. docker compose logs -f   — you should see "registered this device's
 #      node id with the API", then (once your buddy's client is also
-#      running) "connectivity test succeeded".
+#      running and BACKUP_DIR_HOST is set) "backup cycle complete", or
+#      "connectivity check succeeded" if this device isn't backing
+#      anything up itself.
+#
+# To restore what a buddy is holding for you:
+#   docker compose run --rm client restore <buddy's node id> /data/restored
+# (find their node id on your dashboard's Buddies card). Files land under
+# DATA_DIR_HOST/restored on this machine.
 
 services:
   client:
@@ -23,6 +31,10 @@ services:
     # image: ghcr.io/yourusername/backup-buddies/client:latest
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Fixed mount point inside the container — BACKUP_DIR_HOST in .env
+      # controls what's mounted there on the host side, below.
+      - BACKUP_DIR=/backup
     volumes:
       # A real, visible folder on this machine — not an opaque
       # Docker-managed volume — so it's easy to find, move, or point your
@@ -30,3 +42,9 @@ services:
       # DATA_DIR_HOST in .env to use somewhere else instead. Created
       # automatically if it doesn't exist.
       - ${DATA_DIR_HOST}:/data
+      # The folder you're backing up. Mounted read-only — this client only
+      # ever needs to read these files, never write them. Falls back to an
+      # empty local folder when BACKUP_DIR_HOST isn't set in .env, which
+      # just means there's nothing to back up (fine for a receive-only
+      # device).
+      - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro
