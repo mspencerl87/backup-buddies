@@ -456,6 +456,15 @@ const INDEX_HTML: &str = r#"<!doctype html>
     width: 100%; background: #11141a; border: 1px solid var(--border); border-radius: 8px;
     color: var(--text); padding: 0.5rem 0.7rem; font-size: 0.85rem;
   }
+  .browse-breadcrumb {
+    display: flex; align-items: center; gap: 0.3rem; margin-top: 0.6rem;
+    font-size: 0.8rem; flex-wrap: wrap;
+  }
+  .browse-breadcrumb a { color: var(--accent); text-decoration: none; }
+  .browse-breadcrumb a:hover { text-decoration: underline; }
+  .browse-breadcrumb .crumb-sep { color: var(--text-muted); }
+  .file-row .file-icon { width: 1.1em; text-align: center; flex-shrink: 0; }
+  .file-row .folder-link { color: var(--text); font-weight: 600; }
   .modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 0.75rem; }
   .modal-actions .muted { font-size: 0.78rem; }
   .file-list { overflow-y: auto; margin-top: 0.75rem; border-top: 1px solid var(--border); }
@@ -516,6 +525,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
     <div class="modal-search">
       <input type="text" id="browse-search" placeholder="Search by path…">
     </div>
+    <div class="browse-breadcrumb" id="browse-breadcrumb"></div>
     <div class="modal-actions">
       <label class="muted"><input type="checkbox" id="browse-select-all"> select all</label>
       <span class="muted" id="browse-count"></span>
@@ -655,14 +665,27 @@ async function restoreNow(nodeId, btn, resultEl) {
 }
 
 // --- File browser modal ---------------------------------------------------
-// Fetches a buddy's file list once when opened and does all search/filter
-// and selection client-side — simplest approach, and plenty fast even at a
-// few thousand rows, which is the scale this is built for.
-const browseState = { nodeId: null, label: "", files: [], selected: new Set() };
+// Fetches a buddy's file list once when opened (a flat [{path, size}]
+// list — that's all the sync protocol has ever reported, there's no real
+// directory listing on the wire) and builds a folder tree from it
+// client-side, so browsing feels like a normal folder view: one level at
+// a time, click into a folder, breadcrumb back out. Typing in the search
+// box switches to a flat, full-path-matching view across every file
+// instead — search and "browse one folder" want different shapes, and
+// trying to make one view do both gets confusing fast.
+const browseState = {
+  nodeId: null,
+  label: "",
+  files: [], // flat, as returned by the server
+  tree: null, // built from files by buildFileTree()
+  currentPath: "", // "" = root; "testdir"; "a/b"; ... — folder currently open
+  selected: new Set(),
+};
 
 const browseModal = document.getElementById("browse-modal");
 const browseTitle = document.getElementById("browse-title");
 const browseSearch = document.getElementById("browse-search");
+const browseBreadcrumb = document.getElementById("browse-breadcrumb");
 const browseList = document.getElementById("browse-list");
 const browseCount = document.getElementById("browse-count");
 const browseSelectAll = document.getElementById("browse-select-all");
@@ -674,55 +697,207 @@ function closeBrowseModal() {
   browseModal.classList.remove("open");
   browseState.nodeId = null;
   browseState.files = [];
+  browseState.tree = null;
+  browseState.currentPath = "";
   browseState.selected.clear();
 }
 
-function renderBrowseList() {
-  const query = browseSearch.value.trim().toLowerCase();
-  const filtered = query
-    ? browseState.files.filter((f) => f.path.toLowerCase().includes(query))
-    : browseState.files;
+// { dirs: Map<name, node>, items: [{name, path, size}] } per directory.
+function buildFileTree(files) {
+  const root = { dirs: new Map(), items: [] };
+  for (const f of files) {
+    const parts = f.path.split("/").filter(Boolean);
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const name = parts[i];
+      if (!node.dirs.has(name)) node.dirs.set(name, { dirs: new Map(), items: [] });
+      node = node.dirs.get(name);
+    }
+    const name = parts.length > 0 ? parts[parts.length - 1] : f.path;
+    node.items.push({ name, path: f.path, size: f.size });
+  }
+  return root;
+}
+
+function nodeAtPath(path) {
+  let node = browseState.tree;
+  if (!node || !path) return node;
+  for (const part of path.split("/")) {
+    node = node.dirs.get(part);
+    if (!node) return null;
+  }
+  return node;
+}
+
+// Every file path recursively under a tree node — what a folder's
+// checkbox or "Restore" button acts on.
+function collectPaths(node) {
+  let paths = node.items.map((it) => it.path);
+  for (const child of node.dirs.values()) paths = paths.concat(collectPaths(child));
+  return paths;
+}
+
+function renderBreadcrumb() {
+  const parts = browseState.currentPath ? browseState.currentPath.split("/") : [];
+  browseBreadcrumb.innerHTML = "";
+
+  const rootLink = document.createElement("a");
+  rootLink.href = "javascript:void(0)";
+  rootLink.textContent = "Home";
+  rootLink.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    browseState.currentPath = "";
+    renderBrowseView();
+  });
+  browseBreadcrumb.appendChild(rootLink);
+
+  let built = "";
+  for (const part of parts) {
+    built = built ? built + "/" + part : part;
+    const sep = document.createElement("span");
+    sep.className = "crumb-sep";
+    sep.textContent = "/";
+    browseBreadcrumb.appendChild(sep);
+
+    const link = document.createElement("a");
+    link.href = "javascript:void(0)";
+    link.textContent = part;
+    const target = built;
+    link.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      browseState.currentPath = target;
+      renderBrowseView();
+    });
+    browseBreadcrumb.appendChild(link);
+  }
+}
+
+function makeFileRow(item) {
+  const row = document.createElement("div");
+  row.className = "file-row";
+  row.innerHTML = `
+    <input type="checkbox" class="file-pick">
+    <span class="file-icon">📄</span>
+    <span class="path">${item.name}</span>
+    <span class="size">${fmtBytes(item.size)}</span>
+    <button class="secondary file-restore-one">Restore</button>
+  `;
+  const checkbox = row.querySelector(".file-pick");
+  checkbox.checked = browseState.selected.has(item.path);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) browseState.selected.add(item.path);
+    else browseState.selected.delete(item.path);
+    updateSelectedControls();
+  });
+  row.querySelector(".file-restore-one").addEventListener("click", async (ev) => {
+    const btn = ev.target;
+    btn.disabled = true;
+    browseResult.textContent = "Restoring " + item.path + "…";
+    browseResult.style.color = "";
+    try {
+      const body = await doRestore(browseState.nodeId, [item.path]);
+      browseResult.textContent = describeRestoreResult(body);
+      browseResult.style.color = "var(--ok)";
+    } catch (err) {
+      browseResult.textContent = "Restore failed: " + err.message;
+      browseResult.style.color = "var(--danger)";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return row;
+}
+
+function makeFolderRow(name, node, path) {
+  const paths = collectPaths(node);
+  const row = document.createElement("div");
+  row.className = "file-row";
+  row.innerHTML = `
+    <input type="checkbox" class="file-pick">
+    <span class="file-icon">📁</span>
+    <a href="javascript:void(0)" class="path folder-link">${name}/</a>
+    <span class="size">${paths.length} file(s)</span>
+    <button class="secondary folder-restore">Restore</button>
+  `;
+  const checkbox = row.querySelector(".file-pick");
+  checkbox.checked = paths.length > 0 && paths.every((p) => browseState.selected.has(p));
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) paths.forEach((p) => browseState.selected.add(p));
+    else paths.forEach((p) => browseState.selected.delete(p));
+    renderBrowseView();
+  });
+  row.querySelector(".folder-link").addEventListener("click", (ev) => {
+    ev.preventDefault();
+    browseState.currentPath = path;
+    renderBrowseView();
+  });
+  row.querySelector(".folder-restore").addEventListener("click", async (ev) => {
+    const btn = ev.target;
+    btn.disabled = true;
+    browseResult.textContent = "Restoring " + paths.length + " file(s) from " + name + "/…";
+    browseResult.style.color = "";
+    try {
+      const body = await doRestore(browseState.nodeId, paths);
+      browseResult.textContent = describeRestoreResult(body);
+      browseResult.style.color = "var(--ok)";
+    } catch (err) {
+      browseResult.textContent = "Restore failed: " + err.message;
+      browseResult.style.color = "var(--danger)";
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return row;
+}
+
+// Folder view: breadcrumb + the current directory's subfolders (sorted)
+// then its own files (sorted) — one level at a time, not the whole tree
+// flattened out.
+function renderBrowseFolder() {
+  browseBreadcrumb.style.display = "flex";
+  if (nodeAtPath(browseState.currentPath) === null) browseState.currentPath = "";
+  renderBreadcrumb();
+
+  const node = nodeAtPath(browseState.currentPath) || browseState.tree || { dirs: new Map(), items: [] };
+  const dirNames = Array.from(node.dirs.keys()).sort();
+  const items = node.items.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  browseList.innerHTML = "";
+  for (const name of dirNames) {
+    const path = browseState.currentPath ? browseState.currentPath + "/" + name : name;
+    browseList.appendChild(makeFolderRow(name, node.dirs.get(name), path));
+  }
+  for (const item of items) {
+    browseList.appendChild(makeFileRow(item));
+  }
+
+  const visiblePaths = collectPaths(node);
+  browseCount.textContent = dirNames.length + " folder(s), " + items.length + " file(s) here";
+  browseSelectAll.checked = visiblePaths.length > 0 && visiblePaths.every((p) => browseState.selected.has(p));
+  updateSelectedControls();
+}
+
+// Search view: flat, full-path matches across everything the buddy has,
+// regardless of which folder is open — someone searching usually doesn't
+// remember which folder a file lives in.
+function renderBrowseSearch(query) {
+  browseBreadcrumb.style.display = "none";
+  const filtered = browseState.files.filter((f) => f.path.toLowerCase().includes(query));
 
   browseCount.textContent = filtered.length + " of " + browseState.files.length + " file(s)";
   browseList.innerHTML = "";
-
   for (const f of filtered) {
-    const row = document.createElement("div");
-    row.className = "file-row";
-    const checked = browseState.selected.has(f.path) ? "checked" : "";
-    row.innerHTML = `
-      <input type="checkbox" class="file-pick" ${checked}>
-      <span class="path">${f.path}</span>
-      <span class="size">${fmtBytes(f.size)}</span>
-      <button class="secondary file-restore-one">Restore</button>
-    `;
-    const checkbox = row.querySelector(".file-pick");
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) browseState.selected.add(f.path);
-      else browseState.selected.delete(f.path);
-      updateSelectedControls();
-    });
-    row.querySelector(".file-restore-one").addEventListener("click", async (ev) => {
-      const btn = ev.target;
-      btn.disabled = true;
-      browseResult.textContent = "Restoring " + f.path + "…";
-      browseResult.style.color = "";
-      try {
-        const body = await doRestore(browseState.nodeId, [f.path]);
-        browseResult.textContent = describeRestoreResult(body);
-        browseResult.style.color = "var(--ok)";
-      } catch (err) {
-        browseResult.textContent = "Restore failed: " + err.message;
-        browseResult.style.color = "var(--danger)";
-      } finally {
-        btn.disabled = false;
-      }
-    });
-    browseList.appendChild(row);
+    browseList.appendChild(makeFileRow({ name: f.path, path: f.path, size: f.size }));
   }
 
   browseSelectAll.checked = filtered.length > 0 && filtered.every((f) => browseState.selected.has(f.path));
   updateSelectedControls();
+}
+
+function renderBrowseView() {
+  const query = browseSearch.value.trim().toLowerCase();
+  if (query) renderBrowseSearch(query);
+  else renderBrowseFolder();
 }
 
 function updateSelectedControls() {
@@ -735,12 +910,15 @@ async function openBrowseModal(nodeId, label) {
   browseState.nodeId = nodeId;
   browseState.label = label;
   browseState.files = [];
+  browseState.tree = null;
+  browseState.currentPath = "";
   browseState.selected.clear();
   browseSearch.value = "";
   browseResult.textContent = "";
   browseTitle.textContent = "Files from " + label;
   browseCount.textContent = "";
   browseList.innerHTML = "";
+  browseBreadcrumb.innerHTML = "";
   browseModal.classList.add("open");
 
   try {
@@ -748,7 +926,8 @@ async function openBrowseModal(nodeId, label) {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
     browseState.files = (body.files || []).slice().sort((a, b) => a.path.localeCompare(b.path));
-    renderBrowseList();
+    browseState.tree = buildFileTree(browseState.files);
+    renderBrowseView();
   } catch (err) {
     browseList.innerHTML = "";
     browseCount.textContent = "";
@@ -757,7 +936,7 @@ async function openBrowseModal(nodeId, label) {
   }
 }
 
-browseSearch.addEventListener("input", renderBrowseList);
+browseSearch.addEventListener("input", renderBrowseView);
 document.getElementById("browse-close").addEventListener("click", closeBrowseModal);
 browseModal.addEventListener("click", (ev) => {
   if (ev.target === browseModal) closeBrowseModal();
@@ -765,15 +944,15 @@ browseModal.addEventListener("click", (ev) => {
 
 browseSelectAll.addEventListener("change", () => {
   const query = browseSearch.value.trim().toLowerCase();
-  const filtered = query
-    ? browseState.files.filter((f) => f.path.toLowerCase().includes(query))
-    : browseState.files;
+  const paths = query
+    ? browseState.files.filter((f) => f.path.toLowerCase().includes(query)).map((f) => f.path)
+    : collectPaths(nodeAtPath(browseState.currentPath) || browseState.tree || { dirs: new Map(), items: [] });
   if (browseSelectAll.checked) {
-    for (const f of filtered) browseState.selected.add(f.path);
+    paths.forEach((p) => browseState.selected.add(p));
   } else {
-    for (const f of filtered) browseState.selected.delete(f.path);
+    paths.forEach((p) => browseState.selected.delete(p));
   }
-  renderBrowseList();
+  renderBrowseView();
 });
 
 browseRestoreSelected.addEventListener("click", async () => {
