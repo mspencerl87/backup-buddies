@@ -5,7 +5,10 @@ import { stripe } from '../lib/stripe.js';
 
 export const billingRouter = Router();
 
-const FREE_GB = 50;
+// Also enforced (not just reported) in invites.js — the first 50GB an
+// account has pledged, across all its active pairings, costs nothing;
+// pledging past that requires an active Stripe subscription.
+export const FREE_GB = 50;
 const BYTES_PER_GB = 1024 ** 3;
 const USD_PER_TB_MONTH = 3;
 
@@ -14,7 +17,11 @@ const USD_PER_TB_MONTH = 3;
 // being pledged to are symmetric). This is what gets billed, per the
 // "billed on pledged storage" model: a subscription quantity that only
 // moves when a pairing is created or ends, not a live usage meter.
-async function pledgedGBForAccount(accountId) {
+//
+// Exported so invites.js can enforce the free allowance at the point a
+// pledge is actually made (invite creation and redemption), not just
+// report it after the fact here.
+export async function pledgedGBForAccount(accountId) {
   const result = await pool.query(
     `SELECT COALESCE(SUM(pledged_bytes), 0) AS total_bytes
        FROM buddy_pairings

@@ -186,6 +186,25 @@
       return new Date(iso).toLocaleDateString();
     }
 
+    // Shared by every place an API call can come back blocked by the free
+    // storage allowance (invite creation, direct redeem, marketplace
+    // redeem) — shows the server's explanation plus a jump straight to
+    // the Billing card instead of leaving the person to go find it.
+    function showBlockedError(errorEl, data, fallback) {
+      errorEl.textContent = '';
+      errorEl.appendChild(document.createTextNode(data.error || fallback));
+      if (data.requires_subscription) {
+        const link = document.createElement('a');
+        link.href = '#billing';
+        link.textContent = 'Go to Billing';
+        link.style.marginLeft = '0.5rem';
+        link.addEventListener('click', () => {
+          document.getElementById('billing').scrollIntoView({ behavior: 'smooth' });
+        });
+        errorEl.appendChild(link);
+      }
+    }
+
     async function loadMe() {
       const res = await fetch('/api/me', { credentials: 'same-origin' });
       if (res.status === 401) {
@@ -478,7 +497,7 @@
             });
             const data = await parseJsonResponse(res);
             if (!res.ok) {
-              errorEl.textContent = data.error || 'Could not request this pairing.';
+              showBlockedError(errorEl, data, 'Could not request this pairing.');
               btn.disabled = false;
               return;
             }
@@ -554,7 +573,7 @@
         const data = await parseJsonResponse(res);
 
         if (!res.ok) {
-          errorEl.textContent = data.error || 'Could not create invite.';
+          showBlockedError(errorEl, data, 'Could not create invite.');
           return;
         }
 
@@ -580,7 +599,7 @@
         const data = await parseJsonResponse(res);
 
         if (!res.ok) {
-          errorEl.textContent = data.error || 'Could not redeem code.';
+          showBlockedError(errorEl, data, 'Could not redeem code.');
           return;
         }
 

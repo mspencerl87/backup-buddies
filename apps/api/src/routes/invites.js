@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
-import { syncSubscriptionQuantity } from './billing.js';
+import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
 
 export const invitesRouter = Router();
 
@@ -44,6 +44,20 @@ invitesRouter.post('/invites', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'note must be a string' });
   }
 
+  // First line of defense against pledging past the free allowance with no
+  // way to pay for it: this doesn't commit anything by itself (an invite
+  // only becomes a real pledge once someone redeems it — see the same
+  // check, done for real, in redeemInvite below), but there's no reason to
+  // let someone generate a code for storage they can't legally accept.
+  const newPledgeGB = pledgedBytes / GB;
+  const currentPledgeGB = await pledgedGBForAccount(req.account.id);
+  if (currentPledgeGB + newPledgeGB > FREE_GB && !req.account.stripe_subscription_id) {
+    return res.status(402).json({
+      error: `Creating this invite would bring your pledged total to ${currentPledgeGB + newPledgeGB}GB, over the ${FREE_GB}GB free allowance. Subscribe first (Billing, on your dashboard), then create the invite.`,
+      requires_subscription: true,
+    });
+  }
+
   const code = generateInviteCode();
   const result = await pool.query(
     `INSERT INTO invites (code, inviter_account_id, pledged_bytes, is_public, note)
@@ -69,6 +83,22 @@ invitesRouter.get('/invites', requireAuth, async (req, res) => {
   res.json({ invites: result.rows });
 });
 
+// Same query as billing.js's pledgedGBForAccount, but run on the
+// transaction's own client so it sees a consistent snapshot under the
+// invite row's lock — two people redeeming invites from/to the same
+// account at the same instant should never both be let through past the
+// free allowance just because neither saw the other's pairing yet.
+async function pledgedGBForAccountTx(client, accountId) {
+  const result = await client.query(
+    `SELECT COALESCE(SUM(pledged_bytes), 0) AS total_bytes
+       FROM buddy_pairings
+      WHERE (account_a_id = $1 OR account_b_id = $1)
+        AND status = 'active'`,
+    [accountId],
+  );
+  return Math.ceil(Number(result.rows[0].total_bytes) / GB);
+}
+
 // Shared by both redeem routes below (private code, or public marketplace
 // listing): locks the invite row, validates it, creates the resulting
 // buddy_pairings row, and marks the invite redeemed — all in one
@@ -93,6 +123,49 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId }) {
     if (invite.inviter_account_id === redeemerAccountId) {
       await client.query('ROLLBACK');
       return { status: 400, body: { error: "you can't redeem your own invite" } };
+    }
+
+    // The real enforcement of the free allowance: creating this pairing is
+    // the moment the pledge actually becomes binding on both sides (see
+    // pledgedGBForAccount in billing.js — it only counts *active*
+    // pairings, not invites). Checked here, inside the same transaction
+    // and lock as the insert below, rather than relying on the
+    // best-effort check in POST /invites, which can't see pairings
+    // created since the invite was issued or a subscription that's since
+    // lapsed.
+    const newPledgeGB = Math.ceil(Number(invite.pledged_bytes) / GB);
+    const inviterCurrentGB = await pledgedGBForAccountTx(client, invite.inviter_account_id);
+    const redeemerCurrentGB = await pledgedGBForAccountTx(client, redeemerAccountId);
+    const subsResult = await client.query(
+      `SELECT id, stripe_subscription_id FROM accounts WHERE id = ANY($1::uuid[])`,
+      [[invite.inviter_account_id, redeemerAccountId]],
+    );
+    const hasSubscription = new Map(
+      subsResult.rows.map((row) => [row.id, Boolean(row.stripe_subscription_id)]),
+    );
+
+    if (
+      inviterCurrentGB + newPledgeGB > FREE_GB &&
+      !hasSubscription.get(invite.inviter_account_id)
+    ) {
+      await client.query('ROLLBACK');
+      return {
+        status: 402,
+        body: {
+          error:
+            "This pairing can't be accepted — it would put the invite creator over their 50GB free allowance, and they don't have an active subscription.",
+        },
+      };
+    }
+    if (redeemerCurrentGB + newPledgeGB > FREE_GB && !hasSubscription.get(redeemerAccountId)) {
+      await client.query('ROLLBACK');
+      return {
+        status: 402,
+        body: {
+          error: `Accepting this would bring your pledged total to ${redeemerCurrentGB + newPledgeGB}GB, over the ${FREE_GB}GB free allowance. Subscribe first (Billing, on your dashboard), then try again.`,
+          requires_subscription: true,
+        },
+      };
     }
 
     const pairingResult = await client.query(
