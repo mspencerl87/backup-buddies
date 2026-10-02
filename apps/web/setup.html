@@ -132,13 +132,32 @@ cd backup-buddies-client</code></pre>
     <section class="about-section">
       <h2>What this version actually does</h2>
       <p class="muted">
-        This first release of the client proves the pipe works end to end —
-        your machine, your buddy's machine, and the relay in between — using
-        the same client-side encryption real backups will use. It is not yet
-        doing full folder backup and restore; that's the next piece being
-        built on top of this foundation. If you're trying this out, expect
-        a "connectivity test succeeded" log line, not a working backup yet.
+        This is a real, working backup client, not just a connectivity demo
+        — your buddy's machine genuinely ends up holding a usable, encrypted
+        copy of your files.
       </p>
+      <div class="split-table">
+        <div class="split-col">
+          <h3>Does</h3>
+          <ul>
+            <li>Scans your folder roughly every 30 seconds and sends only what's new or changed — unchanged files aren't re-sent each cycle</li>
+            <li>Mirrors deletions too, so your buddy's copy matches yours rather than only ever growing</li>
+            <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
+            <li>Connects directly to your buddy's device when possible, falling back to the relay automatically when it's not</li>
+            <li>Keeps multiple versions of a file, not just the latest — you can browse and restore an earlier version, not only what's currently there</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser, and one-click restore</li>
+            <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
+          </ul>
+        </div>
+        <div class="split-col">
+          <h3>Known limits, for now</h3>
+          <ul>
+            <li>The backup cycle runs on a fixed ~30 second schedule — not yet configurable</li>
+            <li>Backs up the whole folder you point it at — no per-file or pattern-based exclude list yet</li>
+            <li>The local status dashboard has no login of its own — see its section below before exposing that port beyond your own network</li>
+          </ul>
+        </div>
+      </div>
     </section>
 
     <section class="about-section">
