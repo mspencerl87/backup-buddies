@@ -366,3 +366,24 @@ other migration there).
       and (b) `devices.last_seen_at` history turned into an actual uptime
       percentage rather than a point-in-time timestamp. Worth it only if
       self-reports turn out unreliable in practice.
+- [ ] **Reconciliation against the buddy's actual state, not just the
+      local manifest.** Raised by Spencer after manually `rm -r`'ing
+      files on testb's disk (bypassing the protocol) and the sender
+      never noticing — do after the current deadlock-fix re-test is
+      clean. Right now `run_backup_cycle` only ever diffs local files
+      against its own manifest (what it *believes* it already sent); a
+      failed `put` does retry automatically next cycle (manifest isn't
+      updated on failure, so it naturally stays in the "changed" diff —
+      that part already works, confirmed by the deadlock-fix finding
+      above), but if the manifest and the buddy's actual stored files
+      ever drift for any reason *outside* that normal put/delete flow —
+      manual filesystem surgery on the receiver, a bug, partial data
+      loss on their end, restoring from an old snapshot — the sender has
+      no way to detect it. Nothing about the local source file changed,
+      so it's never re-evaluated. Proposed fix: periodically (not every
+      30s cycle — this is heavier) call the buddy's existing `List`
+      request (already used by restore/browse) and diff the *response*
+      against the manifest too, not just local-vs-manifest. Any mismatch
+      (buddy's missing something the manifest thinks landed, or has
+      something stale) triggers a re-send or at minimum a loud,
+      visible warning rather than silent, permanent drift.
