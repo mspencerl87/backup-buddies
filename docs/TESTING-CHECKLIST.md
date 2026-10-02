@@ -83,20 +83,41 @@ clean. Not yet tested against real traffic.
       `apps/client/src/main.rs`: `DASHBOARD_PORT` now drives the actual
       bind address (`DASHBOARD_BIND` still works as a full-address
       override). `cargo build`/`test`/`clippy --all-targets` all clean.
-- [ ] Apply to testa/testb: update both `docker-compose.yml`s (add
-      `network_mode: host`, drop the now-ignored `ports:` section),
-      confirm `DASHBOARD_PORT`/`SYNC_PORT` are still distinct between the
-      two (already true: 8080/8081 and 11235/11236), pull the new image,
-      restart both, and confirm the dashboard is still reachable at its
-      usual address/port after losing Docker's port mapping
-- [ ] Real test: two clients on an actual shared LAN (e.g. two machines
-      on the same home wifi, not same-host containers) — confirm the
-      `"found a buddy on the local network"` log line appears on both
-      sides and the dashboard's buddy card shows direct, not relay
+- [x] Applied to testa/testb: both `docker-compose.yml`s updated
+      (`network_mode: host`, `ports:` section dropped), `DASHBOARD_PORT`/
+      `SYNC_PORT` confirmed still distinct (8080/8081, 11235/11236),
+      image pulled, both restarted, both dashboards reachable at their
+      usual addresses afterward.
+- [x] Confirmed working on testa/testb (2026-10-02): both sides logged
+      `"found a buddy on the local network (mDNS)"` for each other, and
+      the dashboard buddy card switched from "via relay" to
+      **"direct, 0ms"** for a real transfer (7 files, 4.0 GB). This is
+      same-host, not genuinely cross-network, but it's real discovery +
+      a real connection using the LAN path, not just discovery running
+      uselessly alongside relay traffic.
+- [x] Log-noise fix verified: swarm-discovery was re-firing
+      `DiscoveryEvent::Discovered` for the same already-known peer every
+      ~1s, logged at INFO — drowned out everything else within seconds
+      of startup on testa/testb. Fixed (log first sighting only, DEBUG
+      for repeats) and confirmed clean in a fresh restart's logs — one
+      `"found a buddy"` line, no flood, swarm-discovery's own startup
+      chatter quieted too (commit `679656f`).
+- [ ] Real cross-network test: two clients on an *actual* separate LAN
+      from each other (e.g. a machine on home wifi vs. one on a phone
+      hotspot, or two genuinely different physical networks) — same-host
+      testa/testb can't rule out something that only works because
+      they're unusually close (same machine), even though the mDNS
+      result above is a good sign. Deferred by Spencer for later.
+- [ ] Pledge-cap rejection re-test: the original "lets do it" test
+      (`pledge-test-*.bin` files meant to push testb's pledge from testa
+      past 5.0 GB and get the last one rejected) got interrupted by the
+      manual `rm`/ledger-reset detour and hasn't been cleanly re-run
+      since. Deferred by Spencer for later.
 - [ ] Confirm two buddies on *different* networks still behave exactly
       as before this change (mDNS finds nothing, falls through to
       relay/SYNC_PORT direct-over-internet) — must be a strict addition,
-      never a regression
+      never a regression. Same underlying need as the cross-network test
+      above — one test covers both.
 - [ ] Confirm container restart doesn't leave stale mDNS records
       (re-advertise cleanly on startup, old record expires on the other
       side within a reasonable time — `DiscoveryEvent::Expired`)
