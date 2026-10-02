@@ -23,11 +23,14 @@ instead of re-deriving the list from scratch each session.
       (`data/restored/<buddy>/`) — fixed in commit `a771d4c`
 - [x] Plain "Restore" on a single live (non-deleted) file — confirmed
       (`bigfile.bin`, 2.0 MB in 3.5s via relay)
+- [x] "Restore all" on a buddy with a mix of live files — confirmed
+      (7 files, 2.0 MB in 17.6s via relay)
 
 ## Not yet exercised
 
-- [ ] "Restore all" on a buddy with a mix of live files — the hang fix
-      covers it too, but never watched a multi-file batch complete
+Restore path (single file, all files, per-version restore of a deleted
+file) is now fully exercised. Remaining:
+
 - [ ] Pledge-enforcement rejection: a buddy sending more than they're
       pledged should be rejected — never triggered
 - [ ] Disk-space-floor rejection (2GB flat / 5% of filesystem,
@@ -52,3 +55,16 @@ instead of re-deriving the list from scratch each session.
 - Backup cycle is a fixed ~30s, not configurable
 - No per-file/pattern exclude list for what gets backed up
 - Local status dashboard has no login of its own
+
+## Flagged, not yet scoped
+
+- [ ] Restore UX for large transfers: a restore blocks the "Files from
+      <buddy>" modal with a single "Restoring…" message and no
+      per-file/byte progress until the whole batch finishes — fine for
+      a 2MB test, but gives no feedback on a multi-GB/TB restore and no
+      way to tell it's still working vs. stuck. Raised 2026-10-02.
+      Worth deciding: does the restore need to keep running if the
+      modal is closed (it already does — closing the modal doesn't
+      cancel the in-flight fetch, it just stops showing the result),
+      and does it need actual progress (file N of M, bytes so far) or
+      just a way to walk away and check back without losing that state?
