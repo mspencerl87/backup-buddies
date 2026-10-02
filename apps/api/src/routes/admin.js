@@ -11,9 +11,13 @@ export const adminRouter = Router();
 // rather than a 403 that would confirm admin routes exist at all.
 adminRouter.use(requireAuth, requireAdmin);
 
-// All accounts, with cheap counts for a quick scan — not the full detail
-// (devices/pairings/invites), which is a separate per-account fetch below
-// so this list stays fast regardless of how many accounts exist.
+// All accounts, with cheap counts and a buddy summary for a quick scan —
+// not the full detail (devices/pairings/invites), which is a separate
+// per-account fetch below so this list stays fast regardless of how many
+// accounts exist. The buddies array only carries pledged_bytes (what's
+// agreed over the API) — there's no "used" figure to show here, since
+// actual usage is only ever known locally on each client's own dashboard
+// and isn't reported back to this server.
 adminRouter.get('/admin/accounts', async (req, res) => {
   const result = await pool.query(
     `SELECT accounts.id, accounts.email, accounts.nickname, accounts.tier,
@@ -21,10 +25,24 @@ adminRouter.get('/admin/accounts', async (req, res) => {
             (accounts.stripe_subscription_id IS NOT NULL) AS has_subscription,
             (SELECT count(*) FROM devices
               WHERE devices.account_id = accounts.id) AS device_count,
-            (SELECT count(*) FROM buddy_pairings
-              WHERE buddy_pairings.account_a_id = accounts.id
-                 OR buddy_pairings.account_b_id = accounts.id) AS pairing_count
+            COALESCE(buddies.buddies, '[]'::json) AS buddies
        FROM accounts
+       LEFT JOIN LATERAL (
+         SELECT json_agg(
+                  json_build_object(
+                    'email', other.email,
+                    'pledged_bytes', buddy_pairings.pledged_bytes,
+                    'status', buddy_pairings.status
+                  ) ORDER BY other.email
+                ) AS buddies
+           FROM buddy_pairings
+           JOIN accounts other
+             ON other.id = CASE WHEN buddy_pairings.account_a_id = accounts.id
+                                 THEN buddy_pairings.account_b_id
+                                 ELSE buddy_pairings.account_a_id END
+          WHERE buddy_pairings.account_a_id = accounts.id
+             OR buddy_pairings.account_b_id = accounts.id
+       ) buddies ON true
       ORDER BY accounts.created_at DESC`,
   );
   res.json({ accounts: result.rows });

@@ -19,23 +19,25 @@
     </nav>
   </header>
 
-  <main>
+  <main class="admin-main">
     <div class="card" id="not-authorized" style="display:none">
       <h2>Not authorized</h2>
       <p class="muted">This account doesn't have admin access.</p>
     </div>
 
     <div id="admin-content" style="display:none">
-      <div class="card" id="accounts-card">
-        <h2>All accounts</h2>
-        <table id="accounts-table" style="display:none">
-          <thead>
-            <tr><th>Email</th><th>Tier</th><th>Devices</th><th>Pairings</th><th>Created</th><th></th><th></th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
-        <p class="error" id="accounts-error"></p>
+      <h2>All accounts</h2>
+      <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
+      <p class="error" id="accounts-error"></p>
+      <div class="admin-columns" id="accounts-columns" style="display:none">
+        <div class="admin-column">
+          <h2>Free — <span class="count" id="free-count">0</span></h2>
+          <div id="free-accounts"></div>
+        </div>
+        <div class="admin-column">
+          <h2>Paid — <span class="count" id="paid-count">0</span></h2>
+          <div id="paid-accounts"></div>
+        </div>
       </div>
 
       <div class="card" id="detail-card" style="display:none">
@@ -97,8 +99,45 @@
 
     let selfAccountId = null;
 
+    function buddyRowHtml(b) {
+      const statusClass = b.status === 'pending' ? ' pending' : '';
+      return `
+        <div class="buddy-row">
+          <span>${b.email}</span>
+          <span class="buddy-status${statusClass}">${formatBytes(Number(b.pledged_bytes))} pledged · ${b.status}</span>
+        </div>
+      `;
+    }
+
+    function accountCardHtml(a) {
+      const isPaid = a.tier !== 'free';
+      const buddiesHtml = a.buddies.length
+        ? a.buddies.map(buddyRowHtml).join('')
+        : '<div class="muted" style="font-size:0.85rem;">No buddies yet.</div>';
+
+      return `
+        <div class="account-card">
+          <div class="row">
+            <strong>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</strong>
+            <span class="tier-badge${isPaid ? ' paid' : ''}">${a.tier}${a.has_subscription ? ' · subscribed' : ''}</span>
+          </div>
+          <p class="muted" style="margin:0.3rem 0 0;">
+            ${a.device_count} device${Number(a.device_count) === 1 ? '' : 's'} · joined ${formatDate(a.created_at)}
+          </p>
+          <div class="buddies">
+            <div class="buddies-label">Buddies (${a.buddies.length})</div>
+            ${buddiesHtml}
+          </div>
+          <div class="actions">
+            <a href="#" class="view-account-link" data-id="${a.id}">View</a>
+            <a href="#" class="delete-account-link" data-id="${a.id}" data-email="${a.email}">Delete</a>
+          </div>
+        </div>
+      `;
+    }
+
     async function loadAccounts() {
-      const table = document.getElementById('accounts-table');
+      const columns = document.getElementById('accounts-columns');
       const empty = document.getElementById('accounts-empty');
       const errorEl = document.getElementById('accounts-error');
       errorEl.textContent = '';
@@ -116,40 +155,34 @@
         return;
       }
 
-      const tbody = table.querySelector('tbody');
-      tbody.innerHTML = '';
-
       if (data.accounts.length === 0) {
-        table.style.display = 'none';
+        columns.style.display = 'none';
         empty.style.display = 'block';
         return;
       }
 
-      table.style.display = '';
+      columns.style.display = 'flex';
       empty.style.display = 'none';
 
-      for (const a of data.accounts) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</td>
-          <td>${a.tier}${a.has_subscription ? ' · subscribed' : ''}</td>
-          <td>${a.device_count}</td>
-          <td>${a.pairing_count}</td>
-          <td>${formatDate(a.created_at)}</td>
-          <td><a href="#" class="view-account-link" data-id="${a.id}">View</a></td>
-          <td><a href="#" class="delete-account-link" data-id="${a.id}" data-email="${a.email}">Delete</a></td>
-        `;
-        tbody.appendChild(tr);
-      }
+      // Free vs. paid, not a height-balanced split — see the
+      // .admin-columns CSS comment for why this differs from the
+      // dashboard's masonry layout.
+      const free = data.accounts.filter((a) => a.tier === 'free');
+      const paid = data.accounts.filter((a) => a.tier !== 'free');
 
-      tbody.querySelectorAll('.view-account-link').forEach((link) => {
+      document.getElementById('free-count').textContent = free.length;
+      document.getElementById('paid-count').textContent = paid.length;
+      document.getElementById('free-accounts').innerHTML = free.map(accountCardHtml).join('');
+      document.getElementById('paid-accounts').innerHTML = paid.map(accountCardHtml).join('');
+
+      columns.querySelectorAll('.view-account-link').forEach((link) => {
         link.addEventListener('click', (e) => {
           e.preventDefault();
           loadAccountDetail(link.dataset.id);
         });
       });
 
-      tbody.querySelectorAll('.delete-account-link').forEach((link) => {
+      columns.querySelectorAll('.delete-account-link').forEach((link) => {
         link.addEventListener('click', async (e) => {
           e.preventDefault();
           if (link.dataset.id === selfAccountId) {

@@ -289,6 +289,119 @@ footer a {
   }
 }
 
+/* Admin accounts: two genuinely separate columns (free vs. paid), not a
+   height-balanced masonry split like .dashboard-grid above — which column
+   an account lands in is decided by its tier, not by what fits where. */
+.admin-main {
+  max-width: 1120px;
+}
+
+.admin-columns {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.admin-column {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-column h2 {
+  font-size: 1rem;
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+}
+
+.admin-column h2 .count {
+  color: var(--text);
+  font-weight: 700;
+}
+
+@media (max-width: 860px) {
+  .admin-columns {
+    flex-direction: column;
+  }
+}
+
+.account-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.account-card .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.account-card .row strong {
+  font-size: 0.98rem;
+}
+
+.tier-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(148, 153, 166, 0.15);
+  color: var(--text-muted);
+}
+
+.tier-badge.paid {
+  background: rgba(76, 175, 125, 0.15);
+  color: #4caf7d;
+}
+
+.account-card .buddies {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.account-card .buddies-label {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-bottom: 0.3rem;
+}
+
+.buddy-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  padding: 0.15rem 0;
+}
+
+.buddy-row .buddy-status {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.buddy-row .buddy-status.pending {
+  color: #e5a443;
+}
+
+.account-card .actions {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.account-card .actions a.delete-account-link {
+  color: var(--danger);
+}
+
 .marketplace-tier {
   border-bottom: 1px solid var(--border);
 }
