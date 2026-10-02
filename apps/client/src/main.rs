@@ -1,6 +1,7 @@
 mod backup;
 mod dashboard;
 mod manifest;
+mod netinfo;
 mod protocol;
 mod receive;
 mod restore;
@@ -120,7 +121,7 @@ async fn main() -> Result<()> {
         tokio::fs::create_dir_all(&restore_dir).await?;
 
         tracing::info!(buddy = %buddy_id, dir = %restore_dir.display(), "starting restore");
-        let restored = restore::run_restore(
+        let stats = restore::run_restore(
             &endpoint,
             &config.relay_url,
             &config.passphrase,
@@ -128,7 +129,13 @@ async fn main() -> Result<()> {
             &restore_dir,
         )
         .await?;
-        tracing::info!(count = restored, dir = %restore_dir.display(), "restore complete");
+        tracing::info!(
+            count = stats.files_restored,
+            bytes = stats.bytes_restored,
+            duration_ms = stats.duration_ms,
+            dir = %restore_dir.display(),
+            "restore complete"
+        );
 
         endpoint.close().await;
         return Ok(());
@@ -258,23 +265,31 @@ async fn main() -> Result<()> {
                                 )
                                 .await;
                                 let record = match &result {
-                                    Ok((0, 0)) => dashboard::CycleRecord {
-                                        label: label.clone(),
-                                        at: dashboard::unix_now(),
-                                        kind: "backup",
-                                        ok: true,
-                                        detail: "nothing new to back up".to_string(),
-                                        files_sent: Some(0),
-                                        files_deleted: Some(0),
-                                    },
-                                    Ok((put, deleted)) => dashboard::CycleRecord {
+                                    Ok(stats) if stats.files_sent == 0 && stats.files_deleted == 0 => {
+                                        dashboard::CycleRecord {
+                                            label: label.clone(),
+                                            at: dashboard::unix_now(),
+                                            kind: "backup",
+                                            ok: true,
+                                            detail: "nothing new to back up".to_string(),
+                                            files_sent: Some(0),
+                                            files_deleted: Some(0),
+                                            bytes_sent: None,
+                                            duration_ms: None,
+                                            connection: None,
+                                        }
+                                    }
+                                    Ok(stats) => dashboard::CycleRecord {
                                         label: label.clone(),
                                         at: dashboard::unix_now(),
                                         kind: "backup",
                                         ok: true,
                                         detail: "backup cycle complete".to_string(),
-                                        files_sent: Some(*put),
-                                        files_deleted: Some(*deleted),
+                                        files_sent: Some(stats.files_sent),
+                                        files_deleted: Some(stats.files_deleted),
+                                        bytes_sent: Some(stats.bytes_sent),
+                                        duration_ms: Some(stats.duration_ms),
+                                        connection: stats.connection,
                                     },
                                     Err(err) => dashboard::CycleRecord {
                                         label: label.clone(),
@@ -284,15 +299,22 @@ async fn main() -> Result<()> {
                                         detail: err.to_string(),
                                         files_sent: None,
                                         files_deleted: None,
+                                        bytes_sent: None,
+                                        duration_ms: None,
+                                        connection: None,
                                     },
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
-                                match result {
-                                    Ok((0, 0)) => tracing::debug!(buddy = %label, "nothing new to back up"),
-                                    Ok((put, deleted)) => tracing::info!(
+                                match &result {
+                                    Ok(stats) if stats.files_sent == 0 && stats.files_deleted == 0 => {
+                                        tracing::debug!(buddy = %label, "nothing new to back up")
+                                    }
+                                    Ok(stats) => tracing::info!(
                                         buddy = %label,
-                                        files_sent = put,
-                                        files_deleted = deleted,
+                                        files_sent = stats.files_sent,
+                                        files_deleted = stats.files_deleted,
+                                        bytes_sent = stats.bytes_sent,
+                                        duration_ms = stats.duration_ms,
                                         "backup cycle complete"
                                     ),
                                     Err(err) => tracing::warn!(buddy = %label, ?err, "backup cycle failed"),
@@ -310,6 +332,9 @@ async fn main() -> Result<()> {
                                     },
                                     files_sent: None,
                                     files_deleted: None,
+                                    bytes_sent: None,
+                                    duration_ms: None,
+                                    connection: None,
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
                                 match result {

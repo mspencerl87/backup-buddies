@@ -16,6 +16,7 @@ use iroh::{Endpoint, EndpointId, RelayUrl};
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::Manifest;
+use crate::netinfo::ConnectionQuality;
 use crate::receive::{self, PledgeBook};
 
 // Brand assets, shared with apps/web/assets (the canonical copy — see
@@ -39,6 +40,16 @@ pub struct CycleRecord {
     pub detail: String,
     pub files_sent: Option<usize>,
     pub files_deleted: Option<usize>,
+    // Transfer metrics for this cycle — None for a no-op cycle (nothing
+    // changed, no connection opened), a failed cycle, or a ping. Straight
+    // off the connection's own QUIC stats, not derived from file sizes, so
+    // they reflect what actually went over the wire including protocol
+    // overhead. The dashboard computes a rate from bytes_sent/duration_ms
+    // rather than this storing one, to keep the raw numbers as the source
+    // of truth.
+    pub bytes_sent: Option<u64>,
+    pub duration_ms: Option<u64>,
+    pub connection: Option<ConnectionQuality>,
 }
 
 pub type CycleBook = Arc<Mutex<HashMap<String, CycleRecord>>>;
@@ -106,10 +117,25 @@ struct StatusResponse {
     buddies: Vec<BuddyStatus>,
 }
 
+// A buddy's DiskStatsResponse (their numbers, from the wire protocol)
+// plus our own local read on the connection we just used to ask for it
+// (ours alone — not something they report about themselves). Flattened
+// into one JSON object so the frontend doesn't need to know these came
+// from two different places.
+#[derive(Serialize)]
+struct BuddyDiskResponse {
+    #[serde(flatten)]
+    disk: crate::protocol::DiskStatsResponse,
+    connection: ConnectionQuality,
+}
+
 #[derive(Serialize)]
 struct RestoreResponse {
     restored_files: usize,
     dir: String,
+    bytes_restored: u64,
+    duration_ms: u64,
+    connection: Option<ConnectionQuality>,
 }
 
 /// Request body for POST /api/restore/:node_id. `paths` absent or empty
@@ -289,7 +315,7 @@ async fn buddy_disk_handler(
     };
 
     match crate::restore::fetch_buddy_disk_stats(&state.endpoint, &state.relay_url, buddy_id).await {
-        Ok(stats) => Json(stats).into_response(),
+        Ok((disk, connection)) => Json(BuddyDiskResponse { disk, connection }).into_response(),
         Err(err) => (
             StatusCode::BAD_GATEWAY,
             format!("couldn't reach buddy for disk stats: {err}"),
@@ -338,10 +364,14 @@ async fn restore_handler(
     };
 
     match result {
-        Ok(restored_files) => {
-            Json(RestoreResponse { restored_files, dir: restore_dir.display().to_string() })
-                .into_response()
-        }
+        Ok(stats) => Json(RestoreResponse {
+            restored_files: stats.files_restored,
+            dir: restore_dir.display().to_string(),
+            bytes_restored: stats.bytes_restored,
+            duration_ms: stats.duration_ms,
+            connection: stats.connection,
+        })
+        .into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
     }
 }
@@ -513,6 +543,41 @@ function fmtAgo(unixSecs) {
   return Math.floor(secs / 3600) + "h ago";
 }
 
+// Transfer rate from raw bytes/duration rather than storing a precomputed
+// rate anywhere — these are the only two numbers worth persisting, a rate
+// is just how they're read. Null when duration is too small to be a
+// meaningful denominator (near-instant transfers of a tiny file).
+function fmtRate(bytes, ms) {
+  if (!ms || ms < 50) return null;
+  return fmtBytes(bytes / (ms / 1000)) + "/s";
+}
+
+// "direct, 14ms" / "via relay, 80ms" / "connecting…" — iroh tries a
+// direct peer-to-peer path first and falls back to relaying through
+// relay.filegarden.net when NAT traversal doesn't work out; this is the
+// one line on the dashboard that says which one actually happened.
+function fmtConnection(connection) {
+  if (!connection) return "";
+  const kind =
+    connection.path === "direct" ? "direct" : connection.path === "relay" ? "via relay" : "connecting…";
+  const rtt = connection.rtt_ms != null ? ", " + connection.rtt_ms + "ms" : "";
+  return kind + rtt;
+}
+
+// Shared by every "a restore just happened" result line (the plain
+// restore button, restore-selected, restore-all, and the file browser's
+// per-row restore) so the transfer-metrics phrasing stays identical
+// everywhere it shows up.
+function describeRestoreResult(body) {
+  let msg = "Restored " + body.restored_files + " file(s) to " + body.dir;
+  const rate = fmtRate(body.bytes_restored, body.duration_ms);
+  if (rate) {
+    msg += " — " + fmtBytes(body.bytes_restored) + " in " + (body.duration_ms / 1000).toFixed(1) + "s (" + rate + ")";
+  }
+  if (body.connection) msg += " · " + fmtConnection(body.connection);
+  return msg;
+}
+
 // --- Buddy disk checks (keeping each other honest) ------------------------
 // A buddy's pledge is just a number agreed over the API — this asks them
 // live, over the sync protocol, what their disk actually looks like right
@@ -530,10 +595,11 @@ function formatDiskSummary(stats) {
     return { text: "unknown (couldn't read their disk stats)", color: "var(--text-muted)" };
   }
   const overCommitted = stats.pledged_out_total_bytes > stats.available_bytes;
-  const text =
+  let text =
     fmtBytes(stats.available_bytes) + " free of " + fmtBytes(stats.total_bytes) +
     " — pledged out to buddies: " + fmtBytes(stats.pledged_out_total_bytes) +
     (overCommitted ? " (more than they have free!)" : "");
+  if (stats.connection) text += " · " + fmtConnection(stats.connection);
   return { text, color: overCommitted ? "var(--danger)" : "var(--text-muted)" };
 }
 
@@ -578,7 +644,7 @@ async function restoreNow(nodeId, btn, resultEl) {
   resultEl.textContent = "Restoring…";
   try {
     const body = await doRestore(nodeId, []);
-    resultEl.textContent = "Restored " + body.restored_files + " file(s) to " + body.dir;
+    resultEl.textContent = describeRestoreResult(body);
     resultEl.style.color = "var(--ok)";
   } catch (err) {
     resultEl.textContent = "Restore failed: " + err.message;
@@ -643,7 +709,7 @@ function renderBrowseList() {
       browseResult.style.color = "";
       try {
         const body = await doRestore(browseState.nodeId, [f.path]);
-        browseResult.textContent = "Restored " + body.restored_files + " file(s) to " + body.dir;
+        browseResult.textContent = describeRestoreResult(body);
         browseResult.style.color = "var(--ok)";
       } catch (err) {
         browseResult.textContent = "Restore failed: " + err.message;
@@ -718,7 +784,7 @@ browseRestoreSelected.addEventListener("click", async () => {
   browseResult.style.color = "";
   try {
     const body = await doRestore(browseState.nodeId, paths);
-    browseResult.textContent = "Restored " + body.restored_files + " file(s) to " + body.dir;
+    browseResult.textContent = describeRestoreResult(body);
     browseResult.style.color = "var(--ok)";
   } catch (err) {
     browseResult.textContent = "Restore failed: " + err.message;
@@ -734,7 +800,7 @@ browseRestoreAll.addEventListener("click", async () => {
   browseResult.style.color = "";
   try {
     const body = await doRestore(browseState.nodeId, []);
-    browseResult.textContent = "Restored " + body.restored_files + " file(s) to " + body.dir;
+    browseResult.textContent = describeRestoreResult(body);
     browseResult.style.color = "var(--ok)";
   } catch (err) {
     browseResult.textContent = "Restore failed: " + err.message;
@@ -756,6 +822,12 @@ function renderBuddy(b) {
     cycleDetail = cycle.detail + " · " + fmtAgo(cycle.at);
     if (cycle.kind === "backup" && cycle.ok) {
       cycleDetail = "sent " + (cycle.files_sent ?? 0) + ", deleted " + (cycle.files_deleted ?? 0) + " · " + fmtAgo(cycle.at);
+      const rate = fmtRate(cycle.bytes_sent, cycle.duration_ms);
+      if (rate) {
+        cycleDetail +=
+          " · " + fmtBytes(cycle.bytes_sent) + " in " + (cycle.duration_ms / 1000).toFixed(1) + "s (" + rate + ")";
+      }
+      if (cycle.connection) cycleDetail += " · " + fmtConnection(cycle.connection);
     }
   }
 

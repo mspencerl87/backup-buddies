@@ -4,10 +4,25 @@ use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 
+use crate::netinfo::{self, ConnectionQuality};
 use crate::protocol::{self, DiskStatsResponse, ListEntry, ListResponse, SyncAck, SyncRequest};
 use crate::receive::safe_join;
 
 const MAX_FILE_BYTES: usize = 5 * 1024 * 1024 * 1024; // matches receive.rs's per-file cap
+
+/// What one restore actually did, including transfer metrics — mirrors
+/// backup.rs's BackupCycleStats so the dashboard can show both directions
+/// the same way. bytes_restored sums each file's *ciphertext* length (the
+/// decrypted plaintext is what lands on disk, but ciphertext is what
+/// crossed the network, which is what a transfer rate should be measured
+/// against).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RestoreStats {
+    pub files_restored: usize,
+    pub bytes_restored: u64,
+    pub duration_ms: u64,
+    pub connection: Option<ConnectionQuality>,
+}
 
 /// Connects to a buddy and asks what they're holding for us — no
 /// decryption, no writing to disk, just the file list (path + ciphertext
@@ -24,20 +39,23 @@ pub async fn list_buddy_files(
 }
 
 /// Connects to a buddy and asks for their real disk numbers (see
-/// DiskStatsResponse) — used by the dashboard to show what a buddy
-/// actually has available, next to what they've pledged, so an
-/// over-pledged or nearly-full buddy is visible without either side
-/// having to ask the other directly.
+/// DiskStatsResponse), plus our own local read on the quality of that
+/// connection (direct vs. relayed, round-trip latency) — used by the
+/// dashboard to show what a buddy actually has available, next to what
+/// they've pledged, so an over-pledged or nearly-full buddy is visible
+/// without either side having to ask the other directly.
 pub async fn fetch_buddy_disk_stats(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
     buddy_id: EndpointId,
-) -> Result<DiskStatsResponse> {
+) -> Result<(DiskStatsResponse, ConnectionQuality)> {
     let conn = connect(endpoint, relay_url, buddy_id).await?;
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::DiskStats).await?;
     send.finish().context("failed to finish send stream")?;
-    protocol::read_frame(&mut recv).await.context("failed to read disk stats")
+    let stats: DiskStatsResponse =
+        protocol::read_frame(&mut recv).await.context("failed to read disk stats")?;
+    Ok((stats, netinfo::connection_quality(&conn)))
 }
 
 async fn connect(
@@ -62,20 +80,28 @@ async fn list_on(conn: &iroh::endpoint::Connection) -> Result<Vec<ListEntry>> {
 /// our own passphrase, and writes it under `restore_dir` (mirroring the
 /// relative paths it was backed up with). Meant for manual, one-shot use —
 /// the `restore` CLI subcommand, or the dashboard's "Restore everything"
-/// button. Returns the number of files successfully restored.
+/// button.
 pub async fn run_restore(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
     passphrase: &SecretString,
     buddy_id: EndpointId,
     restore_dir: &Path,
-) -> Result<usize> {
+) -> Result<RestoreStats> {
+    let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
     let files = list_on(&conn).await?;
     tracing::info!(count = files.len(), "buddy reports this many files on restore");
 
     let paths: Vec<String> = files.into_iter().map(|f| f.path).collect();
-    restore_paths_on(&conn, passphrase, restore_dir, &paths).await
+    let (files_restored, bytes_restored) =
+        restore_paths_on(&conn, passphrase, restore_dir, &paths).await?;
+    Ok(RestoreStats {
+        files_restored,
+        bytes_restored,
+        duration_ms: started.elapsed().as_millis() as u64,
+        connection: Some(netinfo::connection_quality(&conn)),
+    })
 }
 
 /// Same as `run_restore`, but only the given paths (as returned by
@@ -90,35 +116,54 @@ pub async fn restore_selected(
     buddy_id: EndpointId,
     restore_dir: &Path,
     paths: &[String],
-) -> Result<usize> {
+) -> Result<RestoreStats> {
+    let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
-    restore_paths_on(&conn, passphrase, restore_dir, paths).await
+    let (files_restored, bytes_restored) =
+        restore_paths_on(&conn, passphrase, restore_dir, paths).await?;
+    Ok(RestoreStats {
+        files_restored,
+        bytes_restored,
+        duration_ms: started.elapsed().as_millis() as u64,
+        connection: Some(netinfo::connection_quality(&conn)),
+    })
 }
 
+// Returns (files restored, total ciphertext bytes read) — the byte total
+// is what a transfer rate should be computed against, same reasoning as
+// backup.rs's put_one_file returning ciphertext size rather than
+// plaintext size.
 async fn restore_paths_on(
     conn: &iroh::endpoint::Connection,
     passphrase: &SecretString,
     restore_dir: &Path,
     paths: &[String],
-) -> Result<usize> {
+) -> Result<(usize, u64)> {
     let identity = age::scrypt::Identity::new(passphrase.clone());
 
     let mut restored = 0;
+    let mut bytes = 0u64;
     for rel_path in paths {
         match restore_one_file(conn, &identity, restore_dir, rel_path).await {
-            Ok(()) => restored += 1,
+            Ok(ciphertext_len) => {
+                restored += 1;
+                bytes += ciphertext_len;
+            }
             Err(err) => tracing::warn!(path = %rel_path, ?err, "failed to restore file"),
         }
     }
-    Ok(restored)
+    Ok((restored, bytes))
 }
 
+// Returns the ciphertext length read off the wire on success — see
+// restore_paths_on's doc comment for why the caller wants that, not the
+// decrypted plaintext length.
 async fn restore_one_file(
     conn: &iroh::endpoint::Connection,
     identity: &age::scrypt::Identity,
     restore_dir: &Path,
     rel_path: &str,
-) -> Result<()> {
+) -> Result<u64> {
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::Get { path: rel_path.to_string() }).await?;
     send.finish().context("failed to finish send stream")?;
@@ -130,6 +175,7 @@ async fn restore_one_file(
 
     let ciphertext =
         recv.read_to_end(MAX_FILE_BYTES).await.context("failed to read file bytes")?;
+    let ciphertext_len = ciphertext.len() as u64;
     let plaintext =
         age::decrypt(identity, &ciphertext).context("failed to decrypt file — wrong passphrase?")?;
 
@@ -145,5 +191,5 @@ async fn restore_one_file(
         tokio::fs::create_dir_all(parent).await.context("failed to create restore directory")?;
     }
     tokio::fs::write(&dest, &plaintext).await.context("failed to write restored file")?;
-    Ok(())
+    Ok(ciphertext_len)
 }

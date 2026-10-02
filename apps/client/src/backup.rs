@@ -9,13 +9,30 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 use sha2::{Digest, Sha256};
 
 use crate::manifest::{Manifest, ManifestEntry};
+use crate::netinfo::{self, ConnectionQuality};
 use crate::protocol::{self, SyncAck, SyncRequest};
 
+/// What one backup cycle actually did, including transfer metrics — not
+/// just file counts. `bytes_sent`/`duration_ms` come straight off the
+/// connection's own QUIC stats (so they include protocol overhead, not
+/// just ciphertext — a more honest "how long did this take" number than
+/// summing file sizes), letting the dashboard show a real transfer rate
+/// for the cycle instead of just "sent 3 files". Zeroed/None when the
+/// cycle found nothing to do and never opened a connection at all.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BackupCycleStats {
+    pub files_sent: usize,
+    pub files_deleted: usize,
+    pub bytes_sent: u64,
+    pub duration_ms: u64,
+    pub connection: Option<ConnectionQuality>,
+}
+
 /// One pass: scan `backup_dir`, diff against what we last told `buddy_id`
-/// we'd sent them, and push anything new, changed, or deleted. Returns
-/// (files pushed, files deleted) for logging. Connects to the buddy only
-/// if there's actually something to send — most cycles, after the first,
-/// should find nothing changed and do no network work at all.
+/// we'd sent them, and push anything new, changed, or deleted. Connects to
+/// the buddy only if there's actually something to send — most cycles,
+/// after the first, should find nothing changed and do no network work at
+/// all.
 pub async fn run_backup_cycle(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
@@ -23,7 +40,7 @@ pub async fn run_backup_cycle(
     data_dir: &Path,
     backup_dir: &Path,
     buddy_id: EndpointId,
-) -> Result<(usize, usize)> {
+) -> Result<BackupCycleStats> {
     let buddy_node_id = buddy_id.to_string();
     let mut manifest = Manifest::load(data_dir, &buddy_node_id).await;
 
@@ -47,9 +64,10 @@ pub async fn run_backup_cycle(
         manifest.entries.keys().filter(|rel| !local_paths.contains(rel)).cloned().collect();
 
     if to_put.is_empty() && to_delete.is_empty() {
-        return Ok((0, 0));
+        return Ok(BackupCycleStats::default());
     }
 
+    let cycle_started = std::time::Instant::now();
     let addr = EndpointAddr::new(buddy_id).with_relay_url(relay_url.clone());
     let conn = endpoint
         .connect(addr, protocol::ALPN)
@@ -93,7 +111,17 @@ pub async fn run_backup_cycle(
     // updated for them.
     manifest.save(data_dir, &buddy_node_id).await?;
 
-    Ok((put_count, delete_count))
+    // Read straight off the connection's own QUIC stats rather than
+    // summing what we think we sent — covers protocol overhead (framing,
+    // acks, retransmits) too, which is what actually took the time.
+    let stats = BackupCycleStats {
+        files_sent: put_count,
+        files_deleted: delete_count,
+        bytes_sent: conn.stats().udp_tx.bytes,
+        duration_ms: cycle_started.elapsed().as_millis() as u64,
+        connection: Some(netinfo::connection_quality(&conn)),
+    };
+    Ok(stats)
 }
 
 // Returns the ciphertext size on success — what actually got sent over

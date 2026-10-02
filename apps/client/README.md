@@ -133,6 +133,8 @@ from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
   accepting any incoming file. Deleting it resets what's counted toward
   each buddy's pledge back to zero — the underlying data in `received/` is
   untouched, so this can desync the two if used carelessly.
+- `/data/restored/` — default destination for `restore` (see above); only
+  appears after you run it.
 
 ## Disk safety: pledges vs. the real disk
 
@@ -154,5 +156,26 @@ next to their pledge, with a "Recheck" button for an on-demand refresh. If
 a buddy's actual free space is less than what they've pledged out, it's
 called out in red — useful for spotting a buddy who over-pledged before
 anything actually fails.
-- `/data/restored/` — default destination for `restore` (see above); only
-  appears after you run it.
+
+## Network/transfer visibility
+
+Each backup cycle and restore reads its own transfer numbers straight off
+the connection: bytes actually sent/received (including protocol overhead,
+not just file sizes — a more honest number) and wall-clock duration, shown
+on the dashboard as a rate (e.g. "1.2 MB in 3.1s (390 KB/s)") next to that
+buddy's last cycle and any restore result.
+
+Also shown: whether the connection to a buddy ended up **direct**
+(hole-punched peer-to-peer) or went **via relay**
+(`relay.filegarden.net`), plus round-trip latency. iroh always tries direct
+first and only falls back to the relay when NAT traversal doesn't work out
+— a buddy stuck on relay will generally see lower throughput than a direct
+one, so this is usually the first thing to check if someone's transfers
+seem slow. All of this is local telemetry read off iroh's own connection
+object (`Connection::paths()`/`Connection::stats()`) — none of it is sent
+over the wire or costs an extra round trip.
+
+There's no live, mid-transfer rate (e.g. "currently uploading at 2MB/s") —
+cycles run every 30s and are usually short, so a last-cycle average is
+what's shown rather than adding a streaming/websocket layer for numbers
+that would mostly read "idle" between cycles anyway.
