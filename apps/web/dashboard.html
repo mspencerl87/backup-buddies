@@ -14,6 +14,7 @@
       <a href="/getting-started.html">Getting started</a>
       <a href="/setup.html">Client setup</a>
       <a href="/dashboard.html" class="current">Dashboard</a>
+      <a href="/admin.html" id="admin-nav-link" style="display:none">Admin</a>
       <a href="/terms.html">Terms</a>
       <a href="#" id="logout-link">Log out</a>
     </nav>
@@ -475,6 +476,9 @@
 
       renderAccount(me.account);
       renderPairings(me.pairings, me.account.id);
+      if (me.account.is_admin) {
+        document.getElementById('admin-nav-link').style.display = '';
+      }
 
       // Each of these handles its own errors internally, so one section
       // failing (e.g. a stale deploy missing a route) never blocks the

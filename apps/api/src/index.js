@@ -8,6 +8,7 @@ import { meRouter } from './routes/me.js';
 import { invitesRouter } from './routes/invites.js';
 import { billingRouter } from './routes/billing.js';
 import { devicesRouter } from './routes/devices.js';
+import { adminRouter } from './routes/admin.js';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(meRouter);
 app.use(invitesRouter);
 app.use(billingRouter);
 app.use(devicesRouter);
+app.use(adminRouter);
 
 // Catch-all error handler: any route above that throws (or rejects, since
 // Express 4 doesn't auto-catch async errors) lands here instead of

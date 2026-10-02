@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { isAdminEmail } from '../lib/admin.js';
 
 export const meRouter = Router();
 
@@ -32,6 +33,7 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       created_at: req.account.created_at,
       has_password: Boolean(req.account.password_hash),
       has_google: Boolean(req.account.google_sub),
+      is_admin: isAdminEmail(req.account.email),
     },
     devices: devices.rows,
     pairings: pairings.rows,

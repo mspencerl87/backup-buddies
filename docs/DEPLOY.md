@@ -341,3 +341,31 @@ next to their compose file) to `/data` in the container — a real,
 customer-visible folder rather than a Docker-managed named volume, by
 design (easier to find/move/back up independently). Nothing for app-1 to
 do here; this only affects the customer's own machine.
+
+## 12. Admin page
+
+`/admin.html` lists every account (email, tier, device/pairing counts) and
+lets you drill into one to see its devices, buddy pairings, and invites,
+with delete actions on each — for troubleshooting, not a feature customers
+see or know about.
+
+Access is gated by `ADMIN_EMAILS` (comma-separated, case-insensitive) in
+`.env` on app-1 — not a database role, since the admin set here is just
+you. Unset or empty, `/admin/*` 403s for everyone, you included.
+
+```bash
+cd /opt/backup-buddies/deploy/app
+# edit .env: add/confirm ADMIN_EMAILS=mspencerl87@gmail.com (or your real list)
+docker compose up -d --build api
+```
+
+A few things worth knowing before using the delete actions:
+
+- Deleting an account cascades in Postgres (devices, buddy_pairings,
+  invites, sessions, relay_usage_events all reference `accounts` with
+  `ON DELETE CASCADE`) — one click removes all of it from the database.
+- It does **not** touch Stripe. A deleted account's subscription, if it
+  has one, keeps running and billing until you cancel it separately in
+  the Stripe dashboard — the UI warns on this, but doesn't do it for you.
+- You can't delete your own (admin) account from the page — avoids a
+  confusing self-lockout mid-troubleshooting.

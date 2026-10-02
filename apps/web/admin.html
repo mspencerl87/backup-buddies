@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/">Backup Buddies</a>
+    <nav>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/admin.html" class="current">Admin</a>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="card" id="not-authorized" style="display:none">
+      <h2>Not authorized</h2>
+      <p class="muted">This account doesn't have admin access.</p>
+    </div>
+
+    <div id="admin-content" style="display:none">
+      <div class="card" id="accounts-card">
+        <h2>All accounts</h2>
+        <table id="accounts-table" style="display:none">
+          <thead>
+            <tr><th>Email</th><th>Tier</th><th>Devices</th><th>Pairings</th><th>Created</th><th></th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
+        <p class="error" id="accounts-error"></p>
+      </div>
+
+      <div class="card" id="detail-card" style="display:none">
+        <h2>Account detail</h2>
+        <p id="detail-summary" class="muted"></p>
+        <p id="detail-stripe-note" class="muted" style="display:none; color:#e5a443"></p>
+
+        <h3>Devices</h3>
+        <table id="detail-devices-table" style="display:none">
+          <thead>
+            <tr><th>Label</th><th>Node id</th><th>Last seen</th><th>Token</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="detail-devices-empty" class="muted">No devices.</p>
+
+        <h3>Buddy pairings</h3>
+        <table id="detail-pairings-table" style="display:none">
+          <thead>
+            <tr><th>Other account</th><th>Pledged</th><th>Status</th><th>Since</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="detail-pairings-empty" class="muted">No buddy pairings.</p>
+
+        <h3>Invites created</h3>
+        <table id="detail-invites-table" style="display:none">
+          <thead>
+            <tr><th>Code</th><th>Pledged</th><th>Status</th><th>Public</th><th>Created</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="detail-invites-empty" class="muted">No invites.</p>
+
+        <p class="error" id="detail-error"></p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Same conventions as dashboard.html — every API route returns JSON
+    // even on error, except when the request never reaches Express at all.
+    async function parseJsonResponse(res) {
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Unexpected response (${res.status}) — try refreshing the page.`);
+      }
+      return res.json();
+    }
+
+    function formatBytes(bytes) {
+      const gb = bytes / (1024 ** 3);
+      return gb >= 1 ? `${gb.toFixed(0)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
+    }
+
+    function formatDate(iso) {
+      return iso ? new Date(iso).toLocaleString() : '—';
+    }
+
+    let selfAccountId = null;
+
+    async function loadAccounts() {
+      const table = document.getElementById('accounts-table');
+      const empty = document.getElementById('accounts-empty');
+      const errorEl = document.getElementById('accounts-error');
+      errorEl.textContent = '';
+
+      let data;
+      try {
+        const res = await fetch('/api/admin/accounts', { credentials: 'same-origin' });
+        data = await parseJsonResponse(res);
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not load accounts.';
+          return;
+        }
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load accounts.';
+        return;
+      }
+
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (data.accounts.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const a of data.accounts) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</td>
+          <td>${a.tier}${a.has_subscription ? ' · subscribed' : ''}</td>
+          <td>${a.device_count}</td>
+          <td>${a.pairing_count}</td>
+          <td>${formatDate(a.created_at)}</td>
+          <td><a href="#" class="view-account-link" data-id="${a.id}">View</a></td>
+          <td><a href="#" class="delete-account-link" data-id="${a.id}" data-email="${a.email}">Delete</a></td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      tbody.querySelectorAll('.view-account-link').forEach((link) => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          loadAccountDetail(link.dataset.id);
+        });
+      });
+
+      tbody.querySelectorAll('.delete-account-link').forEach((link) => {
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (link.dataset.id === selfAccountId) {
+            alert("Can't delete your own account from here.");
+            return;
+          }
+          if (!confirm(
+            `Permanently delete ${link.dataset.email}? This removes the account and everything tied to it ` +
+            `(devices, buddy pairings, invites) from the database. This cannot be undone. ` +
+            `If they have an active Stripe subscription, cancel it separately in the Stripe dashboard — ` +
+            `deleting here does not touch billing.`
+          )) return;
+
+          try {
+            const res = await fetch(`/api/admin/accounts/${link.dataset.id}`, {
+              method: 'DELETE',
+              credentials: 'same-origin',
+            });
+            const data = await parseJsonResponse(res);
+            if (!res.ok) {
+              alert(data.error || 'Could not delete account.');
+              return;
+            }
+            if (data.had_stripe_subscription) {
+              alert('Account deleted. It had an active Stripe subscription — remember to cancel it in the Stripe dashboard, it is not affected by this.');
+            }
+            document.getElementById('detail-card').style.display = 'none';
+            await loadAccounts();
+          } catch (err) {
+            alert(err.message || 'Could not delete account.');
+          }
+        });
+      });
+    }
+
+    async function loadAccountDetail(accountId) {
+      const card = document.getElementById('detail-card');
+      const errorEl = document.getElementById('detail-error');
+      errorEl.textContent = '';
+      card.style.display = 'block';
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      let data;
+      try {
+        const res = await fetch(`/api/admin/accounts/${accountId}`, { credentials: 'same-origin' });
+        data = await parseJsonResponse(res);
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Could not load account.';
+          return;
+        }
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load account.';
+        return;
+      }
+
+      const { account, devices, pairings, invites } = data;
+
+      const methods = [];
+      if (account.has_password) methods.push('password');
+      if (account.has_google) methods.push('Google');
+      document.getElementById('detail-summary').textContent =
+        `${account.email} — ${account.tier} tier, relay ${account.relay_status}` +
+        (methods.length ? ` — signs in via ${methods.join(' & ')}` : '') +
+        ` — joined ${formatDate(account.created_at)}`;
+
+      const stripeNote = document.getElementById('detail-stripe-note');
+      if (account.stripe_subscription_id) {
+        stripeNote.textContent = 'Has an active Stripe subscription — deleting this account will not cancel it.';
+        stripeNote.style.display = 'block';
+      } else {
+        stripeNote.style.display = 'none';
+      }
+
+      renderDetailDevices(account.id, devices);
+      renderDetailPairings(account.id, pairings);
+      renderDetailInvites(account.id, invites);
+    }
+
+    function renderDetailDevices(accountId, devices) {
+      const table = document.getElementById('detail-devices-table');
+      const empty = document.getElementById('detail-devices-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (devices.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const d of devices) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${d.label || '(unlabeled)'}</td>
+          <td>${d.iroh_node_id ? `<code>${d.iroh_node_id.slice(0, 10)}…</code>` : 'not set up yet'}</td>
+          <td>${formatDate(d.last_seen_at)}</td>
+          <td><code>…${d.token_last_four || '????'}</code></td>
+          <td><a href="#" class="delete-link" data-kind="devices" data-id="${d.id}">Delete</a></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      wireDeleteLinks(accountId, table);
+    }
+
+    function renderDetailPairings(accountId, pairings) {
+      const table = document.getElementById('detail-pairings-table');
+      const empty = document.getElementById('detail-pairings-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (pairings.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const p of pairings) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.other_email}</td>
+          <td>${formatBytes(Number(p.pledged_bytes))}</td>
+          <td>${p.status}</td>
+          <td>${formatDate(p.created_at)}</td>
+          <td><a href="#" class="delete-link" data-kind="pairings" data-id="${p.id}">Delete</a></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      wireDeleteLinks(accountId, table);
+    }
+
+    function renderDetailInvites(accountId, invites) {
+      const table = document.getElementById('detail-invites-table');
+      const empty = document.getElementById('detail-invites-empty');
+      const tbody = table.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      if (invites.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+
+      for (const inv of invites) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${inv.code}</code></td>
+          <td>${formatBytes(Number(inv.pledged_bytes))}</td>
+          <td>${inv.status}</td>
+          <td>${inv.is_public ? 'yes' : 'no'}</td>
+          <td>${formatDate(inv.created_at)}</td>
+          <td><a href="#" class="delete-link" data-kind="invites" data-id="${inv.id}">Delete</a></td>
+        `;
+        tbody.appendChild(tr);
+      }
+      wireDeleteLinks(accountId, table);
+    }
+
+    function wireDeleteLinks(accountId, table) {
+      table.querySelectorAll('.delete-link').forEach((link) => {
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (!confirm('Delete this? This cannot be undone.')) return;
+          try {
+            const res = await fetch(
+              `/api/admin/accounts/${accountId}/${link.dataset.kind}/${link.dataset.id}`,
+              { method: 'DELETE', credentials: 'same-origin' },
+            );
+            if (!res.ok && res.status !== 204) {
+              const data = await parseJsonResponse(res);
+              alert(data.error || 'Could not delete.');
+              return;
+            }
+            await loadAccountDetail(accountId);
+            await loadAccounts();
+          } catch (err) {
+            alert(err.message || 'Could not delete.');
+          }
+        });
+      });
+    }
+
+    async function init() {
+      const res = await fetch('/api/me', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        window.location.href = '/login.html';
+        return;
+      }
+      const me = await parseJsonResponse(res);
+      selfAccountId = me.account.id;
+
+      if (!me.account.is_admin) {
+        document.getElementById('not-authorized').style.display = 'block';
+        return;
+      }
+
+      document.getElementById('admin-content').style.display = 'block';
+      await loadAccounts();
+    }
+
+    document.getElementById('logout-link').addEventListener('click', async (e) => {
+      e.preventDefault();
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/';
+    });
+
+    init();
+  </script>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+</body>
+</html>
