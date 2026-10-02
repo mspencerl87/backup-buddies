@@ -7,7 +7,12 @@ use std::{
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::protocol::{self, DiskStatsResponse, ListEntry, ListResponse, SyncAck, SyncRequest};
+use crate::bandwidth::BandwidthBook;
+use crate::netinfo::{self, ConnectionQuality};
+use crate::protocol::{
+    self, DiskStatsResponse, ListEntry, ListResponse, ListVersionsResponse, SyncAck, SyncRequest,
+    VersionEntry,
+};
 
 // Never let incoming buddy data consume the disk down to nothing, no
 // matter what's been pledged — pledges are numbers two people agreed on
@@ -33,6 +38,65 @@ async fn disk_has_room_for(data_dir: &Path, additional_bytes: u64) -> bool {
             additional_bytes <= usable
         }
         _ => true,
+    }
+}
+
+// How many *previous* copies of a file are kept once it's overwritten or
+// deleted, on top of the live one — 2 backups + the live copy = 3 versions
+// total recoverable at any time. A pledge or the real-disk floor above
+// still bounds how much space any of this can consume; this just bounds
+// the multiplier a single churning file can add on top of its live size,
+// so "someone keeps editing one huge file" can't quietly balloon disk use
+// without limit.
+const MAX_BACKUP_VERSIONS: u32 = 2;
+
+fn versions_root(sender_dir: &Path) -> PathBuf {
+    sender_dir.join(".versions")
+}
+
+fn version_path(sender_dir: &Path, rel_path: &str, slot: u32) -> Option<PathBuf> {
+    safe_join(&versions_root(sender_dir), &format!("{rel_path}.v{slot}"))
+}
+
+// Called just before a path's live content is about to be replaced
+// (overwrite) or removed (delete). Shifts existing backup slots down by
+// one (dropping the oldest once MAX_BACKUP_VERSIONS is reached), then
+// moves the *current* live file into the newest slot — so a delete isn't
+// destructive (the deleted content becomes a recoverable backup) and an
+// overwrite doesn't lose what was there before. A no-op if there's no
+// live file yet (first write for this path — nothing to protect).
+async fn rotate_versions(sender_dir: &Path, rel_path: &str) {
+    let Some(live) = safe_join(sender_dir, rel_path) else { return };
+    if tokio::fs::metadata(&live).await.is_err() {
+        return;
+    }
+
+    if let Some(oldest) = version_path(sender_dir, rel_path, MAX_BACKUP_VERSIONS) {
+        let _ = tokio::fs::remove_file(&oldest).await;
+    }
+    for slot in (1..MAX_BACKUP_VERSIONS).rev() {
+        let (Some(from), Some(to)) =
+            (version_path(sender_dir, rel_path, slot), version_path(sender_dir, rel_path, slot + 1))
+        else {
+            continue;
+        };
+        if tokio::fs::metadata(&from).await.is_ok() {
+            if let Some(parent) = to.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            let _ = tokio::fs::rename(&from, &to).await;
+        }
+    }
+    if let Some(slot1) = version_path(sender_dir, rel_path, 1) {
+        if let Some(parent) = slot1.parent()
+            && let Err(err) = tokio::fs::create_dir_all(parent).await
+        {
+            tracing::warn!(path = %rel_path, ?err, "couldn't create version directory — not keeping a backup of this overwrite");
+            return;
+        }
+        if let Err(err) = tokio::fs::rename(&live, &slot1).await {
+            tracing::warn!(path = %rel_path, ?err, "couldn't rotate previous version into a backup slot");
+        }
     }
 }
 
@@ -87,12 +151,17 @@ pub async fn handle_incoming(
     incoming: iroh::endpoint::Incoming,
     data_dir: PathBuf,
     pledge_book: PledgeBook,
+    bandwidth_book: BandwidthBook,
 ) -> Result<()> {
     let connecting = incoming.accept()?;
     let conn = connecting.await?;
     let remote = conn.remote_id();
     let remote_id = remote.to_string();
     let sender_dir = data_dir.join("received").join(&remote_id);
+    // Read once per connection rather than per stream — the path a
+    // connection settles on doesn't change mid-connection, and every
+    // stream on it (one per file in a backup cycle) shares the same one.
+    let quality = netinfo::connection_quality(&conn);
 
     loop {
         let (send, recv) = match conn.accept_bi().await {
@@ -102,10 +171,20 @@ pub async fn handle_incoming(
         let data_dir = data_dir.clone();
         let sender_dir = sender_dir.clone();
         let pledge_book = pledge_book.clone();
+        let bandwidth_book = bandwidth_book.clone();
         let remote_id = remote_id.clone();
         tokio::spawn(async move {
-            if let Err(err) =
-                handle_stream(send, recv, data_dir, sender_dir, remote_id.clone(), pledge_book).await
+            if let Err(err) = handle_stream(
+                send,
+                recv,
+                data_dir,
+                sender_dir,
+                remote_id.clone(),
+                pledge_book,
+                bandwidth_book,
+                quality,
+            )
+            .await
             {
                 tracing::warn!(from = %remote_id, ?err, "request from buddy failed");
             }
@@ -115,6 +194,7 @@ pub async fn handle_incoming(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_stream(
     mut send: iroh::endpoint::SendStream,
     mut recv: iroh::endpoint::RecvStream,
@@ -122,6 +202,8 @@ async fn handle_stream(
     sender_dir: PathBuf,
     remote_id: String,
     pledge_book: PledgeBook,
+    bandwidth_book: BandwidthBook,
+    quality: ConnectionQuality,
 ) -> Result<()> {
     let request: SyncRequest =
         protocol::read_frame(&mut recv).await.context("failed to read request")?;
@@ -138,6 +220,8 @@ async fn handle_stream(
                 &remote_id,
                 &pledge_book,
                 &data_dir,
+                &bandwidth_book,
+                &quality,
                 path,
                 ciphertext_len,
                 ciphertext_sha256,
@@ -151,10 +235,17 @@ async fn handle_stream(
             handle_list(&mut send, &sender_dir).await?;
         }
         SyncRequest::Get { path } => {
-            handle_get(&mut send, &sender_dir, path).await?;
+            handle_get(&mut send, &sender_dir, path, &data_dir, &bandwidth_book, &quality).await?;
         }
         SyncRequest::DiskStats => {
             handle_disk_stats(&mut send, &data_dir, &pledge_book).await?;
+        }
+        SyncRequest::ListVersions { path } => {
+            handle_list_versions(&mut send, &sender_dir, path).await?;
+        }
+        SyncRequest::GetVersion { path, version } => {
+            handle_get_version(&mut send, &sender_dir, path, version, &data_dir, &bandwidth_book, &quality)
+                .await?;
         }
     }
 
@@ -186,6 +277,8 @@ async fn handle_put(
     remote_id: &str,
     pledge_book: &PledgeBook,
     data_dir: &Path,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
     path: String,
     ciphertext_len: u64,
     ciphertext_sha256: String,
@@ -204,6 +297,15 @@ async fn handle_put(
     // If we already have a file at this path, only the *delta* against its
     // current size should count against the pledge — otherwise every
     // re-send of an unchanged-size file would eat into the budget again.
+    // Note this slightly undercounts real disk growth while a path's
+    // backup slots are still filling up (an overwrite moves the old
+    // content into .versions/ rather than freeing it — see
+    // rotate_versions), since the pledge math below still assumes the
+    // previous size is reclaimed. Once a path has churned through all
+    // MAX_BACKUP_VERSIONS slots that's true again (the oldest slot really
+    // is freed on every rotation after that), and either way the real-disk
+    // floor just below is what actually prevents the disk from filling —
+    // this delta is only ever used to decide whether a pledge is exceeded.
     let previous_size = tokio::fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
     let incoming_delta = ciphertext_len.saturating_sub(previous_size);
 
@@ -260,6 +362,12 @@ async fn handle_put(
             return Ok(());
         }
 
+        // Protect whatever was there before this overwrite — a buddy's
+        // backup cycle only Puts a path when their local copy actually
+        // changed, so any existing `dest` here is genuinely being replaced,
+        // not just re-sent unchanged.
+        rotate_versions(sender_dir, &path).await;
+
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -273,6 +381,7 @@ async fn handle_put(
             // re-allows it, which is the safe direction to err in.
             tracing::warn!(?err, "failed to persist usage ledger");
         }
+        crate::bandwidth::record(data_dir, bandwidth_book, quality, ciphertext_len).await;
 
         protocol::write_frame(send, &SyncAck::ok()).await?;
         tracing::info!(from = %remote_id, path = %path, bytes = ciphertext_len, "stored file from buddy");
@@ -305,9 +414,17 @@ async fn handle_delete(
     };
 
     let freed = tokio::fs::metadata(&target).await.map(|m| m.len()).unwrap_or(0);
+
+    // A "delete" doesn't destroy the content — it moves it into the same
+    // backup-slot rotation an overwrite goes through, so an accidental
+    // local delete (the far more common case than a deliberate one) is
+    // still recoverable from a backup slot, not actually gone. If that
+    // rotation couldn't happen for some reason, fall back to a plain
+    // remove so the live path is still reliably cleared either way.
+    rotate_versions(sender_dir, &path).await;
     match tokio::fs::remove_file(&target).await {
         Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {} // idempotent: already gone is fine
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {} // idempotent: already gone (or just rotated away) is fine
         Err(err) => {
             protocol::write_frame(send, &SyncAck::err(format!("failed to delete: {err}"))).await?;
             return Ok(());
@@ -400,6 +517,12 @@ fn collect_files<'a>(
             let path = entry.path();
             let Ok(file_type) = entry.file_type().await else { continue };
             if file_type.is_dir() {
+                // Backup-version slots live under .versions/ — they're not
+                // restorable the normal way (ListVersions/GetVersion only),
+                // so they shouldn't show up as if they were live files.
+                if path.file_name().and_then(|n| n.to_str()) == Some(".versions") {
+                    continue;
+                }
                 collect_files(base, &path, out).await;
             } else if file_type.is_file() {
                 let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
@@ -415,6 +538,9 @@ async fn handle_get(
     send: &mut iroh::endpoint::SendStream,
     sender_dir: &Path,
     path: String,
+    data_dir: &Path,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
 ) -> Result<()> {
     let Some(src) = safe_join(sender_dir, &path) else {
         protocol::write_frame(send, &SyncAck::err("invalid path")).await?;
@@ -425,6 +551,55 @@ async fn handle_get(
         Ok(bytes) => {
             protocol::write_frame(send, &SyncAck::ok()).await?;
             send.write_all(&bytes).await.context("failed to send file bytes")?;
+            crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
+        }
+        Err(_) => {
+            protocol::write_frame(send, &SyncAck::err("not found")).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_list_versions(
+    send: &mut iroh::endpoint::SendStream,
+    sender_dir: &Path,
+    path: String,
+) -> Result<()> {
+    let mut versions = Vec::new();
+    for slot in 1..=MAX_BACKUP_VERSIONS {
+        let Some(vp) = version_path(sender_dir, &path, slot) else { break };
+        if let Ok(meta) = tokio::fs::metadata(&vp).await {
+            let modified_unix = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs());
+            versions.push(VersionEntry { version: slot, size: meta.len(), modified_unix });
+        }
+    }
+    protocol::write_frame(send, &ListVersionsResponse { versions }).await?;
+    Ok(())
+}
+
+async fn handle_get_version(
+    send: &mut iroh::endpoint::SendStream,
+    sender_dir: &Path,
+    path: String,
+    version: u32,
+    data_dir: &Path,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
+) -> Result<()> {
+    let Some(src) = version_path(sender_dir, &path, version) else {
+        protocol::write_frame(send, &SyncAck::err("invalid path")).await?;
+        return Ok(());
+    };
+
+    match tokio::fs::read(&src).await {
+        Ok(bytes) => {
+            protocol::write_frame(send, &SyncAck::ok()).await?;
+            send.write_all(&bytes).await.context("failed to send file bytes")?;
+            crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
         }
         Err(_) => {
             protocol::write_frame(send, &SyncAck::err("not found")).await?;

@@ -5,7 +5,10 @@ use anyhow::{Context, Result};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 
 use crate::netinfo::{self, ConnectionQuality};
-use crate::protocol::{self, DiskStatsResponse, ListEntry, ListResponse, SyncAck, SyncRequest};
+use crate::protocol::{
+    self, DiskStatsResponse, ListEntry, ListResponse, ListVersionsResponse, SyncAck, SyncRequest,
+    VersionEntry,
+};
 use crate::receive::safe_join;
 
 const MAX_FILE_BYTES: usize = 5 * 1024 * 1024 * 1024; // matches receive.rs's per-file cap
@@ -56,6 +59,70 @@ pub async fn fetch_buddy_disk_stats(
     let stats: DiskStatsResponse =
         protocol::read_frame(&mut recv).await.context("failed to read disk stats")?;
     Ok((stats, netinfo::connection_quality(&conn)))
+}
+
+/// Asks a buddy what backup slots still exist for one path — the file
+/// browser's "History" affordance uses this to show what's recoverable
+/// before the person picks a version to restore.
+pub async fn list_file_versions(
+    endpoint: &Endpoint,
+    relay_url: &RelayUrl,
+    buddy_id: EndpointId,
+    path: &str,
+) -> Result<Vec<VersionEntry>> {
+    let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    protocol::write_frame(&mut send, &SyncRequest::ListVersions { path: path.to_string() }).await?;
+    send.finish().context("failed to finish send stream")?;
+    let resp: ListVersionsResponse =
+        protocol::read_frame(&mut recv).await.context("failed to read version list")?;
+    Ok(resp.versions)
+}
+
+/// Restores one specific backup slot of one file — not the live copy.
+/// Written alongside the live path with a suffix (`<path>.v<N>.bak`) so it
+/// never clobbers a normal restore of the same file.
+pub async fn restore_version(
+    endpoint: &Endpoint,
+    relay_url: &RelayUrl,
+    passphrase: &SecretString,
+    buddy_id: EndpointId,
+    restore_dir: &Path,
+    path: &str,
+    version: u32,
+) -> Result<RestoreStats> {
+    let started = std::time::Instant::now();
+    let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let identity = age::scrypt::Identity::new(passphrase.clone());
+
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    protocol::write_frame(&mut send, &SyncRequest::GetVersion { path: path.to_string(), version }).await?;
+    send.finish().context("failed to finish send stream")?;
+
+    let ack: SyncAck = protocol::read_frame(&mut recv).await.context("failed to read ack")?;
+    if !ack.ok {
+        anyhow::bail!("buddy could not serve that version: {}", ack.error.unwrap_or_default());
+    }
+    let ciphertext = recv.read_to_end(MAX_FILE_BYTES).await.context("failed to read file bytes")?;
+    let ciphertext_len = ciphertext.len() as u64;
+    let plaintext =
+        age::decrypt(&identity, &ciphertext).context("failed to decrypt file — wrong passphrase?")?;
+
+    let suffixed = format!("{path}.v{version}.bak");
+    let Some(dest) = safe_join(restore_dir, &suffixed) else {
+        anyhow::bail!("buddy sent an unsafe path: {path:?}");
+    };
+    if let Some(parent) = dest.parent() {
+        tokio::fs::create_dir_all(parent).await.context("failed to create restore directory")?;
+    }
+    tokio::fs::write(&dest, &plaintext).await.context("failed to write restored file")?;
+
+    Ok(RestoreStats {
+        files_restored: 1,
+        bytes_restored: ciphertext_len,
+        duration_ms: started.elapsed().as_millis() as u64,
+        connection: Some(netinfo::connection_quality(&conn)),
+    })
 }
 
 async fn connect(

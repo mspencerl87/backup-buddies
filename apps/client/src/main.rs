@@ -1,4 +1,5 @@
 mod backup;
+mod bandwidth;
 mod dashboard;
 mod manifest;
 mod netinfo;
@@ -39,6 +40,12 @@ struct Config {
     // the host side; binding to loopback here instead would make it
     // unreachable through Docker's port mapping at all.
     dashboard_bind: String,
+    // How long since a buddy's last *successful* cycle before the
+    // dashboard calls them stale rather than just "last synced a while
+    // ago" — see dashboard.rs's stale computation. 30s between cycles
+    // means a handful of transient failures shouldn't trip this; it's
+    // meant to catch a buddy that's actually stuck.
+    stale_after_secs: u64,
 }
 
 impl Config {
@@ -48,6 +55,13 @@ impl Config {
             std::env::var("DEVICE_TOKEN").context("DEVICE_TOKEN env var is required")?;
         let passphrase = std::env::var("BACKUP_PASSPHRASE")
             .context("BACKUP_PASSPHRASE env var is required — this never leaves your machine")?;
+        if passphrase.len() < 12 {
+            tracing::warn!(
+                "BACKUP_PASSPHRASE is under 12 characters — a short passphrase is much easier to \
+                 guess, and there's no way to recover your buddy's copy of your data if it's ever \
+                 lost or cracked (there's no \"forgot passphrase\" flow by design)"
+            );
+        }
         let relay_url = std::env::var("RELAY_URL")
             .unwrap_or_else(|_| "https://relay.filegarden.net".to_string())
             .parse()
@@ -56,6 +70,10 @@ impl Config {
         let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
         let dashboard_bind =
             std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let stale_after_secs = std::env::var("STALE_AFTER_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(600);
 
         Ok(Self {
             api_url,
@@ -65,7 +83,48 @@ impl Config {
             data_dir,
             backup_dir,
             dashboard_bind,
+            stale_after_secs,
         })
+    }
+
+    // Fails loud and early, before any of the long-running loops start,
+    // rather than letting a bad config surface later as a confusing
+    // runtime symptom — an empty-looking backup cycle because BACKUP_DIR
+    // doesn't actually exist, or a cryptic connection error because
+    // API_URL has a typo in it.
+    async fn validate(&self) -> Result<()> {
+        if let Some(backup_dir) = &self.backup_dir {
+            let meta = tokio::fs::metadata(backup_dir).await.with_context(|| {
+                format!(
+                    "BACKUP_DIR is set to {} but it doesn't exist or isn't readable from inside the container \
+                     — check the BACKUP_DIR_HOST bind mount in docker-compose.yml",
+                    backup_dir.display()
+                )
+            })?;
+            if !meta.is_dir() {
+                anyhow::bail!("BACKUP_DIR ({}) exists but isn't a directory", backup_dir.display());
+            }
+        }
+
+        reqwest::Url::parse(&self.api_url)
+            .with_context(|| format!("API_URL ({}) isn't a valid URL", self.api_url))?;
+
+        // DATA_DIR itself is create_dir_all'd right after this runs (which
+        // already fails loudly on its own if that's not possible) — this
+        // additionally proves the directory is actually *writable*, not
+        // just creatable, by round-tripping a small probe file. A
+        // read-only bind mount would otherwise only surface much later, as
+        // a failed iroh_secret_key write.
+        tokio::fs::create_dir_all(&self.data_dir)
+            .await
+            .with_context(|| format!("can't create DATA_DIR ({})", self.data_dir.display()))?;
+        let probe = self.data_dir.join(".write-test");
+        tokio::fs::write(&probe, b"ok")
+            .await
+            .with_context(|| format!("DATA_DIR ({}) isn't writable", self.data_dir.display()))?;
+        let _ = tokio::fs::remove_file(&probe).await;
+
+        Ok(())
     }
 }
 
@@ -88,6 +147,7 @@ struct BuddiesResponse {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let config = Config::from_env()?;
+    config.validate().await?;
 
     tokio::fs::create_dir_all(&config.data_dir).await?;
     tokio::fs::create_dir_all(config.data_dir.join("received")).await?;
@@ -158,6 +218,11 @@ async fn main() -> Result<()> {
             .collect(),
     ));
 
+    // Lifetime relay-vs-direct byte totals — see bandwidth.rs. Loaded once
+    // at startup so a restart doesn't reset the counter back to zero.
+    let bandwidth_book: bandwidth::BandwidthBook =
+        Arc::new(Mutex::new(bandwidth::load(&config.data_dir).await));
+
     // What the outbound loop below did on its last pass per buddy — the
     // dashboard reads this directly rather than probing anything itself.
     let cycle_stats: dashboard::CycleBook = Arc::new(Mutex::new(std::collections::HashMap::new()));
@@ -169,9 +234,11 @@ async fn main() -> Result<()> {
         let data_dir = config.data_dir.clone();
         let backup_dir = config.backup_dir.clone();
         let pledge_book = pledge_book.clone();
+        let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         let relay_url = config.relay_url.clone();
         let passphrase = config.passphrase.clone();
+        let stale_after_secs = config.stale_after_secs;
         tokio::spawn(async move {
             if let Err(err) = dashboard::run(
                 &config_dashboard_bind,
@@ -179,10 +246,12 @@ async fn main() -> Result<()> {
                 data_dir,
                 backup_dir,
                 pledge_book,
+                bandwidth_book,
                 cycle_stats,
                 endpoint,
                 relay_url,
                 passphrase,
+                stale_after_secs,
             )
             .await
             {
@@ -197,12 +266,16 @@ async fn main() -> Result<()> {
         let endpoint = endpoint.clone();
         let data_dir = config.data_dir.clone();
         let pledge_book = pledge_book.clone();
+        let bandwidth_book = bandwidth_book.clone();
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let data_dir = data_dir.clone();
                 let pledge_book = pledge_book.clone();
+                let bandwidth_book = bandwidth_book.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = receive::handle_incoming(incoming, data_dir, pledge_book).await {
+                    if let Err(err) =
+                        receive::handle_incoming(incoming, data_dir, pledge_book, bandwidth_book).await
+                    {
                         tracing::warn!(?err, "incoming connection failed");
                     }
                 });
@@ -219,6 +292,7 @@ async fn main() -> Result<()> {
         let endpoint = endpoint.clone();
         let http = http.clone();
         let pledge_book = pledge_book.clone();
+        let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         async move {
             loop {
@@ -264,32 +338,55 @@ async fn main() -> Result<()> {
                                     buddy_id,
                                 )
                                 .await;
+                                if let Ok(stats) = &result
+                                    && let Some(connection) = &stats.connection
+                                {
+                                    bandwidth::record(
+                                        &config.data_dir,
+                                        &bandwidth_book,
+                                        connection,
+                                        stats.bytes_sent,
+                                    )
+                                    .await;
+                                }
                                 let record = match &result {
                                     Ok(stats) if stats.files_sent == 0 && stats.files_deleted == 0 => {
                                         dashboard::CycleRecord {
                                             label: label.clone(),
                                             at: dashboard::unix_now(),
                                             kind: "backup",
-                                            ok: true,
-                                            detail: "nothing new to back up".to_string(),
+                                            ok: stats.files_failed == 0,
+                                            detail: if stats.files_failed == 0 {
+                                                "nothing new to back up".to_string()
+                                            } else {
+                                                format!("{} file(s) still failing to sync", stats.files_failed)
+                                            },
                                             files_sent: Some(0),
                                             files_deleted: Some(0),
                                             bytes_sent: None,
                                             duration_ms: None,
                                             connection: None,
+                                            files_failed: Some(stats.files_failed),
+                                            failed_files: stats.failed_paths.clone(),
+                                            last_ok_at: None,
+                                            consecutive_failures: 0,
                                         }
                                     }
                                     Ok(stats) => dashboard::CycleRecord {
                                         label: label.clone(),
                                         at: dashboard::unix_now(),
                                         kind: "backup",
-                                        ok: true,
+                                        ok: stats.files_failed == 0,
                                         detail: "backup cycle complete".to_string(),
                                         files_sent: Some(stats.files_sent),
                                         files_deleted: Some(stats.files_deleted),
                                         bytes_sent: Some(stats.bytes_sent),
                                         duration_ms: Some(stats.duration_ms),
                                         connection: stats.connection,
+                                        files_failed: Some(stats.files_failed),
+                                        failed_files: stats.failed_paths.clone(),
+                                        last_ok_at: None,
+                                        consecutive_failures: 0,
                                     },
                                     Err(err) => dashboard::CycleRecord {
                                         label: label.clone(),
@@ -302,6 +399,10 @@ async fn main() -> Result<()> {
                                         bytes_sent: None,
                                         duration_ms: None,
                                         connection: None,
+                                        files_failed: None,
+                                        failed_files: Vec::new(),
+                                        last_ok_at: None,
+                                        consecutive_failures: 0,
                                     },
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
@@ -335,6 +436,10 @@ async fn main() -> Result<()> {
                                     bytes_sent: None,
                                     duration_ms: None,
                                     connection: None,
+                                    files_failed: None,
+                                    failed_files: Vec::new(),
+                                    last_ok_at: None,
+                                    consecutive_failures: 0,
                                 };
                                 dashboard::record_cycle(&cycle_stats, node_id_str, record);
                                 match result {

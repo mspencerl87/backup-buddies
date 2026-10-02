@@ -19,14 +19,24 @@ use crate::protocol::{self, SyncAck, SyncRequest};
 /// summing file sizes), letting the dashboard show a real transfer rate
 /// for the cycle instead of just "sent 3 files". Zeroed/None when the
 /// cycle found nothing to do and never opened a connection at all.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BackupCycleStats {
     pub files_sent: usize,
     pub files_deleted: usize,
     pub bytes_sent: u64,
     pub duration_ms: u64,
     pub connection: Option<ConnectionQuality>,
+    // How many put/delete calls failed this cycle — not fatal (the cycle
+    // itself still ran, and anything that failed just stays in next
+    // cycle's diff and gets retried), but worth the dashboard calling out:
+    // a file that keeps failing every cycle isn't a transient blip.
+    pub files_failed: usize,
+    // A capped sample of which paths failed, for display — not every one
+    // if there are many, just enough to point someone at the problem.
+    pub failed_paths: Vec<String>,
 }
+
+const MAX_FAILED_PATHS_SHOWN: usize = 10;
 
 /// One pass: scan `backup_dir`, diff against what we last told `buddy_id`
 /// we'd sent them, and push anything new, changed, or deleted. Connects to
@@ -77,6 +87,8 @@ pub async fn run_backup_cycle(
     let recipient = age::scrypt::Recipient::new(passphrase.clone());
 
     let mut put_count = 0;
+    let mut files_failed = 0usize;
+    let mut failed_paths = Vec::new();
     for (rel_path, abs_path, size, sha256) in &to_put {
         match put_one_file(&conn, &recipient, rel_path, abs_path).await {
             Ok(ciphertext_size) => {
@@ -88,6 +100,10 @@ pub async fn run_backup_cycle(
             }
             Err(err) => {
                 tracing::warn!(path = %rel_path, ?err, "failed to back up file — will retry next cycle");
+                files_failed += 1;
+                if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
+                    failed_paths.push(rel_path.clone());
+                }
             }
         }
     }
@@ -101,6 +117,10 @@ pub async fn run_backup_cycle(
             }
             Err(err) => {
                 tracing::warn!(path = %rel_path, ?err, "failed to tell buddy about a deleted file — will retry next cycle");
+                files_failed += 1;
+                if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
+                    failed_paths.push(rel_path.clone());
+                }
             }
         }
     }
@@ -120,6 +140,8 @@ pub async fn run_backup_cycle(
         bytes_sent: conn.stats().udp_tx.bytes,
         duration_ms: cycle_started.elapsed().as_millis() as u64,
         connection: Some(netinfo::connection_quality(&conn)),
+        files_failed,
+        failed_paths,
     };
     Ok(stats)
 }

@@ -61,6 +61,14 @@ Once your buddy's client is also running (and your pairing is active),
 you'll see either "backup cycle complete" (if you set `BACKUP_DIR_HOST`)
 or "connectivity check succeeded" roughly every 30 seconds.
 
+Before any of that, the client checks its own setup and refuses to start
+with a clear error rather than failing confusingly later — a `BACKUP_DIR`
+that doesn't exist, a `DATA_DIR` it can't actually write to, or an
+`API_URL` that isn't a valid URL all stop it immediately. A short
+`BACKUP_PASSPHRASE` (under 12 characters) doesn't stop it, but logs a
+warning — there's no way to recover your data if it's ever lost or
+guessed, so a short one is worth reconsidering.
+
 ## Status dashboard
 
 This device also serves its own small status page — not to be confused
@@ -135,6 +143,13 @@ from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
   untouched, so this can desync the two if used carelessly.
 - `/data/restored/` — default destination for `restore` (see above); only
   appears after you run it.
+- `/data/received/<buddy node id>/.versions/` — backup slots for that
+  buddy's files, kept when a file is overwritten or deleted (see "File
+  versions" below). Deleting this folder just gives up that recovery
+  history; it doesn't touch the live files in `received/`.
+- `/data/bandwidth.json` — lifetime bytes moved via relay vs. direct (see
+  "Relay bandwidth" below). Deleting it just resets the dashboard's
+  counter back to zero.
 
 ## Disk safety: pledges vs. the real disk
 
@@ -179,3 +194,61 @@ There's no live, mid-transfer rate (e.g. "currently uploading at 2MB/s") —
 cycles run every 30s and are usually short, so a last-cycle average is
 what's shown rather than adding a streaming/websocket layer for numbers
 that would mostly read "idle" between cycles anyway.
+
+Lifetime relay-vs-direct totals are also shown, in their own card on the
+dashboard — see "Relay bandwidth" below.
+
+## File versions — protection against overwrites and accidental deletes
+
+A buddy's copy used to just mirror yours exactly: whatever you last sent
+them is all they have. Now, whenever a file you'd already backed up gets
+overwritten or deleted, the previous content isn't discarded — it's kept
+as a numbered backup slot (`.versions/` inside that buddy's `received/`
+folder on the receiving end), up to the 2 most recent replacements. So at
+any time, up to 3 copies of a file exist on your buddy's disk: the current
+one (if it still exists) plus its last 2 predecessors. A delete isn't
+destructive either — the deleted content becomes the newest backup slot
+rather than vanishing, so a fat-fingered local delete is recoverable the
+same way a bad overwrite is.
+
+To get one back: open **Browse files** on a buddy's card, click
+**History** next to a file, and pick a version to restore. It's written
+to `data/restored/<buddy>/<path>.v<N>.bak` — alongside, never over, a
+normal restore of that file — so you can compare before deciding what to
+keep.
+
+This is a backstop against corruption, a bad sync, or an accidental local
+delete, not full version history — only the live copy and its last 2
+predecessors are kept, and they still count toward your buddy's disk and
+(once a path has cycled through all its backup slots) their pledge to you,
+same as any other data you store with them.
+
+## Buddy health — staleness and per-file failures
+
+The pill next to each buddy's name shows the *last* cycle's result, but a
+buddy could look fine on that alone while quietly failing for a while
+(say, a one-off error that happens to land on the very last cycle you
+happened to check). The dashboard tracks this separately: if a buddy
+hasn't had a *successful* cycle in over `STALE_AFTER_SECS` (10 minutes by
+default — see `.env.example`), a red **stale** badge shows up next to
+their status, saying how long it's actually been since something last
+went through.
+
+Separately, if specific files keep failing to send or delete while the
+cycle otherwise runs fine, they're called out by name under that buddy's
+card (capped at the first 10, if there are more) rather than just logged
+and silently retried forever in the background. A cycle with any failing
+files is no longer reported as fully "ok" either, for the same reason.
+
+## Relay bandwidth
+
+Every file transferred — your own backups and restores, and anything a
+buddy pushes to or pulls from you — is tallied by which network path
+carried it, direct or via `relay.filegarden.net`, and kept as a running
+lifetime total in a **Bandwidth** card on the dashboard (persisted to
+`data/bandwidth.json`, so it survives restarts). This is the number that
+would actually matter for metered relay-bandwidth billing: direct
+peer-to-peer transfers don't touch the relay at all and cost nothing to
+meter, so the relay figure is specifically "how much of this device's
+traffic would need billing for," not total traffic. This only tracks and
+surfaces the number — it isn't wired up to billing yet.

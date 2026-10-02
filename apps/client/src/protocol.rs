@@ -47,6 +47,14 @@ pub enum SyncRequest {
     /// trusting the pledge they agreed to, so an over-pledged or
     /// nearly-full buddy is visible before it becomes a failed backup.
     DiskStats,
+    /// "What old copies of this file do you still have?" — every time a
+    /// path is overwritten or deleted, the previous content is kept as a
+    /// numbered backup rather than discarded (see receive.rs's
+    /// rotate_versions). Answered with ListVersionsResponse.
+    ListVersions { path: String },
+    /// "Send me backup slot N of this file." Same response shape as Get:
+    /// a SyncAck, then on success the raw ciphertext bytes.
+    GetVersion { path: String, version: u32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,6 +97,23 @@ pub struct DiskStatsResponse {
     pub available_bytes: u64,
     pub used_bytes: u64,
     pub pledged_out_total_bytes: u64,
+}
+
+/// One backed-up previous copy of a file. `version: 1` is the most
+/// recently replaced/deleted content, counting up to however many backup
+/// slots this host keeps (see receive.rs::MAX_BACKUP_VERSIONS) — the
+/// live/current copy (if it still exists) is not included here, it's what
+/// List/Get already report.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VersionEntry {
+    pub version: u32,
+    pub size: u64,
+    pub modified_unix: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListVersionsResponse {
+    pub versions: Vec<VersionEntry>,
 }
 
 pub async fn write_frame<T: Serialize>(send: &mut iroh::endpoint::SendStream, value: &T) -> Result<()> {

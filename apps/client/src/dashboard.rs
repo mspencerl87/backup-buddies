@@ -6,7 +6,7 @@ use std::{
 
 use age::secrecy::SecretString;
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
@@ -15,6 +15,7 @@ use axum::{
 use iroh::{Endpoint, EndpointId, RelayUrl};
 use serde::{Deserialize, Serialize};
 
+use crate::bandwidth::{BandwidthBook, BandwidthTotals};
 use crate::manifest::Manifest;
 use crate::netinfo::ConnectionQuality;
 use crate::receive::{self, PledgeBook};
@@ -50,12 +51,39 @@ pub struct CycleRecord {
     pub bytes_sent: Option<u64>,
     pub duration_ms: Option<u64>,
     pub connection: Option<ConnectionQuality>,
+    // How many files this cycle failed to send/delete, and a capped
+    // sample of which ones — None for a ping (not applicable). A cycle
+    // with any failures is reported as not-`ok`, same as a connection
+    // failure, since "ran but some files are stuck" deserves the same
+    // attention as "didn't run at all".
+    pub files_failed: Option<usize>,
+    pub failed_files: Vec<String>,
+    // Set by record_cycle below, not by the caller: when this cycle
+    // succeeded, last_ok_at is this cycle's own `at`; when it didn't,
+    // it's carried forward from whatever the last successful cycle was —
+    // so the dashboard can show "last synced 2h ago" even while recent
+    // attempts have been failing, rather than losing that fact the moment
+    // the first failure overwrites the record.
+    pub last_ok_at: Option<u64>,
+    // Same idea: how many cycles in a row have failed, reset to 0 the
+    // moment one succeeds. One bad cycle reads very differently from
+    // twenty in a row.
+    pub consecutive_failures: u32,
 }
 
 pub type CycleBook = Arc<Mutex<HashMap<String, CycleRecord>>>;
 
-pub fn record_cycle(cycle_stats: &CycleBook, node_id: &str, record: CycleRecord) {
-    cycle_stats.lock().unwrap().insert(node_id.to_string(), record);
+pub fn record_cycle(cycle_stats: &CycleBook, node_id: &str, mut record: CycleRecord) {
+    let mut book = cycle_stats.lock().unwrap();
+    let previous = book.get(node_id);
+    record.last_ok_at = if record.ok {
+        Some(record.at)
+    } else {
+        previous.and_then(|r| r.last_ok_at)
+    };
+    record.consecutive_failures =
+        if record.ok { 0 } else { previous.map(|r| r.consecutive_failures).unwrap_or(0) + 1 };
+    book.insert(node_id.to_string(), record);
 }
 
 pub fn unix_now() -> u64 {
@@ -68,10 +96,12 @@ struct AppState {
     data_dir: PathBuf,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
+    bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
+    stale_after_secs: u64,
 }
 
 #[derive(Serialize)]
@@ -88,6 +118,11 @@ struct BuddyStatus {
     sent_files: usize,
     sent_bytes: u64,
     last_cycle: Option<CycleRecord>,
+    // True when this buddy hasn't had a successful cycle in over
+    // stale_after_secs (or has never had one at all despite trying) —
+    // computed here rather than left to the frontend so the threshold
+    // lives in one place (Config::stale_after_secs).
+    stale: bool,
 }
 
 /// Physical space on the filesystem backing `data_dir` — where every
@@ -115,6 +150,12 @@ struct StatusResponse {
     // actually fit.
     pledged_out_total_bytes: u64,
     buddies: Vec<BuddyStatus>,
+    // Lifetime bytes this device has moved via relay.filegarden.net vs.
+    // direct peer-to-peer, across every backup, restore, and buddy-served
+    // request — see bandwidth.rs. Global, not per-buddy: what matters here
+    // is how much of this device's traffic costs relay bandwidth, same
+    // number regardless of which buddy it was with.
+    bandwidth: BandwidthTotals,
 }
 
 // A buddy's DiskStatsResponse (their numbers, from the wire protocol)
@@ -148,6 +189,19 @@ struct RestoreRequest {
     paths: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct PathQuery {
+    path: String,
+}
+
+/// Request body for POST /api/restore-version/:node_id — restores one
+/// specific backup slot of one file, rather than the live copy.
+#[derive(Deserialize)]
+struct RestoreVersionRequest {
+    path: String,
+    version: u32,
+}
+
 /// Binds and serves the dashboard until the process shuts down. Meant to
 /// run alongside the accept/outbound loops in main.rs's tokio::select!,
 /// not instead of them — it only reads the same state those loops already
@@ -160,20 +214,24 @@ pub async fn run(
     data_dir: PathBuf,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
+    bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
+    stale_after_secs: u64,
 ) -> anyhow::Result<()> {
     let state = AppState {
         node_id,
         data_dir,
         backup_dir,
         pledge_book,
+        bandwidth_book,
         cycle_stats,
         endpoint,
         relay_url,
         passphrase,
+        stale_after_secs,
     };
 
     let app = Router::new()
@@ -183,7 +241,9 @@ pub async fn run(
         .route("/api/status", get(status_handler))
         .route("/api/buddies/:node_id/files", get(files_handler))
         .route("/api/buddies/:node_id/disk", get(buddy_disk_handler))
+        .route("/api/buddies/:node_id/versions", get(versions_handler))
         .route("/api/restore/:node_id", post(restore_handler))
+        .route("/api/restore-version/:node_id", post(restore_version_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
@@ -255,6 +315,13 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         let received_files = received.len();
         let received_total_bytes: u64 = received.iter().map(|f| f.size).sum();
 
+        // A buddy only counts as stale once we've actually tried and
+        // failed — a brand-new pairing with no cycle yet gets the existing
+        // "no cycle yet" pill instead, not a false stale warning.
+        let stale = cycle.as_ref().is_some_and(|c| {
+            c.last_ok_at.map(|at| unix_now().saturating_sub(at) > state.stale_after_secs).unwrap_or(true)
+        });
+
         buddies.push(BuddyStatus {
             label: cycle.as_ref().map(|c| c.label.clone()),
             node_id,
@@ -265,8 +332,11 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
             sent_files,
             sent_bytes,
             last_cycle: cycle,
+            stale,
         });
     }
+
+    let bandwidth = *state.bandwidth_book.lock().unwrap();
 
     Json(StatusResponse {
         node_id: state.node_id.clone(),
@@ -275,6 +345,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         disk,
         pledged_out_total_bytes,
         buddies,
+        bandwidth,
     })
 }
 
@@ -324,6 +395,82 @@ async fn buddy_disk_handler(
     }
 }
 
+// Asks the buddy what backup slots still exist for one path — live, same
+// as files_handler, so "what can I recover" always reflects what's
+// actually on their disk right now.
+async fn versions_handler(
+    State(state): State<AppState>,
+    AxumPath(node_id_str): AxumPath<String>,
+    Query(query): Query<PathQuery>,
+) -> impl IntoResponse {
+    let buddy_id: EndpointId = match node_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "not a valid Iroh node id".to_string()).into_response(),
+    };
+
+    match crate::restore::list_file_versions(&state.endpoint, &state.relay_url, buddy_id, &query.path).await
+    {
+        Ok(versions) => Json(ListVersionsResponse { versions }).into_response(),
+        Err(err) => {
+            (StatusCode::BAD_GATEWAY, format!("couldn't reach buddy for version history: {err}"))
+                .into_response()
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ListVersionsResponse {
+    versions: Vec<crate::protocol::VersionEntry>,
+}
+
+// Restores one backup slot of one file — see restore::restore_version for
+// where it ends up on disk (suffixed, alongside a normal restore, never
+// overwriting it).
+async fn restore_version_handler(
+    State(state): State<AppState>,
+    AxumPath(node_id_str): AxumPath<String>,
+    Json(body): Json<RestoreVersionRequest>,
+) -> impl IntoResponse {
+    let buddy_id: EndpointId = match node_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "not a valid Iroh node id".to_string()).into_response(),
+    };
+
+    let restore_dir = state.data_dir.join("restored").join(&node_id_str);
+    if let Err(err) = tokio::fs::create_dir_all(&restore_dir).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't create restore directory: {err}"))
+            .into_response();
+    }
+
+    match crate::restore::restore_version(
+        &state.endpoint,
+        &state.relay_url,
+        &state.passphrase,
+        buddy_id,
+        &restore_dir,
+        &body.path,
+        body.version,
+    )
+    .await
+    {
+        Ok(stats) => {
+            if let Some(connection) = &stats.connection {
+                crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
+                    .await;
+            }
+            Json(RestoreResponse {
+                restored_files: stats.files_restored,
+                dir: restore_dir.display().to_string(),
+                bytes_restored: stats.bytes_restored,
+                duration_ms: stats.duration_ms,
+                connection: stats.connection,
+            })
+            .into_response()
+        }
+        Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
+    }
+}
+
 // Pulls files that buddy currently has stored for us and writes them
 // under data_dir/restored/<their node id>/ — a fixed, predictable
 // location (separate per buddy, so restoring from two buddies in a row
@@ -364,14 +511,20 @@ async fn restore_handler(
     };
 
     match result {
-        Ok(stats) => Json(RestoreResponse {
-            restored_files: stats.files_restored,
-            dir: restore_dir.display().to_string(),
-            bytes_restored: stats.bytes_restored,
-            duration_ms: stats.duration_ms,
-            connection: stats.connection,
-        })
-        .into_response(),
+        Ok(stats) => {
+            if let Some(connection) = &stats.connection {
+                crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
+                    .await;
+            }
+            Json(RestoreResponse {
+                restored_files: stats.files_restored,
+                dir: restore_dir.display().to_string(),
+                bytes_restored: stats.bytes_restored,
+                duration_ms: stats.duration_ms,
+                connection: stats.connection,
+            })
+            .into_response()
+        }
         Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
     }
 }
@@ -475,6 +628,12 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .file-row .path { flex: 1; word-break: break-all; }
   .file-row .size { color: var(--text-muted); white-space: nowrap; }
   .file-row button { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
+  .file-history {
+    padding: 0.4rem 0.6rem 0.6rem 2.3rem; font-size: 0.78rem; color: var(--text-muted);
+    border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02);
+  }
+  .version-row { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; padding: 0.25rem 0; }
+  .version-row button { padding: 0.2rem 0.55rem; font-size: 0.72rem; flex-shrink: 0; }
   .modal-status { font-size: 0.8rem; margin-top: 0.6rem; }
   .modal-footer { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
 </style>
@@ -511,6 +670,26 @@ const INDEX_HTML: &str = r#"<!doctype html>
     </div>
     <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
     <div class="disk-warning" id="disk-warning" style="display:none;"></div>
+  </div>
+  <div class="card" id="bandwidth-card">
+    <h2>Bandwidth</h2>
+    <div class="muted">Lifetime, across every backup, restore, and buddy request this device has handled.</div>
+    <div class="disk-stats">
+      <div class="stat">
+        <div class="label">Via relay</div>
+        <div class="value" id="bw-relay">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Direct (peer-to-peer)</div>
+        <div class="value" id="bw-direct">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Total</div>
+        <div class="value" id="bw-total">…</div>
+      </div>
+    </div>
+    <div class="bar-track"><div class="bar-fill" id="bw-bar" style="width:0%"></div></div>
+    <div class="muted" style="margin-top:0.4rem; font-size:0.78rem;" id="bw-note"></div>
   </div>
   <div id="empty" class="card" style="display:none;">No buddies seen yet — waiting on the first poll of the API.</div>
   <div id="buddies"></div>
@@ -772,7 +951,13 @@ function renderBreadcrumb() {
   }
 }
 
+// Returns a fragment of [row, history-panel] rather than just the row, so
+// every existing call site (`browseList.appendChild(makeFileRow(item))`)
+// keeps working unchanged — appending a fragment appends both children in
+// order. The history panel stays empty and hidden until "History" is
+// clicked, so opening the browser doesn't fire a versions request per file.
 function makeFileRow(item) {
+  const frag = document.createDocumentFragment();
   const row = document.createElement("div");
   row.className = "file-row";
   row.innerHTML = `
@@ -781,7 +966,12 @@ function makeFileRow(item) {
     <span class="path">${item.name}</span>
     <span class="size">${fmtBytes(item.size)}</span>
     <button class="secondary file-restore-one">Restore</button>
+    <button class="secondary file-history-toggle">History</button>
   `;
+  const history = document.createElement("div");
+  history.className = "file-history";
+  history.style.display = "none";
+
   const checkbox = row.querySelector(".file-pick");
   checkbox.checked = browseState.selected.has(item.path);
   checkbox.addEventListener("change", () => {
@@ -805,7 +995,76 @@ function makeFileRow(item) {
       btn.disabled = false;
     }
   });
-  return row;
+
+  let historyLoaded = false;
+  row.querySelector(".file-history-toggle").addEventListener("click", async () => {
+    const wasOpen = history.style.display !== "none";
+    history.style.display = wasOpen ? "none" : "block";
+    if (wasOpen || historyLoaded) return;
+    historyLoaded = true;
+    history.textContent = "Checking for older versions…";
+    try {
+      const res = await fetch(
+        "/api/buddies/" + encodeURIComponent(browseState.nodeId) + "/versions?path=" +
+        encodeURIComponent(item.path)
+      );
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+      renderVersionHistory(history, item.path, body.versions || []);
+    } catch (err) {
+      historyLoaded = false; // allow a retry on the next click
+      history.textContent = "Couldn't load version history: " + err.message;
+    }
+  });
+
+  frag.appendChild(row);
+  frag.appendChild(history);
+  return frag;
+}
+
+// Every overwrite or delete keeps the previous content as a numbered
+// backup slot (see receive.rs::rotate_versions) — this lists whatever
+// slots a buddy still has for one path and lets the person pull an older
+// one back, separately from a normal restore (which only ever gives you
+// the live copy).
+function renderVersionHistory(container, path, versions) {
+  if (versions.length === 0) {
+    container.textContent = "No earlier versions kept for this file.";
+    return;
+  }
+  container.innerHTML = "";
+  for (const v of versions) {
+    const when = v.modified_unix ? fmtAgo(v.modified_unix) : "at an unknown time";
+    const row = document.createElement("div");
+    row.className = "version-row";
+    row.innerHTML = `
+      <span>Version ${v.version} — ${fmtBytes(v.size)}, kept ${when}</span>
+      <button class="secondary version-restore">Restore this version</button>
+    `;
+    row.querySelector(".version-restore").addEventListener("click", async (ev) => {
+      const btn = ev.target;
+      btn.disabled = true;
+      browseResult.textContent = "Restoring version " + v.version + " of " + path + "…";
+      browseResult.style.color = "";
+      try {
+        const res = await fetch("/api/restore-version/" + encodeURIComponent(browseState.nodeId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path, version: v.version }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+        browseResult.textContent = describeRestoreResult(body) + " (as a separate .v" + v.version + ".bak file)";
+        browseResult.style.color = "var(--ok)";
+      } catch (err) {
+        browseResult.textContent = "Restore failed: " + err.message;
+        browseResult.style.color = "var(--danger)";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    container.appendChild(row);
+  }
 }
 
 function makeFolderRow(name, node, path) {
@@ -1008,6 +1267,27 @@ function renderBuddy(b) {
       }
       if (cycle.connection) cycleDetail += " · " + fmtConnection(cycle.connection);
     }
+    if (cycle.consecutive_failures > 1) {
+      cycleDetail += " · " + cycle.consecutive_failures + " cycles in a row now";
+    }
+  }
+
+  // A buddy can look "ok" on the very latest cycle (kind pill) while still
+  // having gone a long time without a *successful* one, or have files that
+  // keep failing cycle after cycle — both worth a loud, separate warning
+  // rather than burying them in the one-line cycle detail above.
+  let stalePill = "";
+  if (b.stale) {
+    const lastOkText = cycle && cycle.last_ok_at ? fmtAgo(cycle.last_ok_at) : "never";
+    stalePill = ' <span class="pill pill-err">stale — last synced ' + lastOkText + '</span>';
+  }
+  let failedLine = "";
+  if (cycle && cycle.files_failed > 0) {
+    const sample =
+      cycle.failed_files && cycle.failed_files.length ? ": " + cycle.failed_files.join(", ") : "";
+    failedLine =
+      '<div class="muted" style="color: var(--danger); margin-top: 0.4rem;">⚠ ' +
+      cycle.files_failed + " file(s) won't send/receive" + sample + "</div>";
   }
 
   const div = document.createElement("div");
@@ -1015,9 +1295,10 @@ function renderBuddy(b) {
   div.innerHTML = `
     <div class="row">
       <h2>${b.label ? b.label : b.node_id.slice(0, 12) + "…"}</h2>
-      ${cyclePill}
+      <div>${cyclePill}${stalePill}</div>
     </div>
     <div class="muted">${cycleDetail}</div>
+    ${failedLine}
     <div class="row" style="margin-top: 0.9rem;">
       <div>
         <div class="muted">You've sent them</div>
@@ -1102,6 +1383,26 @@ function renderDisk(data) {
   }
 }
 
+// Relay vs. direct is shown as a split bar (relay first) so it's obvious
+// at a glance how much of this device's lifetime traffic actually costs
+// relay bandwidth vs. went peer-to-peer for free.
+function renderBandwidth(data) {
+  const bw = data.bandwidth || { relay_bytes: 0, direct_bytes: 0 };
+  const total = bw.relay_bytes + bw.direct_bytes;
+  document.getElementById("bw-relay").textContent = fmtBytes(bw.relay_bytes);
+  document.getElementById("bw-direct").textContent = fmtBytes(bw.direct_bytes);
+  document.getElementById("bw-total").textContent = fmtBytes(total);
+
+  const relayPct = total > 0 ? (bw.relay_bytes / total) * 100 : 0;
+  document.getElementById("bw-bar").style.width = relayPct + "%";
+
+  const note = document.getElementById("bw-note");
+  note.textContent =
+    total === 0
+      ? "Nothing transferred yet."
+      : Math.round(relayPct) + "% of all traffic so far has gone through the relay rather than direct.";
+}
+
 async function refresh() {
   const res = await fetch("/api/status");
   const data = await res.json();
@@ -1109,6 +1410,7 @@ async function refresh() {
   document.getElementById("backup-dir").textContent = data.backup_dir || "(nothing — receive-only)";
 
   renderDisk(data);
+  renderBandwidth(data);
 
   const container = document.getElementById("buddies");
   const empty = document.getElementById("empty");
