@@ -20,6 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+# dashboard.rs embeds these via include_str! at compile time, so the
+# builder stage needs them on disk before `cargo build` runs — brought in
+# from apps/web/assets (the canonical copy) rather than regenerated here.
+COPY assets ./assets
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim

@@ -37,10 +37,19 @@ header {
 }
 
 header .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 700;
   font-size: 1.1rem;
   text-decoration: none;
   color: var(--text);
+}
+
+header .logo-mark {
+  width: 28px;
+  height: 28px;
+  display: block;
 }
 
 header nav {

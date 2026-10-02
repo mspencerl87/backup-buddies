@@ -7,7 +7,7 @@ use std::{
 use age::secrecy::SecretString;
 use axum::{
     extract::{Path as AxumPath, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
     Json, Router,
@@ -17,6 +17,14 @@ use serde::Serialize;
 
 use crate::manifest::Manifest;
 use crate::receive::{self, PledgeBook};
+
+// Brand assets, shared with apps/web/assets (the canonical copy — see
+// that directory's files and this crate's Dockerfile for how they get
+// here). Embedded at compile time rather than served from disk: this
+// dashboard has no static-file directory of its own, and two tiny SVGs
+// aren't worth adding one for.
+const MARK_SVG: &str = include_str!("../assets/mark.svg");
+const FAVICON_SVG: &str = include_str!("../assets/favicon.svg");
 
 /// One entry per buddy, updated by main.rs's outbound loop every time it
 /// finishes a backup cycle (or a ping, for a buddy with no BACKUP_DIR) —
@@ -114,6 +122,8 @@ pub async fn run(
 
     let app = Router::new()
         .route("/", get(index_handler))
+        .route("/favicon.svg", get(favicon_handler))
+        .route("/mark.svg", get(mark_handler))
         .route("/api/status", get(status_handler))
         .route("/api/restore/:node_id", post(restore_handler))
         .with_state(state);
@@ -126,6 +136,14 @@ pub async fn run(
 
 async fn index_handler() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+async fn favicon_handler() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], FAVICON_SVG)
+}
+
+async fn mark_handler() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], MARK_SVG)
 }
 
 async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
@@ -219,6 +237,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backup Buddies — this device</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   :root {
     --bg: #0f1115; --surface: #171a21; --border: #2a2e38; --text: #e8e9ec;
@@ -231,8 +250,10 @@ const INDEX_HTML: &str = r#"<!doctype html>
     background: var(--bg); color: var(--text); line-height: 1.5;
   }
   header { padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border); }
-  header h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
-  header .sub { color: var(--text-muted); font-size: 0.85rem; }
+  header .title-row { display: flex; align-items: center; gap: 0.6rem; }
+  header .title-row img { width: 26px; height: 26px; display: block; }
+  header h1 { font-size: 1.1rem; margin: 0; }
+  header .sub { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; }
   main { max-width: 920px; margin: 0 auto; padding: 1.5rem; }
   .card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -262,7 +283,10 @@ const INDEX_HTML: &str = r#"<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Backup Buddies</h1>
+  <div class="title-row">
+    <img src="/mark.svg" alt="">
+    <h1>Backup Buddies</h1>
+  </div>
   <div class="sub">This device: <code id="node-id">…</code> · backing up <code id="backup-dir">…</code></div>
 </header>
 <main>
