@@ -58,27 +58,75 @@
           On your <a href="/dashboard.html">dashboard</a>, under <strong>Devices</strong>, give this machine a label (e.g. "home desktop") and click <strong>Add device</strong>. You'll see a token — copy it now, it's only shown once.
         </li>
         <li>
-          <strong>Download the client</strong>
-          Run this on the machine you want to back up — it downloads everything needed, no account or repository access required:
-          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>curl -fsSL https://app.filegarden.net/client/install.sh | bash
-cd backup-buddies-client</code></pre>
-        </li>
-        <li>
-          <strong>Fill in your <code>.env</code> file</strong>
-          The installer already created <code>.env</code> for you from the template — open it and fill in <code>DEVICE_TOKEN</code> (from step 1) and <code>BACKUP_PASSPHRASE</code> (your own — never sent to us or your buddy). Leave <code>API_URL</code> and <code>RELAY_URL</code> as they are.
-          Your data is stored in <code>DATA_DIR_HOST</code>, a real folder on this machine — it defaults to <code>./data</code> next to this file, but you can point it anywhere (a separate disk, a NAS mount) by changing that one line.
+          <strong>Make a folder and save two files into it</strong>
+          Create a folder for the client (e.g. <code>backup-buddies-client</code>) and save these two files inside it exactly as shown — nothing to fill in on the first one, it's the same for everyone:
+          <p class="muted" style="margin:0.75rem 0 0.25rem">
+            <code>docker-compose.yml</code> — pulls the published client image, no build step, no source code on your machine:
+          </p>
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>services:
+  client:
+    image: ghcr.io/mspencerl87/backup-buddies/client:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - BACKUP_DIR=/backup
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8080"
+    volumes:
+      - ${DATA_DIR_HOST}:/data
+      - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro</code></pre>
+          <p class="muted" style="margin:1rem 0 0.25rem">
+            <code>.env</code> — this is the one you customize. Only <strong>DEVICE_TOKEN</strong> and <strong>BACKUP_PASSPHRASE</strong> are required; the rest have sensible defaults:
+          </p>
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>API_URL=https://api.filegarden.net
+RELAY_URL=https://relay.filegarden.net
+
+<strong style="color:#4f8cff">DEVICE_TOKEN=paste_the_token_from_step_1_here</strong>
+<strong style="color:#4f8cff">BACKUP_PASSPHRASE=a few random words only you know</strong>
+
+# Only set this if this machine should SEND backups, not just receive them —
+# point it at the real folder you want backed up. Leave it out otherwise.
+#BACKUP_DIR_HOST=./my-files
+
+# Where this device's data lands — defaults to ./data next to this file.
+DATA_DIR_HOST=./data</code></pre>
+          <p class="muted" style="margin-top:0.75rem">
+            Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
+            <code>BACKUP_PASSPHRASE=correct horse battery staple woodland</code> — yours will look
+            different; the token comes from step 1, and the passphrase is anything memorable only you know.
+          </p>
         </li>
         <li>
           <strong>Start it</strong>
-          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>docker compose up -d
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>docker compose pull
+docker compose up -d
 docker compose logs -f</code></pre>
-          The first run builds the image locally (a few minutes); after that, starting is instant. You should see a line confirming the device registered. Your Devices card on the dashboard will now show this device as connected.
+          <code>pull</code> fetches the already-built image — a few seconds, not a build. You should see a line confirming the device registered. Your Devices card on the dashboard will now show this device as connected.
         </li>
         <li>
           <strong>Confirm it found your buddy</strong>
           Once your buddy's client is running too, you'll see a "connectivity test succeeded" line in the logs roughly every 30 seconds. That confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible.
         </li>
       </ol>
+
+      <details class="marketplace-tier" style="margin-top:1.5rem">
+        <summary>Prefer to build it yourself from source instead?</summary>
+        <div style="padding:0.75rem 0 0.25rem">
+          <p class="muted">
+            One command downloads the full source and a <code>docker-compose.yml</code>
+            that builds it locally instead of pulling the published image —
+            useful if you'd rather compile it yourself than trust a prebuilt
+            image, or want to inspect the code first:
+          </p>
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>curl -fsSL https://app.filegarden.net/client/install.sh | bash
+cd backup-buddies-client</code></pre>
+          <p class="muted">
+            Fill in the same two <code>.env</code> values as above, then
+            <code>docker compose up -d</code> — the first run builds the
+            image locally (a few minutes); after that, starting is instant.
+          </p>
+        </div>
+      </details>
     </section>
 
     <section class="about-section">
@@ -98,9 +146,10 @@ docker compose logs -f</code></pre>
       <p class="muted">Run these from inside the <code>backup-buddies-client</code> folder (where its <code>docker-compose.yml</code> lives):</p>
       <ul class="tech-list">
         <li><code>docker compose up -d</code> — start the client in the background. Safe to run again any time (e.g. after editing <code>.env</code>) — it restarts with the new settings.</li>
+        <li><code>docker compose pull && docker compose up -d</code> — update to the latest published client version. Nothing updates itself automatically, so run this whenever you want the newest release.</li>
         <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
         <li><code>docker compose ps</code> — check whether it's currently running.</li>
-        <li><code>docker compose restart</code> — restart it without rebuilding.</li>
+        <li><code>docker compose restart</code> — restart it without pulling or rebuilding.</li>
         <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in <code>DATA_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
       </ul>
     </section>
