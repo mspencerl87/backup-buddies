@@ -4,7 +4,7 @@ use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
 
-use crate::protocol::{self, ListEntry, ListResponse, SyncAck, SyncRequest};
+use crate::protocol::{self, DiskStatsResponse, ListEntry, ListResponse, SyncAck, SyncRequest};
 use crate::receive::safe_join;
 
 const MAX_FILE_BYTES: usize = 5 * 1024 * 1024 * 1024; // matches receive.rs's per-file cap
@@ -21,6 +21,23 @@ pub async fn list_buddy_files(
 ) -> Result<Vec<ListEntry>> {
     let conn = connect(endpoint, relay_url, buddy_id).await?;
     list_on(&conn).await
+}
+
+/// Connects to a buddy and asks for their real disk numbers (see
+/// DiskStatsResponse) — used by the dashboard to show what a buddy
+/// actually has available, next to what they've pledged, so an
+/// over-pledged or nearly-full buddy is visible without either side
+/// having to ask the other directly.
+pub async fn fetch_buddy_disk_stats(
+    endpoint: &Endpoint,
+    relay_url: &RelayUrl,
+    buddy_id: EndpointId,
+) -> Result<DiskStatsResponse> {
+    let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    protocol::write_frame(&mut send, &SyncRequest::DiskStats).await?;
+    send.finish().context("failed to finish send stream")?;
+    protocol::read_frame(&mut recv).await.context("failed to read disk stats")
 }
 
 async fn connect(

@@ -40,6 +40,13 @@ pub enum SyncRequest {
     /// SyncAck (ok:false if not found), or on success a SyncAck{ok:true}
     /// immediately followed by the raw ciphertext bytes.
     Get { path: String },
+    /// "What does your disk actually look like?" — real filesystem space
+    /// plus how much of it you've committed across every buddy, not just
+    /// what you've pledged me. Answered with DiskStatsResponse. Lets each
+    /// side's dashboard show the other's real numbers instead of just
+    /// trusting the pledge they agreed to, so an over-pledged or
+    /// nearly-full buddy is visible before it becomes a failed backup.
+    DiskStats,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -67,6 +74,21 @@ pub struct ListEntry {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ListResponse {
     pub files: Vec<ListEntry>,
+}
+
+/// Answer to `SyncRequest::DiskStats` — the responder's real, physical
+/// filesystem numbers (not a promise): what's actually on disk under its
+/// DATA_DIR, plus the sum of what it's pledged out across every buddy it
+/// has (including, but not limited to, the one asking). Zeroed out rather
+/// than omitted when the host couldn't read disk stats, so a buddy on an
+/// unusual filesystem shows up as "unknown" instead of breaking the
+/// dashboard that's asking.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DiskStatsResponse {
+    pub total_bytes: u64,
+    pub available_bytes: u64,
+    pub used_bytes: u64,
+    pub pledged_out_total_bytes: u64,
 }
 
 pub async fn write_frame<T: Serialize>(send: &mut iroh::endpoint::SendStream, value: &T) -> Result<()> {

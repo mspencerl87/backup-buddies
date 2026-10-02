@@ -133,5 +133,26 @@ from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
   accepting any incoming file. Deleting it resets what's counted toward
   each buddy's pledge back to zero — the underlying data in `received/` is
   untouched, so this can desync the two if used carelessly.
+
+## Disk safety: pledges vs. the real disk
+
+A pledge is just a number two accounts agreed on over the API — it's not a
+reservation the filesystem enforces. On top of the per-buddy pledge check
+above, every incoming file is also checked against the *real* free space on
+the filesystem under `DATA_DIR` (`statvfs`, same mechanism the dashboard's
+Disk card reads). A write that would eat into a floor of whichever is
+bigger — 2GB flat, or 5% of the filesystem's total size — is rejected with
+"not enough disk space on this host", independent of whether the sender is
+still within their pledge. This is what keeps an over-pledge (or anything
+else filling the same disk) from being able to actually starve the host,
+with no admin intervention needed.
+
+The dashboard also lets you check a buddy's *real* numbers directly — each
+buddy card fetches their live disk stats (total/free, and what they've
+pledged out to everyone, not just you) over the sync protocol and shows it
+next to their pledge, with a "Recheck" button for an on-demand refresh. If
+a buddy's actual free space is less than what they've pledged out, it's
+called out in red — useful for spotting a buddy who over-pledged before
+anything actually fails.
 - `/data/restored/` — default destination for `restore` (see above); only
   appears after you run it.

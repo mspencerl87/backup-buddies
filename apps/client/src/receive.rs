@@ -7,7 +7,34 @@ use std::{
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::protocol::{self, ListEntry, ListResponse, SyncAck, SyncRequest};
+use crate::protocol::{self, DiskStatsResponse, ListEntry, ListResponse, SyncAck, SyncRequest};
+
+// Never let incoming buddy data consume the disk down to nothing, no
+// matter what's been pledged — pledges are numbers two people agreed on
+// over the API, not a reservation the OS enforces, and an over-pledge (or
+// just something else on the same disk growing) shouldn't be able to take
+// this host down. The floor is whichever is bigger: a flat 2GB, or 5% of
+// the filesystem's total size, so it scales sensibly from a small test
+// box up to a many-terabyte server.
+const MIN_FREE_RESERVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MIN_FREE_RESERVE_PERCENT: u64 = 5;
+
+// Real, physical headroom check — independent of and in addition to the
+// per-buddy pledge enforcement in handle_put below. Fails open (allows
+// the write) if disk stats can't be read at all, since a transient statvfs
+// error shouldn't block every incoming backup; the pledge check is still
+// the primary guard in that case.
+async fn disk_has_room_for(data_dir: &Path, additional_bytes: u64) -> bool {
+    let data_dir = data_dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir)).await {
+        Ok(Ok(stats)) => {
+            let reserve = MIN_FREE_RESERVE_BYTES.max(stats.total_space() / 100 * MIN_FREE_RESERVE_PERCENT);
+            let usable = stats.available_space().saturating_sub(reserve);
+            additional_bytes <= usable
+        }
+        _ => true,
+    }
+}
 
 // How much of a buddy's pledge we've used (received_bytes) against how
 // much they've actually pledged us (pledged_bytes). Keyed by the buddy's
@@ -126,6 +153,9 @@ async fn handle_stream(
         SyncRequest::Get { path } => {
             handle_get(&mut send, &sender_dir, path).await?;
         }
+        SyncRequest::DiskStats => {
+            handle_disk_stats(&mut send, &data_dir, &pledge_book).await?;
+        }
     }
 
     send.stopped().await.ok();
@@ -175,6 +205,24 @@ async fn handle_put(
     // current size should count against the pledge — otherwise every
     // re-send of an unchanged-size file would eat into the budget again.
     let previous_size = tokio::fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
+    let incoming_delta = ciphertext_len.saturating_sub(previous_size);
+
+    // The real disk guard, ahead of the pledge check below: a pledge is
+    // just a number this host agreed to over the API, so a buddy honoring
+    // their own pledge perfectly can still arrive at a disk that's full
+    // for some other reason (an over-generous pledge, something else on
+    // the same volume). Checked first so a failure here reads as "no
+    // room" rather than the more specific "pledge exceeded".
+    if incoming_delta > 0 && !disk_has_room_for(data_dir, incoming_delta).await {
+        tracing::warn!(
+            from = %remote_id,
+            path = %path,
+            attempted_bytes = ciphertext_len,
+            "rejected file — not enough real disk space left on this host"
+        );
+        protocol::write_frame(send, &SyncAck::err("not enough disk space on this host")).await?;
+        return Ok(());
+    }
 
     let decision = {
         let mut book = pledge_book.lock().unwrap();
@@ -286,6 +334,47 @@ async fn handle_delete(
 async fn handle_list(send: &mut iroh::endpoint::SendStream, sender_dir: &Path) -> Result<()> {
     let files = list_sender_files(sender_dir).await;
     protocol::write_frame(send, &ListResponse { files }).await?;
+    Ok(())
+}
+
+// Answers DiskStats with this host's real numbers — see
+// DiskStatsResponse's doc comment for why this exists (lets the asking
+// buddy's dashboard show "what do they actually have" next to "what did
+// they pledge" instead of just trusting the pledge).
+async fn handle_disk_stats(
+    send: &mut iroh::endpoint::SendStream,
+    data_dir: &Path,
+    pledge_book: &PledgeBook,
+) -> Result<()> {
+    let pledged_out_total_bytes: u64 =
+        { pledge_book.lock().unwrap().values().map(|s| s.pledged_bytes).sum() };
+
+    let data_dir_owned = data_dir.to_path_buf();
+    let stats = tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir_owned)).await;
+
+    let response = match stats {
+        Ok(Ok(stats)) => {
+            let total_bytes = stats.total_space();
+            let available_bytes = stats.available_space();
+            DiskStatsResponse {
+                total_bytes,
+                available_bytes,
+                used_bytes: total_bytes.saturating_sub(available_bytes),
+                pledged_out_total_bytes,
+            }
+        }
+        // Couldn't read disk stats — report zeros rather than failing the
+        // whole request, so the asking dashboard can show "unknown"
+        // instead of an error.
+        _ => DiskStatsResponse {
+            total_bytes: 0,
+            available_bytes: 0,
+            used_bytes: 0,
+            pledged_out_total_bytes,
+        },
+    };
+
+    protocol::write_frame(send, &response).await?;
     Ok(())
 }
 

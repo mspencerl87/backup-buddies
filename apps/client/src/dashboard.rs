@@ -156,6 +156,7 @@ pub async fn run(
         .route("/mark.svg", get(mark_handler))
         .route("/api/status", get(status_handler))
         .route("/api/buddies/:node_id/files", get(files_handler))
+        .route("/api/buddies/:node_id/disk", get(buddy_disk_handler))
         .route("/api/restore/:node_id", post(restore_handler))
         .with_state(state);
 
@@ -274,6 +275,29 @@ async fn files_handler(
     }
 }
 
+// Connects to the buddy and asks for their real disk numbers — live, same
+// as files_handler above, not cached — so "keeping each other honest" on
+// the dashboard means right now, not whatever was true when the pledge
+// was agreed to.
+async fn buddy_disk_handler(
+    State(state): State<AppState>,
+    AxumPath(node_id_str): AxumPath<String>,
+) -> impl IntoResponse {
+    let buddy_id: EndpointId = match node_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, "not a valid Iroh node id".to_string()).into_response(),
+    };
+
+    match crate::restore::fetch_buddy_disk_stats(&state.endpoint, &state.relay_url, buddy_id).await {
+        Ok(stats) => Json(stats).into_response(),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            format!("couldn't reach buddy for disk stats: {err}"),
+        )
+            .into_response(),
+    }
+}
+
 // Pulls files that buddy currently has stored for us and writes them
 // under data_dir/restored/<their node id>/ — a fixed, predictable
 // location (separate per buddy, so restoring from two buddies in a row
@@ -374,6 +398,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
     margin-top: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 8px; font-size: 0.82rem;
     background: rgba(255,107,107,0.12); color: var(--danger);
   }
+  .buddy-disk-recheck { margin-left: 0.4rem; padding: 0.15rem 0.5rem; font-size: 0.72rem; }
   button {
     background: var(--accent); color: var(--accent-text); border: none; border-radius: 8px;
     padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;
@@ -486,6 +511,53 @@ function fmtAgo(unixSecs) {
   if (secs < 60) return secs + "s ago";
   if (secs < 3600) return Math.floor(secs / 60) + "m ago";
   return Math.floor(secs / 3600) + "h ago";
+}
+
+// --- Buddy disk checks (keeping each other honest) ------------------------
+// A buddy's pledge is just a number agreed over the API — this asks them
+// live, over the sync protocol, what their disk actually looks like right
+// now. Fetched once automatically the first time a buddy's card appears
+// (buddyDiskFetched guards against re-fetching on every 5s status poll,
+// which would mean a fresh connection to every buddy every 5 seconds);
+// the "Recheck" button bypasses that guard for an on-demand refresh.
+const buddyDiskCache = new Map(); // nodeId -> {text, color}
+const buddyDiskFetched = new Set();
+
+function formatDiskSummary(stats) {
+  if (!stats || stats.total_bytes === 0) {
+    return { text: "unknown (couldn't read their disk stats)", color: "var(--text-muted)" };
+  }
+  const overCommitted = stats.pledged_out_total_bytes > stats.available_bytes;
+  const text =
+    fmtBytes(stats.available_bytes) + " free of " + fmtBytes(stats.total_bytes) +
+    " — pledged out to buddies: " + fmtBytes(stats.pledged_out_total_bytes) +
+    (overCommitted ? " (more than they have free!)" : "");
+  return { text, color: overCommitted ? "var(--danger)" : "var(--text-muted)" };
+}
+
+function applyBuddyDisk(nodeId) {
+  const el = document.querySelector('.buddy-disk[data-node-id="' + CSS.escape(nodeId) + '"]');
+  if (!el) return;
+  const cached = buddyDiskCache.get(nodeId);
+  if (!cached) {
+    el.textContent = "checking…";
+    el.style.color = "";
+    return;
+  }
+  el.textContent = cached.text;
+  el.style.color = cached.color;
+}
+
+async function fetchBuddyDisk(nodeId) {
+  try {
+    const res = await fetch("/api/buddies/" + encodeURIComponent(nodeId) + "/disk");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+    buddyDiskCache.set(nodeId, formatDiskSummary(data));
+  } catch (err) {
+    buddyDiskCache.set(nodeId, { text: "couldn't reach them (" + err.message + ")", color: "var(--danger)" });
+  }
+  applyBuddyDisk(nodeId);
 }
 
 async function doRestore(nodeId, paths) {
@@ -707,6 +779,11 @@ function renderBuddy(b) {
       <div class="muted">Their pledge to you: ${fmtBytes(b.received_bytes_counted)} / ${fmtBytes(b.pledged_bytes)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
     </div>
+    <div class="muted" style="margin-top: 0.75rem;">
+      Their actual disk:
+      <span class="buddy-disk" data-node-id="${b.node_id}">checking…</span>
+      <button class="secondary buddy-disk-recheck" data-node-id="${b.node_id}">Recheck</button>
+    </div>
     <div style="margin-top: 1rem;">
       <button class="restore-btn" data-node-id="${b.node_id}">Restore from this buddy</button>
       <button class="secondary browse-btn" data-node-id="${b.node_id}">Browse files…</button>
@@ -719,6 +796,14 @@ function renderBuddy(b) {
   const browseBtn = div.querySelector(".browse-btn");
   const label = b.label ? b.label : b.node_id.slice(0, 12) + "…";
   browseBtn.addEventListener("click", () => openBrowseModal(b.node_id, label));
+
+  div.querySelector(".buddy-disk-recheck").addEventListener("click", () => fetchBuddyDisk(b.node_id));
+  applyBuddyDisk(b.node_id);
+  if (!buddyDiskFetched.has(b.node_id)) {
+    buddyDiskFetched.add(b.node_id);
+    fetchBuddyDisk(b.node_id);
+  }
+
   return div;
 }
 
