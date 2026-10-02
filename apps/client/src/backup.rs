@@ -61,10 +61,11 @@ pub async fn run_backup_cycle(
     let mut put_count = 0;
     for (rel_path, abs_path, size, sha256) in &to_put {
         match put_one_file(&conn, &recipient, rel_path, abs_path).await {
-            Ok(()) => {
-                manifest
-                    .entries
-                    .insert(rel_path.clone(), ManifestEntry { size: *size, sha256: sha256.clone() });
+            Ok(ciphertext_size) => {
+                manifest.entries.insert(
+                    rel_path.clone(),
+                    ManifestEntry { size: *size, sha256: sha256.clone(), ciphertext_size },
+                );
                 put_count += 1;
             }
             Err(err) => {
@@ -95,22 +96,27 @@ pub async fn run_backup_cycle(
     Ok((put_count, delete_count))
 }
 
+// Returns the ciphertext size on success — what actually got sent over
+// the wire and stored on the buddy's end, which is what the caller
+// records in the manifest for the dashboard to show (see ManifestEntry's
+// ciphertext_size field for why that's not just `size`).
 async fn put_one_file(
     conn: &iroh::endpoint::Connection,
     recipient: &age::scrypt::Recipient,
     rel_path: &str,
     abs_path: &Path,
-) -> Result<()> {
+) -> Result<u64> {
     let plaintext = tokio::fs::read(abs_path).await.context("failed to read local file")?;
     let ciphertext = age::encrypt(recipient, &plaintext).context("failed to encrypt file")?;
     let ciphertext_sha256 = hex::encode(Sha256::digest(&ciphertext));
+    let ciphertext_len = ciphertext.len() as u64;
 
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(
         &mut send,
         &SyncRequest::Put {
             path: rel_path.to_string(),
-            ciphertext_len: ciphertext.len() as u64,
+            ciphertext_len,
             ciphertext_sha256,
         },
     )
@@ -122,7 +128,7 @@ async fn put_one_file(
     if !ack.ok {
         anyhow::bail!("buddy rejected file: {}", ack.error.unwrap_or_default());
     }
-    Ok(())
+    Ok(ciphertext_len)
 }
 
 async fn delete_one_file(conn: &iroh::endpoint::Connection, rel_path: &str) -> Result<()> {

@@ -15,8 +15,19 @@ use serde::{Deserialize, Serialize};
 /// anything whose hash and size already match.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ManifestEntry {
+    /// Plaintext size and hash of the local file — what `backup.rs`
+    /// diffs against on every cycle to decide if something changed.
     pub size: u64,
     pub sha256: String,
+    /// Size of the *encrypted* bytes actually sent to the buddy and
+    /// stored on their end — bigger than `size` (age's format has fixed
+    /// overhead per file), and what the dashboard shows, so it's directly
+    /// comparable to the buddy's own "received" byte count instead of
+    /// mixing plaintext and ciphertext totals. `#[serde(default)]` so a
+    /// manifest written before this field existed still loads (as 0,
+    /// corrected the next time that file is re-sent).
+    #[serde(default)]
+    pub ciphertext_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

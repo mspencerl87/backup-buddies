@@ -163,7 +163,10 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
 
         let manifest = Manifest::load(&state.data_dir, &node_id).await;
         let sent_files = manifest.entries.len();
-        let sent_bytes: u64 = manifest.entries.values().map(|e| e.size).sum();
+        // ciphertext_size, not size (plaintext) — comparable to
+        // received_total_bytes below, which is also a ciphertext size (the
+        // buddy's own received/ files on disk are the encrypted bytes).
+        let sent_bytes: u64 = manifest.entries.values().map(|e| e.ciphertext_size).sum();
 
         let sender_dir = state.data_dir.join("received").join(&node_id);
         let received = receive::list_sender_files(&sender_dir).await;
