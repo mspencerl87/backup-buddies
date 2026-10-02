@@ -62,11 +62,9 @@ From the exact-size matching fix (commit `4910d6f`, deployed):
 From the listing-criteria + full-page browse fix (not yet committed as of
 this writing — see "Marketplace listing criteria" below):
 
-- [ ] **Migration must be applied before this deploys** — see that
-      section's "Deploy order" note. If the API ever 500s on `/invites`
-      or `/invites/public` right after a deploy, this is almost certainly
-      why; apply `db/migrations/010_marketplace_listing_criteria.sql` and
-      it should clear up without a restart.
+- [x] Migration `010_marketplace_listing_criteria.sql` applied to
+      production (4x `ALTER TABLE` + `CREATE INDEX`, no errors) — commit
+      `6c2cab4`/deploy `37054888082` both confirmed clean
 - [ ] Creating an invite with country/speed tier/always-on/relay-only set
       actually stores them — check "Invites you've sent" or query the DB
       row directly, since that table doesn't display the new columns
