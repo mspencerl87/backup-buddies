@@ -200,6 +200,15 @@ seem slow. All of this is local telemetry read off iroh's own connection
 object (`Connection::paths()`/`Connection::stats()`) — none of it is sent
 over the wire or costs an extra round trip.
 
+A direct connection is only *possible* if something outside your network
+can actually reach this device on its sync port — `SYNC_PORT` in
+`.env` (11235 by default), published by `docker-compose.yml`. Forwarding
+that same port on your router gives NAT traversal a real shot; without
+it, every connection relays no matter how good either side's network
+otherwise is, since nothing can ever reach this device from outside to
+hole-punch with. Forwarding it is entirely optional — nothing breaks if
+you skip it, transfers just relay instead, same as before this existed.
+
 There's no live, mid-transfer rate (e.g. "currently uploading at 2MB/s") —
 cycles run every 30s and are usually short, so a last-cycle average is
 what's shown rather than adding a streaming/websocket layer for numbers

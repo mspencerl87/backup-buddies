@@ -56,6 +56,15 @@ services:
       # untrusted network), bind it to loopback only instead:
       #   - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
       - "${DASHBOARD_PORT:-8080}:8080"
+      # The actual sync connection to your buddy, over UDP — separate from
+      # the dashboard port above. Published so a direct (peer-to-peer)
+      # connection is *possible*, same host port as SYNC_PORT in .env so
+      # the two stay in sync; it's optional in the sense that nothing
+      # breaks if you don't forward it on your router too, every transfer
+      # just relays instead, which still works fine, just costs more
+      # (latency, and relay bandwidth past the free tier) than direct
+      # would have.
+      - "${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"
     volumes:
       # A real, visible folder on this machine — not an opaque
       # Docker-managed volume — so it's easy to find, move, or point your

@@ -72,6 +72,7 @@
       - BACKUP_DIR=/backup
     ports:
       - "${DASHBOARD_PORT:-8080}:8080"
+      - "${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"
     volumes:
       - ${DATA_DIR_HOST}:/data
       - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro</code></pre>
@@ -95,7 +96,16 @@ DATA_DIR_HOST=./data
 # this host. Defaults to 8080 — only set this if 8080 is already taken,
 # e.g. you're running more than one device's client on the same machine
 # (give each its own folder and a different DASHBOARD_PORT here).
-#DASHBOARD_PORT=8080</code></pre>
+#DASHBOARD_PORT=8080
+
+# The UDP port used for the actual connection to your buddy (not the
+# dashboard above). Backup Buddies works fine without ever touching this
+# — it just relays through relay.filegarden.net instead of connecting
+# directly — but if you can forward a UDP port on your router, forward
+# this one to this machine for a shot at a faster direct connection.
+# Defaults to 11235; only change it if that's easier to forward, or
+# already taken by something else.
+#SYNC_PORT=11235</code></pre>
           <p class="muted" style="margin-top:0.75rem">
             Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
             <code>BACKUP_PASSPHRASE=correct horse battery staple woodland</code> — yours will look

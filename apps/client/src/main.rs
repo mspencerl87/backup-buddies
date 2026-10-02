@@ -46,6 +46,18 @@ struct Config {
     // means a handful of transient failures shouldn't trip this; it's
     // meant to catch a buddy that's actually stuck.
     stale_after_secs: u64,
+    // The UDP port iroh binds for the actual sync traffic (separate from
+    // DASHBOARD_BIND's TCP port above). Fixed and configurable, rather
+    // than the random free port iroh picks by default, specifically so
+    // docker-compose.yml can publish it — see the `ports:` entry there.
+    // Without a published UDP port, NAT means this device can never
+    // receive an inbound hole-punch attempt, so direct (peer-to-peer)
+    // connections are impossible and every byte relays, even between two
+    // buddies who'd otherwise connect directly fine. Forwarding this port
+    // on a home router is still optional — nothing breaks without it,
+    // every transfer just goes through the relay instead, same as before
+    // this existed.
+    sync_port: u16,
 }
 
 impl Config {
@@ -74,6 +86,11 @@ impl Config {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(600);
+        let sync_port = std::env::var("SYNC_PORT")
+            .ok()
+            .map(|s| s.parse().context("SYNC_PORT must be a valid port number (1-65535)"))
+            .transpose()?
+            .unwrap_or(11235);
 
         Ok(Self {
             api_url,
@@ -84,6 +101,7 @@ impl Config {
             backup_dir,
             dashboard_bind,
             stale_after_secs,
+            sync_port,
         })
     }
 
@@ -155,10 +173,32 @@ async fn main() -> Result<()> {
     let secret_key = load_or_generate_secret_key(&config.data_dir).await?;
     let endpoint_id = secret_key.public();
 
+    // Bind to a fixed, known port on both IP families instead of the
+    // random free port iroh picks by default — clear_ip_transports()
+    // first, since the builder otherwise already has its own default
+    // 0.0.0.0:0 / [::]:0 binds queued up, which would leave this
+    // listening on *two* sockets per family rather than replacing them.
+    // See sync_port's doc comment on Config for why a fixed port matters:
+    // docker-compose.yml can only publish a UDP port it knows ahead of
+    // time, and a published port is what makes direct connections
+    // possible at all.
     let endpoint = Endpoint::builder(Minimal)
         .secret_key(secret_key)
         .alpns(vec![protocol::ALPN.to_vec()])
         .relay_mode(RelayMode::custom([config.relay_url.clone()]))
+        .clear_ip_transports()
+        .bind_addr(format!("0.0.0.0:{}", config.sync_port))
+        .context("failed to configure IPv4 sync port")?
+        // is_required(false): iroh's own *default* IPv6 bind is allowed to
+        // fail (plenty of hosts/containers don't have IPv6 at all), but
+        // bind_addr_with_opts defaults is_required to true — without this
+        // override, a container with no IPv6 would fail to start
+        // entirely over a socket this code doesn't actually need.
+        .bind_addr_with_opts(
+            format!("[::]:{}", config.sync_port),
+            iroh::endpoint::BindOpts::default().set_is_required(false),
+        )
+        .context("failed to configure IPv6 sync port")?
         .bind()
         .await
         .context("failed to bind Iroh endpoint")?;

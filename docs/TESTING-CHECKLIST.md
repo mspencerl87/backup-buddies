@@ -4,6 +4,47 @@ Running list of what's been verified against a live testa/testb pairing,
 and what's still open. Update this in place as items get checked off
 instead of re-deriving the list from scratch each session.
 
+## Needs testing — direct-connection fix (SYNC_PORT)
+
+While generating the pledge-rejection test data below, noticed every
+transfer between testa/testb goes via relay, 100% of the time. Root
+cause: `apps/client/docker-compose.yml` never published a UDP port for
+iroh's actual sync connection (only the dashboard's TCP port was
+published), so neither container could ever receive an inbound
+hole-punch attempt — direct connections were structurally impossible,
+not just unlucky, for every real deployment of the client as shipped,
+not only testa/testb. Fixed by binding iroh to a fixed port
+(`SYNC_PORT`, default 11235, configurable) instead of a random one, and
+publishing that port as UDP in both `docker-compose.yml` and the
+customer-facing snippet in `apps/web/setup.html`. `cargo build`/`test`/
+`clippy --all-targets` all clean. Not yet committed/pushed, and not yet
+tested against real traffic — testa and testb are both behind the same
+host/IP (same NAT), which is itself a hard case for hole-punching (NAT
+hairpinning isn't supported by every router/NAT device), so even a fully
+correct fix might still show relay-only between these two specifically.
+That wouldn't mean the fix is wrong — it'd mean testa/testb isn't a
+representative test for this particular thing, since two real customers
+are virtually always on two different networks.
+
+- [ ] Decide whether testa/testb is even a reasonable way to verify
+      this, given the same-host NAT-hairpin caveat above — may need two
+      genuinely different networks (e.g. a phone hotspot vs. home wifi)
+      to really confirm direct connections work at all
+- [ ] Confirm whether testa/testb's compose builds from source
+      (`build: .`) or pulls the published image, to know how to get this
+      build onto the test host
+- [ ] Once deployed, forward `SYNC_PORT` (11235 by default) on whatever
+      router each side is behind, confirm `docker compose logs` shows a
+      path other than relay (iroh's `Connection::paths()`/the dashboard's
+      "via relay" vs. direct indicator)
+- [ ] Confirm a client with no `SYNC_PORT` forwarded still works exactly
+      as before (relay-only) — this must be a strict addition, never a
+      regression for anyone who doesn't touch their router
+- [ ] IPv6 bind is marked optional (`set_is_required(false)`) — confirm
+      a container with no IPv6 available still starts cleanly (this is
+      the whole reason that override exists; untested against a real
+      no-IPv6 host)
+
 ## Verified working (2026-10-02)
 
 - [x] Backup cycle: testa → testb, new/changed files detected and sent
