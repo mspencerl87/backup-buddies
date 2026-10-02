@@ -70,3 +70,9 @@ from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
 - `/data/received/` — encrypted blobs received from a buddy during the
   connectivity test. Not yet organized into real backups — that's part of
   the next phase of this client.
+- `/data/usage.json` — `{ "<buddy node id>": <bytes received from them> }`,
+  tracked per buddy and checked against their pledge
+  (`buddy_pairings.pledged_bytes`, fetched from the API every 30s) before
+  accepting any incoming payload. Deleting it resets what's counted toward
+  each buddy's pledge back to zero — the underlying data in `received/` is
+  untouched, so this can desync the two if used carelessly.
