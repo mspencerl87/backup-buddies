@@ -89,7 +89,13 @@ RELAY_URL=https://relay.filegarden.net
 #BACKUP_DIR_HOST=./my-files
 
 # Where this device's data lands — defaults to ./data next to this file.
-DATA_DIR_HOST=./data</code></pre>
+DATA_DIR_HOST=./data
+
+# The port the local status dashboard (see below) is reachable on from
+# this host. Defaults to 8080 — only set this if 8080 is already taken,
+# e.g. you're running more than one device's client on the same machine
+# (give each its own folder and a different DASHBOARD_PORT here).
+#DASHBOARD_PORT=8080</code></pre>
           <p class="muted" style="margin-top:0.75rem">
             Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
             <code>BACKUP_PASSPHRASE=correct horse battery staple woodland</code> — yours will look
@@ -176,7 +182,8 @@ cd backup-buddies-client</code></pre>
     <section class="about-section">
       <h2>Troubleshooting</h2>
       <ul class="tech-list">
-        <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>.</li>
+        <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>. A 401 here means that exact token doesn't match any device on your dashboard — it's either stale (its device was removed and re-added since, which issues a new one) or the paste picked up extra whitespace; easiest fix is to remove the device, add it again, and paste the fresh token.</li>
+        <li><strong>"port is already allocated" on <code>docker compose up -d</code>:</strong> something else on this host — often another device's client — already has that host port. Set <code>DASHBOARD_PORT</code> to a free port in this device's <code>.env</code> (see above) and try again. Only the host-side port needs to be unique per device on the same machine; leave the container-side <code>:8080</code> in <code>docker-compose.yml</code> alone.</li>
         <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
         <li><strong>Lost your device token:</strong> remove the device on your dashboard and add it again — tokens can't be retrieved after creation, only replaced.</li>
       </ul>
