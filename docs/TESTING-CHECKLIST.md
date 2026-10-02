@@ -214,12 +214,12 @@ Not yet exercised on testa/testb (built, compiles clean, not yet deployed
       visible via the separate red failed-files line and the "backup
       failed" pill right next to it; staleness now answers "can we
       reach this buddy at all" instead of restating that. `cargo
-      build`/`test`/`clippy --all-targets` clean. Not yet redeployed/
-      reconfirmed on testa/testb — on the same testb buddy (currently
-      showing 2 permanently-pledge-exceeded files), next refresh after
-      deploy should show "last synced <Ns ago>" with the stale pill
-      gone entirely, while the "backup failed" pill and the two
-      per-file reason lines stay exactly as they are now.
+      build`/`test`/`clippy --all-targets` clean. **Confirmed live on
+      testb (2026-10-02)**: same buddy, same 2 permanently-pledge-
+      exceeded files — stale pill is gone entirely, only "backup
+      failed" remains, and both per-file reason lines still show
+      correctly. Staleness now correctly reflects reachability, not
+      per-file rejects.
 
 ## Verified working (2026-10-02)
 
