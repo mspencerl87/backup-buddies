@@ -25,6 +25,24 @@ const GB = 1024 ** 3;
 const PLEDGE_STEP_BYTES = 5 * GB;
 const PLEDGE_MAX_BYTES = 20_000 * GB;
 
+// Self-reported listing criteria (country, speed_tier, always_on,
+// relay_only — see migration 010) — displayed on marketplace listings so
+// a browser can judge fit for themselves (unlike pledged_bytes, these are
+// never used to filter what the API returns; see GET /invites/public).
+// Only speed_tier needs a fixed set to validate against; country is
+// free-text-ish (checked against the dashboard's own list client-side,
+// not re-validated here, since "Other" is a valid choice) and the two
+// booleans just coerce.
+const SPEED_TIERS = ['under_10', '10_50', '50_200', '200_plus'];
+const MAX_COUNTRY_LENGTH = 100;
+
+// Default page size for GET /invites/public, and the most a caller can
+// ask for — a marketplace could grow into hundreds of listings at one
+// size, and this is meant to be paged through (see find-a-buddy.html),
+// never loaded all at once.
+const MARKETPLACE_PAGE_SIZE = 50;
+const MARKETPLACE_MAX_PAGE_SIZE = 100;
+
 // Short, URL-safe, hard to guess by brute force but easy to read aloud or
 // paste into a text message — e.g. "7f3a9c2b1e".
 function generateInviteCode() {
@@ -37,7 +55,8 @@ function generateInviteCode() {
 // anyone to find and request, instead of only usable by whoever you send
 // the code to directly.
 invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, res) => {
-  const { pledged_bytes, is_public, note } = req.body ?? {};
+  const { pledged_bytes, is_public, note, country, speed_tier, always_on, relay_only } =
+    req.body ?? {};
 
   const pledgedBytes = Number(pledged_bytes);
   if (
@@ -52,6 +71,17 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
   }
   if (note !== undefined && note !== null && typeof note !== 'string') {
     return res.status(400).json({ error: 'note must be a string' });
+  }
+  if (
+    country !== undefined &&
+    country !== null &&
+    country !== '' &&
+    (typeof country !== 'string' || country.length > MAX_COUNTRY_LENGTH)
+  ) {
+    return res.status(400).json({ error: `country must be a string up to ${MAX_COUNTRY_LENGTH} characters` });
+  }
+  if (speed_tier !== undefined && speed_tier !== null && speed_tier !== '' && !SPEED_TIERS.includes(speed_tier)) {
+    return res.status(400).json({ error: `speed_tier must be one of: ${SPEED_TIERS.join(', ')}` });
   }
 
   // First line of defense against pledging past the free allowance with no
@@ -70,10 +100,23 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
 
   const code = generateInviteCode();
   const result = await pool.query(
-    `INSERT INTO invites (code, inviter_account_id, pledged_bytes, is_public, note)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, code, pledged_bytes, status, is_public, note, created_at`,
-    [code, req.account.id, pledgedBytes, Boolean(is_public), note || null],
+    `INSERT INTO invites
+       (code, inviter_account_id, pledged_bytes, is_public, note,
+        country, speed_tier, always_on, relay_only)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id, code, pledged_bytes, status, is_public, note, country,
+               speed_tier, always_on, relay_only, created_at`,
+    [
+      code,
+      req.account.id,
+      pledgedBytes,
+      Boolean(is_public),
+      note || null,
+      country || null,
+      speed_tier || null,
+      Boolean(always_on),
+      Boolean(relay_only),
+    ],
   );
 
   res.status(201).json({ invite: result.rows[0] });
@@ -83,7 +126,8 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
 // or see which ones have already been redeemed.
 invitesRouter.get('/invites', requireAuth, async (req, res) => {
   const result = await pool.query(
-    `SELECT id, code, pledged_bytes, status, is_public, note, created_at,
+    `SELECT id, code, pledged_bytes, status, is_public, note, country,
+            speed_tier, always_on, relay_only, created_at,
             redeemed_by_account_id, redeemed_at
        FROM invites
       WHERE inviter_account_id = $1
@@ -258,25 +302,63 @@ invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, a
 // required, not optional, because an unfiltered "browse everything" view
 // is exactly the mismatch this is meant to prevent; the dashboard always
 // sends it.
+//
+// Paginated (?offset=, ?limit=) rather than returned all at once — a
+// single size tier could in principle grow into hundreds of listings, and
+// find-a-buddy.html pages through them with a "Load more" button instead
+// of ever asking for all of them in one response. Also includes, per
+// listing, the inviter's self-reported country/speed_tier/always_on/
+// relay_only (display-only — see the comment above on why these aren't
+// filters) plus two things derived from the inviter's own account history
+// rather than self-reported: how long they've had an account, and how
+// many pairings (of any outcome — active or revoked) they've actually
+// completed before. Not a trust/rating system, just a lightweight signal
+// a browser can use the same way they'd eyeball an account's age on any
+// other marketplace.
 invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
   const pledgedBytes = Number(req.query.pledged_bytes);
   if (!Number.isInteger(pledgedBytes) || pledgedBytes <= 0) {
     return res.status(400).json({ error: 'pledged_bytes query parameter is required' });
   }
+  const limit = req.query.limit !== undefined ? Number(req.query.limit) : MARKETPLACE_PAGE_SIZE;
+  const offset = req.query.offset !== undefined ? Number(req.query.offset) : 0;
+  if (!Number.isInteger(limit) || limit <= 0 || limit > MARKETPLACE_MAX_PAGE_SIZE) {
+    return res.status(400).json({ error: `limit must be between 1 and ${MARKETPLACE_MAX_PAGE_SIZE}` });
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    return res.status(400).json({ error: 'offset must be 0 or greater' });
+  }
 
   const result = await pool.query(
     `SELECT invites.id, invites.pledged_bytes, invites.note, invites.created_at,
-            COALESCE(accounts.nickname, 'Buddy #' || substring(accounts.id::text, 1, 8)) AS inviter_label
+            invites.country, invites.speed_tier, invites.always_on, invites.relay_only,
+            COALESCE(accounts.nickname, 'Buddy #' || substring(accounts.id::text, 1, 8)) AS inviter_label,
+            accounts.created_at AS inviter_member_since,
+            (SELECT count(*) FROM buddy_pairings
+              WHERE (account_a_id = accounts.id OR account_b_id = accounts.id)
+                AND status IN ('active', 'revoked')) AS inviter_completed_pairings,
+            count(*) OVER () AS total_count
        FROM invites
        JOIN accounts ON accounts.id = invites.inviter_account_id
       WHERE invites.is_public = true
         AND invites.status = 'pending'
         AND invites.inviter_account_id <> $1
         AND invites.pledged_bytes = $2
-      ORDER BY invites.created_at DESC`,
-    [req.account.id, pledgedBytes],
+      ORDER BY invites.created_at DESC
+      LIMIT $3 OFFSET $4`,
+    [req.account.id, pledgedBytes, limit, offset],
   );
-  res.json({ listings: result.rows, pledged_bytes: pledgedBytes });
+  const totalCount = result.rows[0] ? Number(result.rows[0].total_count) : 0;
+  const listings = result.rows.map(({ total_count, ...listing }) => listing);
+
+  res.json({
+    listings,
+    pledged_bytes: pledgedBytes,
+    total_count: totalCount,
+    offset,
+    limit,
+    has_more: offset + listings.length < totalCount,
+  });
 });
 
 // Request a pairing from a public listing — same effect as redeeming a

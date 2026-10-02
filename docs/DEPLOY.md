@@ -531,3 +531,34 @@ is actually working.
    then restart the API (it also runs 10 minutes after boot) and confirm
    the digest arrives at every `ADMIN_EMAILS` address, listing that
    account. Clean up the test account from `/admin.html` afterward.
+
+## 16. Marketplace listing criteria (country, speed tier, always-on, relay-only)
+
+Adds four optional, self-reported columns to `invites`
+(`country`, `speed_tier`, `always_on`, `relay_only`), shown on "Find a
+buddy" listings so a browser can judge fit beyond just the exact pledge
+size they're already matched on — see `docs/TESTING-CHECKLIST.md`'s
+"Marketplace listing criteria" design note for the full rationale. Also
+adds `apps/web/find-a-buddy.html` as a standalone page (no new API routes
+or env vars) — nothing to configure for that part, it's served the same
+way every other static page under `apps/web` already is.
+
+**Apply the migration before — or any time around — this deploys, not
+strictly after:**
+```bash
+cd /opt/backup-buddies
+git pull
+cd deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/010_marketplace_listing_criteria.sql
+```
+Unlike some earlier migrations, there's no ordering requirement here and
+no `docker compose up -d --build api` needed afterward — all four new
+columns are additive with defaults/nullable, so the *currently running*
+API (which has never heard of them) keeps working fine before you apply
+it, and Postgres doesn't need a restart to pick up new columns. The only
+failure mode is the reverse order: if the *new* API code (from this
+deploy) is already running and queries these columns before they exist,
+every `GET`/`POST /invites*` call 500s until you run the command above —
+no restart needed once you do, it clears up on the next request. Applying
+it early, before the code ships, avoids that window entirely.

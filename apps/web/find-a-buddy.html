@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Find a buddy — Backup Buddies</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="alternate icon" href="/assets/favicon.ico">
+  <link rel="apple-touch-icon" href="/assets/favicon-180.png">
+</head>
+<body>
+  <header>
+    <a class="logo" href="/"><img src="/assets/mark.svg" alt="" class="logo-mark">Backup Buddies</a>
+    <nav>
+      <a href="/about.html">How it works</a>
+      <a href="/pricing.html">Pricing &amp; billing</a>
+      <a href="/getting-started.html">Getting started</a>
+      <a href="/setup.html">Client setup</a>
+      <a href="/dashboard.html">Dashboard</a>
+      <a href="/terms.html">Terms</a>
+      <a href="#" id="logout-link">Log out</a>
+    </nav>
+  </header>
+
+  <main class="dashboard-main">
+    <div class="card">
+      <h2>Find a buddy</h2>
+      <p class="muted">
+        Listings are matched by exact pledge size — pick the size you want
+        to trade below, and you'll only see listings pledging exactly
+        that much. <a href="/dashboard.html#invite-a-buddy">List your own</a>
+        from the dashboard.
+      </p>
+
+      <label for="size-filter">Show listings pledging</label>
+      <select id="size-filter"></select>
+
+      <p id="results-count" class="muted" style="margin-top:1rem"></p>
+      <div id="listings"></div>
+      <p id="listings-empty" class="muted" style="display:none">
+        No public listings at this size right now — be the first to
+        <a href="/dashboard.html#invite-a-buddy">list one</a>, or try a different size.
+      </p>
+      <p class="error" id="listings-error"></p>
+      <button class="btn btn-secondary" id="load-more-btn" type="button" style="display:none; margin-top:1rem">
+        Load more
+      </button>
+    </div>
+  </main>
+
+  <footer>
+    <a href="/terms.html">Terms of Service</a>
+  </footer>
+
+  <script src="/api-utils.js"></script>
+  <script src="/pledge-options.js"></script>
+  <script>
+    const PAGE_SIZE = 50;
+    let offset = 0;
+    let pledgedBytes = null;
+
+    const sizeFilterEl = document.getElementById('size-filter');
+    const listingsEl = document.getElementById('listings');
+    const emptyEl = document.getElementById('listings-empty');
+    const errorEl = document.getElementById('listings-error');
+    const countEl = document.getElementById('results-count');
+    const loadMoreBtn = document.getElementById('load-more-btn');
+
+    // Pre-select whatever size the dashboard's "Browse buddies" link was
+    // clicked with (?pledged_bytes=<bytes>), so picking a size there and
+    // landing here feels like one step rather than two. Falls back to the
+    // same 50GB default the invite-creation dropdown uses.
+    const requestedBytes = Number(new URLSearchParams(window.location.search).get('pledged_bytes'));
+    const defaultGb = Number.isInteger(requestedBytes) && requestedBytes > 0
+      ? Math.round(requestedBytes / 1024 ** 3)
+      : 50;
+    populatePledgeSelect(sizeFilterEl, PLEDGE_GB_OPTIONS.includes(defaultGb) ? defaultGb : 50);
+
+    function describeListing(listing) {
+      const bits = [];
+      if (listing.country) bits.push(listing.country);
+      const speedLabel = speedTierLabel(listing.speed_tier);
+      if (speedLabel) bits.push(speedLabel);
+      if (listing.always_on) bits.push('Usually online');
+      if (listing.relay_only) bits.push('Relay-only network');
+      return bits.join(' · ');
+    }
+
+    function renderListing(listing) {
+      const row = document.createElement('div');
+      row.className = 'marketplace-row';
+      row.style.cssText =
+        'display:flex; justify-content:space-between; align-items:flex-start; ' +
+        'gap:1rem; padding:1rem 0; border-bottom:1px solid var(--border);';
+
+      const criteria = describeListing(listing);
+      const memberSince = listing.inviter_member_since ? formatDate(listing.inviter_member_since) : null;
+      const pairingCount = Number(listing.inviter_completed_pairings || 0);
+
+      row.innerHTML = `
+        <div>
+          <strong>${listing.inviter_label}</strong>
+          ${criteria ? `<div class="muted">${criteria}</div>` : ''}
+          ${memberSince ? `<div class="muted">Member since ${memberSince} · ${pairingCount} completed pairing${pairingCount === 1 ? '' : 's'}</div>` : ''}
+          ${listing.note ? `<div class="muted">"${listing.note}"</div>` : ''}
+        </div>
+        <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button" style="flex-shrink:0">
+          Request pairing
+        </button>
+      `;
+
+      row.querySelector('.request-pairing-btn').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        errorEl.textContent = '';
+        btn.disabled = true;
+        try {
+          const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pledged_bytes: pledgedBytes }),
+          });
+          const data = await parseJsonResponse(res);
+          if (!res.ok) {
+            showBlockedError(errorEl, data, 'Could not request this pairing.', '/dashboard.html#billing');
+            btn.disabled = false;
+            return;
+          }
+          row.innerHTML = `<div class="muted">Paired! <a href="/dashboard.html#buddy-pairings">View it on your dashboard</a>.</div>`;
+        } catch (err) {
+          errorEl.textContent = err.message || 'Could not request this pairing.';
+          btn.disabled = false;
+        }
+      });
+
+      listingsEl.appendChild(row);
+    }
+
+    async function loadListings({ reset }) {
+      errorEl.textContent = '';
+      if (reset) {
+        offset = 0;
+        listingsEl.innerHTML = '';
+        emptyEl.style.display = 'none';
+      }
+
+      const gb = Number(sizeFilterEl.value);
+      pledgedBytes = Math.round(gb * 1024 ** 3);
+
+      loadMoreBtn.disabled = true;
+      let data;
+      try {
+        const res = await fetch(
+          `/api/invites/public?pledged_bytes=${pledgedBytes}&limit=${PAGE_SIZE}&offset=${offset}`,
+          { credentials: 'same-origin' },
+        );
+        if (!res.ok) {
+          errorEl.textContent = 'Could not load listings.';
+          loadMoreBtn.style.display = 'none';
+          return;
+        }
+        data = await parseJsonResponse(res);
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load listings.';
+        loadMoreBtn.style.display = 'none';
+        return;
+      }
+
+      for (const listing of data.listings) renderListing(listing);
+      offset += data.listings.length;
+
+      countEl.textContent = data.total_count === 0
+        ? ''
+        : `${data.total_count} listing${data.total_count === 1 ? '' : 's'} at this size`;
+      emptyEl.style.display = data.total_count === 0 ? 'block' : 'none';
+      loadMoreBtn.style.display = data.has_more ? '' : 'none';
+      loadMoreBtn.disabled = false;
+    }
+
+    sizeFilterEl.addEventListener('change', () => loadListings({ reset: true }));
+    loadMoreBtn.addEventListener('click', () => loadListings({ reset: false }));
+
+    document.getElementById('logout-link').addEventListener('click', async (e) => {
+      e.preventDefault();
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/';
+    });
+
+    (async function init() {
+      try {
+        const me = await loadMe();
+        if (!me) return;
+      } catch (err) {
+        errorEl.textContent = 'Could not load your account — try refreshing the page.';
+        return;
+      }
+      await loadListings({ reset: true });
+    })();
+  </script>
+</body>
+</html>

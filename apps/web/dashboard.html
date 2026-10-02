@@ -69,14 +69,10 @@
     <div class="card" id="find-a-buddy">
       <h2>Find a buddy</h2>
       <p class="muted">Don't have anyone to pair with yet? Browse people who've listed the same amount of storage you want to trade, or list your own below.</p>
-      <label for="marketplace-size">Show listings pledging</label>
-      <select id="marketplace-size"></select>
-      <div id="marketplace-list"></div>
-      <p id="marketplace-empty" class="muted" style="display:none">No public listings at this size right now — be the first to list it below, or try a different size.</p>
-      <p class="error" id="marketplace-error"></p>
+      <a class="btn" href="/find-a-buddy.html">Browse buddies</a>
     </div>
 
-    <div class="card">
+    <div class="card" id="buddy-pairings">
       <h2>Buddy pairings</h2>
       <table id="pairings-table" style="display:none">
         <thead>
@@ -97,9 +93,26 @@
           <input type="checkbox" id="invite-public">
           <span>List this publicly in "Find a buddy" instead of only sharing the code directly</span>
         </label>
-        <div id="invite-note-row" style="display:none">
+        <div id="invite-criteria-rows" style="display:none">
+          <p class="muted" style="margin-bottom:0.5rem">
+            Optional — shown on your listing so people can judge fit for
+            themselves. None of this is required to match; it's just
+            displayed, same as the note below.
+          </p>
           <label for="invite-note">Note (optional)</label>
           <input type="text" id="invite-note" placeholder="e.g. Fast connection, available evenings">
+          <label for="invite-country">Country (optional)</label>
+          <select id="invite-country"></select>
+          <label for="invite-speed-tier">Upload speed (optional)</label>
+          <select id="invite-speed-tier"></select>
+          <label class="checkbox-row" for="invite-always-on" style="margin-left:0">
+            <input type="checkbox" id="invite-always-on">
+            <span>This machine is usually online (not just a laptop that's sometimes off)</span>
+          </label>
+          <label class="checkbox-row" for="invite-relay-only" style="margin-left:0">
+            <input type="checkbox" id="invite-relay-only">
+            <span>My network usually can't make a direct connection (behind a restrictive firewall/CGNAT) — transfers go through the relay</span>
+          </label>
         </div>
         <button class="btn" type="submit" style="margin-top:1rem">Generate invite code</button>
       </form>
@@ -130,97 +143,12 @@
     </div>
   </main>
 
+  <script src="/api-utils.js"></script>
+  <script src="/pledge-options.js"></script>
   <script>
-    // Every API route returns JSON, even its errors — except when a
-    // request never reaches Express at all (wrong path, server down,
-    // Caddy/Cloudflare returning its own error page). res.json() throws
-    // on those instead of giving back something we can show, so callers
-    // use this instead of calling res.json() directly.
-    async function parseJsonResponse(res) {
-      const contentType = res.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        throw new Error(`Unexpected response (${res.status}) — try refreshing the page.`);
-      }
-      return res.json();
-    }
-
-    function formatBytes(bytes) {
-      const gb = bytes / (1024 ** 3);
-      return gb >= 1 ? `${gb.toFixed(0)} GB` : `${(bytes / (1024 ** 2)).toFixed(0)} MB`;
-    }
-
-    function formatDate(iso) {
-      return new Date(iso).toLocaleDateString();
-    }
-
-    // Single source of truth for pledge sizes, in GB — must match the API's
-    // PLEDGE_STEP_BYTES/PLEDGE_MAX_BYTES (apps/api/src/routes/invites.js).
-    // Shared by the "Storage to pledge" (create) and "Show listings
-    // pledging" (browse) dropdowns, which both need the exact same list of
-    // sizes: creating a listing and finding one are two sides of the same
-    // exact-size match (see "Find a buddy" below), so letting either
-    // dropdown drift out of sync with the other, or with the API's actual
-    // step, would silently break that.
-    const PLEDGE_GB_OPTIONS = [];
-    for (let gb = 5; gb <= 50; gb += 5) PLEDGE_GB_OPTIONS.push(gb);
-    for (let gb = 500; gb <= 20000; gb += 500) PLEDGE_GB_OPTIONS.push(gb);
-
-    function pledgeOptionLabel(gb) {
-      if (gb === 50) return '50 GB (full free allowance)';
-      return gb >= 1000 ? `${(gb / 1000).toFixed(gb % 1000 === 0 ? 0 : 1)} TB` : `${gb} GB`;
-    }
-
-    function populatePledgeSelect(selectEl, defaultGb) {
-      selectEl.innerHTML = '';
-      for (const gb of PLEDGE_GB_OPTIONS) {
-        const option = document.createElement('option');
-        option.value = String(gb);
-        option.textContent = pledgeOptionLabel(gb);
-        if (gb === defaultGb) option.selected = true;
-        selectEl.appendChild(option);
-      }
-    }
-
     populatePledgeSelect(document.getElementById('pledged-gb'), 50);
-    populatePledgeSelect(document.getElementById('marketplace-size'), 50);
-
-    // Shared by every place an API call can come back blocked by the free
-    // storage allowance (invite creation, direct redeem, marketplace
-    // redeem) — shows the server's explanation plus a jump straight to
-    // the Billing card instead of leaving the person to go find it.
-    function showBlockedError(errorEl, data, fallback) {
-      errorEl.textContent = '';
-      errorEl.appendChild(document.createTextNode(data.error || fallback));
-      if (data.requires_subscription) {
-        const link = document.createElement('a');
-        link.href = '#billing';
-        link.textContent = 'Go to Billing';
-        link.style.marginLeft = '0.5rem';
-        link.addEventListener('click', () => {
-          document.getElementById('billing').scrollIntoView({ behavior: 'smooth' });
-        });
-        errorEl.appendChild(link);
-      }
-      if (data.email_unverified) {
-        const link = document.createElement('a');
-        link.href = '#verify-banner';
-        link.textContent = 'Resend verification email';
-        link.style.marginLeft = '0.5rem';
-        link.addEventListener('click', () => {
-          document.getElementById('verify-banner').scrollIntoView({ behavior: 'smooth' });
-        });
-        errorEl.appendChild(link);
-      }
-    }
-
-    async function loadMe() {
-      const res = await fetch('/api/me', { credentials: 'same-origin' });
-      if (res.status === 401) {
-        window.location.href = '/login.html';
-        return null;
-      }
-      return parseJsonResponse(res);
-    }
+    populateCountrySelect(document.getElementById('invite-country'));
+    populateSpeedTierSelect(document.getElementById('invite-speed-tier'));
 
     function renderAccount(account) {
       const methods = [];
@@ -469,86 +397,8 @@
       }
     });
 
-    async function loadMarketplace() {
-      const listEl = document.getElementById('marketplace-list');
-      const emptyEl = document.getElementById('marketplace-empty');
-      const errorEl = document.getElementById('marketplace-error');
-      errorEl.textContent = '';
-
-      // Pairs trade like-for-like: redeeming a listing commits the
-      // redeemer to the SAME pledged_bytes back (see the comment on
-      // GET /invites/public), so this always asks the API for one exact
-      // size rather than everything — there is no "browse all sizes" mode.
-      const pledgedGb = Number(document.getElementById('marketplace-size').value);
-      const pledgedBytes = Math.round(pledgedGb * 1024 ** 3);
-
-      let data;
-      try {
-        const res = await fetch(`/api/invites/public?pledged_bytes=${pledgedBytes}`, {
-          credentials: 'same-origin',
-        });
-        if (!res.ok) {
-          errorEl.textContent = 'Could not load the marketplace.';
-          return;
-        }
-        data = await parseJsonResponse(res);
-      } catch (err) {
-        errorEl.textContent = err.message || 'Could not load the marketplace.';
-        return;
-      }
-
-      listEl.innerHTML = '';
-      if (data.listings.length === 0) {
-        emptyEl.style.display = 'block';
-        return;
-      }
-      emptyEl.style.display = 'none';
-
-      for (const listing of data.listings) {
-        const row = document.createElement('div');
-        row.className = 'marketplace-row';
-        row.innerHTML = `
-          <div>
-            <strong>${listing.inviter_label}</strong>
-            ${listing.note ? `<div class="muted">${listing.note}</div>` : ''}
-          </div>
-          <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button">Request pairing</button>
-        `;
-        listEl.appendChild(row);
-      }
-
-      listEl.querySelectorAll('.request-pairing-btn').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          errorEl.textContent = '';
-          btn.disabled = true;
-          try {
-            const res = await fetch(`/api/invites/public/${btn.dataset.id}/redeem`, {
-              method: 'POST',
-              credentials: 'same-origin',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pledged_bytes: pledgedBytes }),
-            });
-            const data = await parseJsonResponse(res);
-            if (!res.ok) {
-              showBlockedError(errorEl, data, 'Could not request this pairing.');
-              btn.disabled = false;
-              return;
-            }
-            await init();
-          } catch (err) {
-            errorEl.textContent = err.message || 'Could not request this pairing.';
-            btn.disabled = false;
-          }
-        });
-      });
-    }
-
-    document.getElementById('marketplace-size').addEventListener('change', () => {
-      loadMarketplace();
-    });
-
     document.getElementById('invite-public').addEventListener('change', (e) => {
-      document.getElementById('invite-note-row').style.display = e.target.checked ? 'block' : 'none';
+      document.getElementById('invite-criteria-rows').style.display = e.target.checked ? 'block' : 'none';
     });
 
     async function init() {
@@ -574,7 +424,6 @@
       // Billing here before this was added.
       await loadInvites();
       await loadDevices();
-      await loadMarketplace();
       await loadBilling();
 
       const checkoutStatus = new URLSearchParams(window.location.search).get('checkout');
@@ -599,13 +448,25 @@
       const pledgedBytes = Math.round(gb * 1024 ** 3);
       const isPublic = document.getElementById('invite-public').checked;
       const note = document.getElementById('invite-note').value.trim();
+      const country = document.getElementById('invite-country').value;
+      const speedTier = document.getElementById('invite-speed-tier').value;
+      const alwaysOn = document.getElementById('invite-always-on').checked;
+      const relayOnly = document.getElementById('invite-relay-only').checked;
 
       try {
         const res = await fetch('/api/invites', {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pledged_bytes: pledgedBytes, is_public: isPublic, note: note || undefined }),
+          body: JSON.stringify({
+            pledged_bytes: pledgedBytes,
+            is_public: isPublic,
+            note: note || undefined,
+            country: country || undefined,
+            speed_tier: speedTier || undefined,
+            always_on: alwaysOn,
+            relay_only: relayOnly,
+          }),
         });
         const data = await parseJsonResponse(res);
 

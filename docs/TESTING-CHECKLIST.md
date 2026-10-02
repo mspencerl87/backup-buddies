@@ -33,35 +33,65 @@ instead of re-deriving the list from scratch each session.
       meant the smallest legal pledge was already 10x the entire free
       allowance). Lowered the step to 5GB in commit `3b76eab`; confirmed
       deployed (`deploy.yml` run succeeded against `3b76eab`).
+- [x] Exact-size marketplace matching shipped (commit `4910d6f`, deployed
+      — `deploy.yml` run `37053290026` succeeded): `GET /invites/public`
+      requires `pledged_bytes` and only returns that exact size;
+      `POST /invites/public/:id/redeem` requires it too and 409s on a
+      mismatch. Still not manually exercised end-to-end on testa/testb —
+      see below.
 
 ## Needs testing (new — not yet exercised on testa/testb)
 
-Added by the exact-size marketplace matching fix (not yet committed as of
-this writing — see "Marketplace size-matching" below for what changed):
+From the exact-size matching fix (commit `4910d6f`, deployed):
 
-- [ ] "Find a buddy" only ever shows one pledge size at a time (the
-      `marketplace-size` dropdown) — confirm switching it actually
-      re-queries and swaps the listed buddies, including the
-      now-you-see-it/now-you-don't case of a size with zero listings
-      (the empty-state message)
+- [ ] Picking a different size on "Find a buddy" actually re-queries and
+      swaps the listed buddies, including the now-you-see-it/now-you-
+      don't case of a size with zero listings (the empty-state message)
 - [ ] Redeeming a listing sends the selected size back to the API
       (`pledged_bytes` in the POST body) and the resulting pairing's
       `pledged_bytes` matches exactly — confirm end-to-end on
       testa/testb, not just by reading the code
 - [ ] `GET /invites/public` without a `pledged_bytes` query param returns
-      400 — confirm the dashboard never calls it that way and that a
-      direct/manual API call gets the expected rejection
+      400 — confirm a direct/manual API call gets the expected rejection
 - [ ] The redeem-time mismatch guard (`expectedPledgedBytes` check in
       `redeemInvite`) actually fires on a 409 if forced — this needs a
       deliberate test (e.g. two browser tabs, or a raw `curl` with a
       `pledged_bytes` that doesn't match the listing id) since the normal
       UI flow can't produce a mismatch on its own
-- [ ] The `pledged-gb` (create) and `marketplace-size` (browse) dropdowns
-      still show the same set of sizes after any future
-      `PLEDGE_STEP_BYTES`/`PLEDGE_MAX_BYTES` change — they're generated
-      from one shared `PLEDGE_GB_OPTIONS` list in `dashboard.html` now,
-      but that list is hand-maintained and not pulled from the API, so a
-      future API-side step/max change needs the same edit made here too
+
+From the listing-criteria + full-page browse fix (not yet committed as of
+this writing — see "Marketplace listing criteria" below):
+
+- [ ] **Migration must be applied before this deploys** — see that
+      section's "Deploy order" note. If the API ever 500s on `/invites`
+      or `/invites/public` right after a deploy, this is almost certainly
+      why; apply `db/migrations/010_marketplace_listing_criteria.sql` and
+      it should clear up without a restart.
+- [ ] Creating an invite with country/speed tier/always-on/relay-only set
+      actually stores them — check "Invites you've sent" or query the DB
+      row directly, since that table doesn't display the new columns
+- [ ] Those same fields are only sent to the API when "List this
+      publicly" is checked (`invite-criteria-rows` toggle) — confirm an
+      unchecked private invite doesn't submit stale values from a
+      previously-checked session
+- [ ] `find-a-buddy.html` loads standalone (not just as a tab inside
+      dashboard.html) — confirm the shared `api-utils.js`/
+      `pledge-options.js` scripts actually load given Caddy's static root
+      is `apps/web` (should be automatic, same directory, but confirm
+      post-deploy since this is a brand new page)
+- [ ] Pagination: `?limit=`/`?offset=` and `has_more`/`total_count` — hard
+      to exercise for real without 50+ listings at one size; at minimum
+      confirm "Load more" stays hidden when there's only a handful
+- [ ] Landing on `find-a-buddy.html?pledged_bytes=<bytes>` from the
+      dashboard's "Browse buddies" link pre-selects the right size in the
+      dropdown
+- [ ] The `pledged-gb` (dashboard, create) and `size-filter`
+      (find-a-buddy.html, browse) dropdowns stay in sync after any future
+      `PLEDGE_STEP_BYTES`/`PLEDGE_MAX_BYTES` change — both now generate
+      from the single `PLEDGE_GB_OPTIONS` list in `apps/web/pledge-
+      options.js`, but that list is hand-maintained and not pulled from
+      the API, so a future API-side step/max change needs the same edit
+      made there too
 
 ## Not yet exercised
 
@@ -113,8 +143,63 @@ filtering to one exact size:
   people already agreed on a size out of band when one sent the other a
   code, so there's nothing to match there
 
-Not yet committed/pushed as of this writing — see "Needs testing" above
-for what to confirm on testa/testb before and after it ships.
+Committed and deployed as `4910d6f` — see "Verified working" above.
+
+## Design note: marketplace listing criteria (country, speed, etc.)
+
+Raised while discussing the size-matching fix above: exact pledge size
+alone doesn't rule out a US-based buddy matching with one in a country with
+terrible mutual latency, or someone on gigabit fiber pairing with someone
+on a 2 Mbps uplink. Added four optional, self-reported fields to invite
+creation, shown on marketplace listings but — unlike pledged_bytes — never
+used to filter what's returned, so browsing still shows everyone at a
+given size and lets the person judge fit themselves:
+
+- **Country** (dropdown, `invites.country`) — country only, deliberately;
+  no state/city/postal code, consistent with the marketplace's existing
+  "nothing here reveals who someone is" stance on identity.
+- **Upload speed tier** (`invites.speed_tier`, one of `under_10` /
+  `10_50` / `50_200` / `200_plus`) — bucketed rather than a typed Mbps
+  number, since a raw figure is rarely accurate anyway (varies by time of
+  day, ISP throttling, Wi-Fi vs. wired).
+- **Usually online** (`invites.always_on`, boolean) — self-reported; not
+  derived from `devices.last_seen_at` for this first pass.
+- **Relay-only network** (`invites.relay_only`, boolean) — self-reported.
+  Auto-detecting this would need the client to report direct-vs-relay
+  ratio back to the API (it already knows this per-transfer, shown in the
+  local dashboard's "via relay, 92ms" messages, but never reports it
+  centrally) — real plumbing work, deferred; see "Flagged, not yet
+  scoped" below.
+
+Also added, but *derived* rather than self-reported — no new columns:
+**member since** (`accounts.created_at`) and **completed pairings**
+(count of that account's `buddy_pairings` with status `active` or
+`revoked`), as a lightweight trust signal, not a rating system.
+
+**"Find a buddy" became its own page** (`apps/web/find-a-buddy.html`)
+rather than an inline dashboard card, since a marketplace showing all this
+per listing — plus however many listings a size tier grows to — doesn't
+fit in a card. The dashboard's card is now a one-line teaser + "Browse
+buddies" link (carries the dashboard's currently-selected pledge size
+across as `?pledged_bytes=`); the new page owns its own size filter,
+paginates listings (`?limit=`/`?offset=`, default page 50, max 100), and
+redeems the same way the old inline card did. Shared JS
+(`api-utils.js`, `pledge-options.js`) factored out so both pages use the
+same `parseJsonResponse`/`loadMe`/`showBlockedError` helpers and the same
+pledge-size list, rather than copy-pasting it into a second page.
+
+**Deploy order — read before pushing this one:** this adds four columns
+to `invites` (migration `010_marketplace_listing_criteria.sql`).
+`deploy.yml` never runs migrations — it only pulls and restarts the API
+image — so if the code deploys before the migration is applied, every
+`GET`/`POST /invites*` call 500s until someone runs the migration by
+hand. All four new columns are additive with defaults/nullable, so
+there's no reason to sequence it tightly: **apply the migration against
+production whenever convenient, any time before or after this code
+ships** — old API code never references the new columns, so running it
+early is harmless, and that removes the race entirely. See
+`docs/DEPLOY.md` for the exact `psql` command (same pattern as every
+other migration there).
 
 ## Documented, intentional limits (no action needed unless priorities change)
 
@@ -131,3 +216,11 @@ for what to confirm on testa/testb before and after it ships.
       progress endpoint would still answer correctly if it did).
       Worth a small persistent indicator elsewhere on the dashboard
       (e.g. on the buddy's card) if that's annoying in practice.
+- [ ] `always_on`/`relay_only` marketplace listing fields are self-
+      reported for now (see "Design note: marketplace listing criteria"
+      above). Auto-deriving them from real telemetry would need: (a) a
+      new table/column for the client to report direct-vs-relay ratio
+      per transfer (it already knows this locally, just never sends it),
+      and (b) `devices.last_seen_at` history turned into an actual uptime
+      percentage rather than a point-in-time timestamp. Worth it only if
+      self-reports turn out unreliable in practice.
