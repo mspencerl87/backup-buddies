@@ -606,6 +606,14 @@ async fn handle_get(
         Ok(bytes) => {
             protocol::write_frame(send, &SyncAck::ok()).await?;
             send.write_all(&bytes).await.context("failed to send file bytes")?;
+            // Without this, the stream's FIN never goes out, so the
+            // requesting side's recv.read_to_end() (restore_one_file in
+            // restore.rs) blocks forever waiting for a close that never
+            // arrives — every restore hangs indefinitely instead of
+            // failing loudly or completing. backup.rs's Put path already
+            // does this after its own write_all; this is the same thing
+            // on the Get side, which never had it.
+            send.finish().context("failed to finish send stream")?;
             crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
         }
         Err(_) => {
@@ -654,6 +662,11 @@ async fn handle_get_version(
         Ok(bytes) => {
             protocol::write_frame(send, &SyncAck::ok()).await?;
             send.write_all(&bytes).await.context("failed to send file bytes")?;
+            // See the matching comment in handle_get above — same missing
+            // finish() causing the same indefinite hang, this time on
+            // restore_version's recv.read_to_end() instead of
+            // restore_one_file's.
+            send.finish().context("failed to finish send stream")?;
             crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
         }
         Err(_) => {
