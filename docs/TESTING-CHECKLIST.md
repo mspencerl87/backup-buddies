@@ -108,11 +108,37 @@ clean. Not yet tested against real traffic.
       testa/testb can't rule out something that only works because
       they're unusually close (same machine), even though the mDNS
       result above is a good sign. Deferred by Spencer for later.
-- [ ] Pledge-cap rejection re-test: the original "lets do it" test
-      (`pledge-test-*.bin` files meant to push testb's pledge from testa
-      past 5.0 GB and get the last one rejected) got interrupted by the
-      manual `rm`/ledger-reset detour and hasn't been cleanly re-run
-      since. Deferred by Spencer for later.
+- [x] Pledge-cap rejection, functionally confirmed (2026-10-02): testb's
+      own logs show the real rejection cleanly — `WARN ... rejected file
+      — would exceed this buddy's pledge path=pledge-test-5.bin
+      attempted_bytes=1074004134 pledged_bytes=5368709120
+      received_bytes=4296021318` — correct numbers, correct decision.
+      4 files (2, 3, 4, 6 — 4.0 GB) landed under the 5.0 GB cap, the 5th
+      was refused.
+- [x] **Found and fixed a serious bug this test exposed**: that
+      rejection deadlocked the whole connection. testa went completely
+      silent for 8+ minutes (0.09% CPU, no crash, no log line) instead of
+      logging the failure and moving to the next file. Root cause:
+      `handle_put` decides/writes its rejection ack *before* reading the
+      incoming body (deliberately, to avoid downloading bytes it's about
+      to discard) — but the sender writes its *entire* file body before
+      ever trying to read the ack, so the sender's write blocks forever
+      on flow-control credit the receiver never grants. Not related to
+      today's mDNS/host-networking work — a real, independent,
+      pre-existing bug that just hadn't been hit by a real-sized
+      rejection before. Fixed with `RecvStream::stop()` (QUIC
+      STOP_SENDING) in all four early-rejection branches (file too
+      large, invalid path, disk space, pledge exceeded), not just the
+      pledge one. `cargo build`/`test`/`clippy --all-targets` clean,
+      commit `a9589cf`.
+- [ ] Re-run pledge-test cleanly once the fix is deployed: pull the new
+      image on testa/testb, restart both (testa's current container is
+      permanently stuck mid-deadlock and needs a fresh start regardless),
+      re-trigger a rejection (`pledge-test-1.bin` is still unaccounted
+      for — never successfully landed or cleanly rejected), and confirm
+      testa now logs a matching `WARN ... failed to back up file ...
+      will retry next cycle` instead of going silent, with the cycle
+      continuing normally afterward.
 - [ ] Confirm two buddies on *different* networks still behave exactly
       as before this change (mDNS finds nothing, falls through to
       relay/SYNC_PORT direct-over-internet) — must be a strict addition,
