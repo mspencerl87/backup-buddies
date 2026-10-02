@@ -285,12 +285,12 @@ async fn handle_put(
 ) -> Result<()> {
     const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5GB per file, sanity cap
     if ciphertext_len > MAX_FILE_BYTES {
-        protocol::write_frame(send, &SyncAck::err("file too large")).await?;
+        reject_without_reading_body(recv, send, "file too large").await?;
         return Ok(());
     }
 
     let Some(dest) = safe_join(sender_dir, &path) else {
-        protocol::write_frame(send, &SyncAck::err("invalid path")).await?;
+        reject_without_reading_body(recv, send, "invalid path").await?;
         return Ok(());
     };
 
@@ -322,7 +322,7 @@ async fn handle_put(
             attempted_bytes = ciphertext_len,
             "rejected file — not enough real disk space left on this host"
         );
-        protocol::write_frame(send, &SyncAck::err("not enough disk space on this host")).await?;
+        reject_without_reading_body(recv, send, "not enough disk space on this host").await?;
         return Ok(());
     }
 
@@ -396,8 +396,30 @@ async fn handle_put(
         received_bytes,
         "rejected file — would exceed this buddy's pledge"
     );
-    protocol::write_frame(send, &SyncAck::err("pledge exceeded")).await?;
+    reject_without_reading_body(recv, send, "pledge exceeded").await?;
     Ok(())
+}
+
+// Every early-rejection branch above decides *before* reading the
+// incoming file body off `recv` — deliberately, so we don't waste time
+// and bandwidth downloading megabytes/gigabytes of a file we're about to
+// throw away. But the sender (put_one_file in backup.rs) writes its
+// entire ciphertext body before it ever tries to read our ack, so if we
+// just write the rejection ack without doing anything about the body
+// they're still sending, their `send.write_all(&ciphertext)` blocks
+// forever waiting for QUIC flow-control credit we'll never grant (we're
+// not reading), while we sit in handle_stream's `send.stopped().await`
+// waiting for them to finish sending — a real deadlock, not just a slow
+// cycle. `RecvStream::stop()` sends a QUIC STOP_SENDING frame, which
+// makes their blocked write fail immediately instead of hanging, so they
+// can log the failure and move on to the next file next cycle.
+async fn reject_without_reading_body(
+    recv: &mut iroh::endpoint::RecvStream,
+    send: &mut iroh::endpoint::SendStream,
+    reason: &'static str,
+) -> Result<()> {
+    recv.stop(iroh::endpoint::VarInt::from_u32(0)).ok();
+    protocol::write_frame(send, &SyncAck::err(reason)).await
 }
 
 async fn handle_delete(
