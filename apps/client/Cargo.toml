@@ -15,6 +15,11 @@ anyhow = "1.0.104"
 # Local status/restore dashboard (dashboard.rs) — plain axum, no templating
 # engine; the one page it serves is a small embedded HTML/JS string.
 axum = "0.7"
+# Physical free/total space for the filesystem under DATA_DIR, shown on
+# the dashboard next to what's been pledged — plain std::fs has no
+# portable way to ask the OS this. Default "sync" feature only; we call it
+# from a blocking context (see dashboard.rs's disk_stats).
+fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
 hex = "0.4.3"
 iroh = "1.3.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }

@@ -79,10 +79,30 @@ struct BuddyStatus {
     last_cycle: Option<CycleRecord>,
 }
 
+/// Physical space on the filesystem backing `data_dir` — where every
+/// buddy's `received/<their id>/` lives. This is the actual disk, not the
+/// sum of pledges: pledges are promises about how much we'll *accept*,
+/// this is what the OS says is really there. The two can and do diverge
+/// (pledges made before the disk filled up, other things sharing the same
+/// volume), which is exactly what the dashboard needs to show.
+#[derive(Serialize)]
+struct DiskStatus {
+    total_bytes: u64,
+    available_bytes: u64,
+    used_bytes: u64,
+}
+
 #[derive(Serialize)]
 struct StatusResponse {
     node_id: String,
     backup_dir: Option<String>,
+    data_dir: String,
+    disk: Option<DiskStatus>,
+    // Sum of every buddy's pledged_bytes — the total we've promised to
+    // store for others on this same disk. Compared against `disk` on the
+    // dashboard so an operator can see at a glance whether their pledges
+    // actually fit.
+    pledged_out_total_bytes: u64,
     buddies: Vec<BuddyStatus>,
 }
 
@@ -167,6 +187,30 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     let mut buddy_ids: BTreeSet<String> = pledge_snapshot.keys().cloned().collect();
     buddy_ids.extend(cycle_snapshot.keys().cloned());
 
+    let pledged_out_total_bytes: u64 = pledge_snapshot.values().map(|p| p.pledged_bytes).sum();
+
+    // statvfs is a blocking syscall — cheap, but run it off the async
+    // runtime's worker thread like any other blocking call. None (rather
+    // than failing the whole request) if the platform or path doesn't
+    // support it, so a disk-stats quirk on some host never takes down the
+    // rest of the dashboard.
+    let disk = {
+        let data_dir = state.data_dir.clone();
+        tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .map(|stats| {
+                let total_bytes = stats.total_space();
+                let available_bytes = stats.available_space();
+                DiskStatus {
+                    total_bytes,
+                    available_bytes,
+                    used_bytes: total_bytes.saturating_sub(available_bytes),
+                }
+            })
+    };
+
     let mut buddies = Vec::with_capacity(buddy_ids.len());
     for node_id in buddy_ids {
         let pledge = pledge_snapshot.get(&node_id).copied().unwrap_or_default();
@@ -200,6 +244,9 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     Json(StatusResponse {
         node_id: state.node_id.clone(),
         backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
+        data_dir: state.data_dir.display().to_string(),
+        disk,
+        pledged_out_total_bytes,
         buddies,
     })
 }
@@ -319,6 +366,14 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .muted { color: var(--text-muted); font-size: 0.85rem; }
   .bar-track { background: #11141a; border-radius: 6px; height: 6px; overflow: hidden; margin-top: 0.4rem; }
   .bar-fill { background: var(--accent); height: 100%; }
+  .bar-fill-warn { background: var(--danger); }
+  .disk-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+  .disk-stats .stat .label { color: var(--text-muted); font-size: 0.78rem; }
+  .disk-stats .stat .value { font-size: 1rem; font-weight: 600; margin-top: 0.1rem; }
+  .disk-warning {
+    margin-top: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 8px; font-size: 0.82rem;
+    background: rgba(255,107,107,0.12); color: var(--danger);
+  }
   button {
     background: var(--accent); color: var(--accent-text); border: none; border-radius: 8px;
     padding: 0.45rem 0.9rem; font-size: 0.85rem; font-weight: 600; cursor: pointer;
@@ -369,6 +424,30 @@ const INDEX_HTML: &str = r#"<!doctype html>
   <div class="sub">This device: <code id="node-id">…</code> · backing up <code id="backup-dir">…</code></div>
 </header>
 <main>
+  <div class="card" id="disk-card" style="display:none;">
+    <h2>Disk</h2>
+    <div class="muted"><code id="data-dir">…</code></div>
+    <div class="disk-stats">
+      <div class="stat">
+        <div class="label">Used</div>
+        <div class="value" id="disk-used">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Free</div>
+        <div class="value" id="disk-free">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Total</div>
+        <div class="value" id="disk-total">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Pledged out</div>
+        <div class="value" id="disk-pledged">…</div>
+      </div>
+    </div>
+    <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+    <div class="disk-warning" id="disk-warning" style="display:none;"></div>
+  </div>
   <div id="empty" class="card" style="display:none;">No buddies seen yet — waiting on the first poll of the API.</div>
   <div id="buddies"></div>
 </main>
@@ -643,11 +722,51 @@ function renderBuddy(b) {
   return div;
 }
 
+function renderDisk(data) {
+  const card = document.getElementById("disk-card");
+  if (!data.disk) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "block";
+
+  document.getElementById("data-dir").textContent = data.data_dir;
+  document.getElementById("disk-used").textContent = fmtBytes(data.disk.used_bytes);
+  document.getElementById("disk-free").textContent = fmtBytes(data.disk.available_bytes);
+  document.getElementById("disk-total").textContent = fmtBytes(data.disk.total_bytes);
+  document.getElementById("disk-pledged").textContent = fmtBytes(data.pledged_out_total_bytes);
+
+  const usedPct = data.disk.total_bytes > 0 ? (data.disk.used_bytes / data.disk.total_bytes) * 100 : 0;
+  const bar = document.getElementById("disk-bar");
+  bar.style.width = Math.min(100, usedPct) + "%";
+
+  // The number that actually matters: can the disk cover what's been
+  // pledged to buddies on top of what's already used? Pledges aren't
+  // necessarily all consumed yet, so this is a "could run out" warning,
+  // not a "is out" one.
+  const warningEl = document.getElementById("disk-warning");
+  const committedTotal = data.disk.used_bytes + data.pledged_out_total_bytes;
+  if (data.pledged_out_total_bytes > data.disk.available_bytes) {
+    bar.classList.add("bar-fill-warn");
+    warningEl.style.display = "block";
+    warningEl.textContent =
+      "You've pledged " + fmtBytes(data.pledged_out_total_bytes) + " to buddies, but only " +
+      fmtBytes(data.disk.available_bytes) + " is actually free on this disk (" +
+      fmtBytes(committedTotal) + " committed against " + fmtBytes(data.disk.total_bytes) + " total). " +
+      "If buddies fill their pledges, this disk will run out.";
+  } else {
+    bar.classList.remove("bar-fill-warn");
+    warningEl.style.display = "none";
+  }
+}
+
 async function refresh() {
   const res = await fetch("/api/status");
   const data = await res.json();
   document.getElementById("node-id").textContent = data.node_id;
   document.getElementById("backup-dir").textContent = data.backup_dir || "(nothing — receive-only)";
+
+  renderDisk(data);
 
   const container = document.getElementById("buddies");
   const empty = document.getElementById("empty");
