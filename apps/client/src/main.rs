@@ -175,7 +175,17 @@ struct BuddiesResponse {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    // Default to info for this crate's own logs, but quiet down
+    // swarm-discovery's own chatty internal logging (e.g. "no addresses
+    // for peer, not announcing" during normal startup, before this
+    // device's own address is resolved yet) — it's noise, not signal,
+    // for anyone reading these logs. RUST_LOG, if set, overrides this
+    // entirely rather than layering on top of it.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
+            |_| tracing_subscriber::EnvFilter::new("info,swarm_discovery=warn"),
+        ))
+        .init();
     let config = Config::from_env()?;
     config.validate().await?;
 
@@ -238,19 +248,37 @@ async fn main() -> Result<()> {
     // affect connection behavior either way, iroh uses the address lookup
     // service's results on its own regardless of whether anyone's
     // listening on this stream.
+    //
+    // swarm-discovery re-announces/refreshes a peer's record periodically
+    // (every second or so), which re-fires Discovered for the *same*
+    // peer repeatedly — logging every one of those at INFO would drown
+    // out everything else in the logs within seconds. Only the first
+    // sighting of a given endpoint_id (or a re-sighting after it
+    // expired) is worth a log line; track what's already been announced
+    // and log the rest at DEBUG instead.
     {
         let mut events = mdns.subscribe().await;
         tokio::spawn(async move {
             use n0_future::StreamExt;
+            let mut currently_visible: std::collections::HashSet<EndpointId> =
+                std::collections::HashSet::new();
             while let Some(event) = events.next().await {
                 match event {
                     DiscoveryEvent::Discovered { endpoint_info, .. } => {
-                        tracing::info!(
-                            endpoint_id = %endpoint_info.endpoint_id,
-                            "found a buddy on the local network (mDNS) — direct LAN connection possible"
-                        );
+                        if currently_visible.insert(endpoint_info.endpoint_id) {
+                            tracing::info!(
+                                endpoint_id = %endpoint_info.endpoint_id,
+                                "found a buddy on the local network (mDNS) — direct LAN connection possible"
+                            );
+                        } else {
+                            tracing::debug!(
+                                endpoint_id = %endpoint_info.endpoint_id,
+                                "mDNS re-announced a buddy already known on the local network"
+                            );
+                        }
                     }
                     DiscoveryEvent::Expired { endpoint_id } => {
+                        currently_visible.remove(&endpoint_id);
                         tracing::debug!(%endpoint_id, "mDNS-discovered buddy no longer visible on the local network");
                     }
                     // DiscoveryEvent is #[non_exhaustive] — future variants
