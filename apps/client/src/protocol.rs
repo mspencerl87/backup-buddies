@@ -77,6 +77,15 @@ impl SyncAck {
 pub struct ListEntry {
     pub path: String,
     pub size: u64,
+    /// True when this path has no live file anymore — it was deleted, and
+    /// what's left is only a backup slot under `.versions/` (see
+    /// `rotate_versions` in receive.rs). `size` for a deleted entry is the
+    /// size of its newest surviving version, not a live file. Lets the
+    /// dashboard's file browser still show (and offer History/restore-a-
+    /// version for) a file the person deleted, instead of it silently
+    /// disappearing from the list the moment there's no live copy.
+    #[serde(default)]
+    pub deleted: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

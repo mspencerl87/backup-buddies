@@ -499,10 +499,65 @@ async fn handle_disk_stats(
 /// as the same ListEntry shape the List protocol request returns. Shared
 /// with dashboard.rs so the local status page can show "what have they
 /// backed up with us" without duplicating the directory walk.
+///
+/// Includes deleted-but-recoverable paths (live file gone, but a slot
+/// still exists under .versions/) as entries with `deleted: true`, so a
+/// file someone deleted doesn't just vanish from the list — it's still
+/// reachable via History/restore-a-version, same as an overwritten file
+/// is. Without this, rotate_versions() on delete faithfully keeps the
+/// backup slot on disk, but nothing in the browser ever offered a way
+/// back to it once the live copy was gone.
 pub async fn list_sender_files(sender_dir: &Path) -> Vec<ListEntry> {
     let mut files = Vec::new();
     collect_files(sender_dir, sender_dir, &mut files).await;
+
+    let live: std::collections::HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    let mut deleted = Vec::new();
+    collect_deleted(sender_dir, &versions_root(sender_dir), &live, &mut deleted).await;
+    files.extend(deleted);
+
     files
+}
+
+// Walks .versions/ looking for paths that no longer have a live file —
+// i.e. the file was deleted, not just overwritten. Each one becomes a
+// single `deleted: true` ListEntry (deduped across its remaining backup
+// slots), sized from whichever slot is newest.
+fn collect_deleted<'a>(
+    sender_dir: &'a Path,
+    dir: &'a Path,
+    live: &'a std::collections::HashSet<&'a str>,
+    out: &'a mut Vec<ListEntry>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+    Box::pin(async move {
+        let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return };
+        let mut seen = std::collections::HashSet::new();
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type().await else { continue };
+            if file_type.is_dir() {
+                collect_deleted(sender_dir, &path, live, out).await;
+            } else if file_type.is_file() {
+                let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+                // Version slots are named "<original file name>.v<N>" —
+                // strip that suffix to get back the original relative path.
+                let Some(stripped) = file_name.rsplit_once(".v").and_then(|(name, slot)| {
+                    slot.parse::<u32>().ok().map(|_| name)
+                }) else {
+                    continue;
+                };
+                let versions_dir = versions_root(sender_dir);
+                let rel_dir = path.parent().unwrap_or(&path).strip_prefix(&versions_dir).unwrap_or(Path::new(""));
+                let rel = rel_dir.join(stripped).to_string_lossy().replace('\\', "/");
+
+                if live.contains(rel.as_str()) || !seen.insert(rel.clone()) {
+                    continue;
+                }
+                let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
+                out.push(ListEntry { path: rel, size, deleted: true });
+            }
+        }
+    })
 }
 
 // Recursive async fn needs boxing in stable Rust.
@@ -528,7 +583,7 @@ fn collect_files<'a>(
                 let size = entry.metadata().await.map(|m| m.len()).unwrap_or(0);
                 let rel =
                     path.strip_prefix(base).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                out.push(ListEntry { path: rel, size });
+                out.push(ListEntry { path: rel, size, deleted: false });
             }
         }
     })
@@ -606,4 +661,47 @@ async fn handle_get_version(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression test for a deleted file disappearing from the dashboard's
+    // file browser entirely (reported against a live setup: delete a file
+    // locally, let it cycle, then "Files from <buddy>" just no longer
+    // listed it at all — not even with a History button — despite
+    // rotate_versions() correctly keeping its content under .versions/).
+    #[tokio::test]
+    async fn list_sender_files_surfaces_deleted_but_recoverable_paths() {
+        let dir = std::env::temp_dir()
+            .join(format!("bb-list-sender-files-test-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+        tokio::fs::create_dir_all(dir.join("notes")).await.unwrap();
+        tokio::fs::create_dir_all(dir.join(".versions/notes")).await.unwrap();
+
+        // `hello.txt` is still live.
+        tokio::fs::write(dir.join("hello.txt"), b"hi").await.unwrap();
+        // `notes/wtf.txt` was deleted — rotate_versions() moved its old
+        // content to slot 1 before the delete, so only the version slot
+        // remains, no live file.
+        tokio::fs::write(dir.join(".versions/notes/wtf.txt.v1"), b"old content").await.unwrap();
+
+        let files = list_sender_files(&dir).await;
+
+        let hello = files.iter().find(|f| f.path == "hello.txt").expect("hello.txt listed");
+        assert!(!hello.deleted, "live file should not be marked deleted");
+
+        let wtf = files
+            .iter()
+            .find(|f| f.path == "notes/wtf.txt")
+            .expect("deleted file should still be listed, not silently dropped");
+        assert!(wtf.deleted, "a path with no live file but a surviving version should be marked deleted");
+        assert_eq!(wtf.size, "old content".len() as u64);
+
+        // Exactly one entry for the deleted path, not one per surviving slot.
+        assert_eq!(files.iter().filter(|f| f.path == "notes/wtf.txt").count(), 1);
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
 }

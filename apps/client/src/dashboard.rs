@@ -663,6 +663,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .file-row:hover { background-color: rgba(255, 255, 255, 0.025); }
   .file-row .path { flex: 1; word-break: break-all; }
   .file-row .size { color: var(--text-muted); white-space: nowrap; }
+  .file-row-deleted .path { color: var(--text-muted); font-style: italic; }
   .file-row button { padding: 0.25rem 0.6rem; font-size: 0.75rem; }
   .file-history {
     padding: 0.4rem 0.6rem 0.6rem 2.3rem; font-size: 0.78rem; color: var(--text-muted);
@@ -929,7 +930,7 @@ function buildFileTree(files) {
       node = node.dirs.get(name);
     }
     const name = parts.length > 0 ? parts[parts.length - 1] : f.path;
-    node.items.push({ name, path: f.path, size: f.size });
+    node.items.push({ name, path: f.path, size: f.size, deleted: !!f.deleted });
   }
   return root;
 }
@@ -946,8 +947,12 @@ function nodeAtPath(path) {
 
 // Every file path recursively under a tree node — what a folder's
 // checkbox or "Restore" button acts on.
+// Deleted entries are left out here on purpose — they have no checkbox
+// (see makeFileRow) and nothing live to restore the normal way, so
+// "select all" / bulk restore should skip over them rather than silently
+// failing to restore a file the person never checked themselves.
 function collectPaths(node) {
-  let paths = node.items.map((it) => it.path);
+  let paths = node.items.filter((it) => !it.deleted).map((it) => it.path);
   for (const child of node.dirs.values()) paths = paths.concat(collectPaths(child));
   return paths;
 }
@@ -992,16 +997,21 @@ function renderBreadcrumb() {
 // keeps working unchanged — appending a fragment appends both children in
 // order. The history panel stays empty and hidden until "History" is
 // clicked, so opening the browser doesn't fire a versions request per file.
+// A `deleted` item has no live file left — just a backup slot under
+// .versions/ (see collect_deleted in receive.rs). It can't be restored the
+// normal way (there's nothing live to fetch), so it gets no checkbox and
+// no plain "Restore" button, only "History" to pick a surviving version —
+// same path an overwritten file's older versions already go through.
 function makeFileRow(item) {
   const frag = document.createDocumentFragment();
   const row = document.createElement("div");
-  row.className = "file-row";
+  row.className = "file-row" + (item.deleted ? " file-row-deleted" : "");
   row.innerHTML = `
-    <input type="checkbox" class="file-pick">
-    <span class="file-icon">📄</span>
-    <span class="path">${item.name}</span>
+    ${item.deleted ? "" : '<input type="checkbox" class="file-pick">'}
+    <span class="file-icon">${item.deleted ? "🗑️" : "📄"}</span>
+    <span class="path">${item.name}${item.deleted ? " (deleted — recoverable)" : ""}</span>
     <span class="size">${fmtBytes(item.size)}</span>
-    <button class="secondary file-restore-one">Restore</button>
+    ${item.deleted ? "" : '<button class="secondary file-restore-one">Restore</button>'}
     <button class="secondary file-history-toggle">History</button>
   `;
   const history = document.createElement("div");
@@ -1009,13 +1019,15 @@ function makeFileRow(item) {
   history.style.display = "none";
 
   const checkbox = row.querySelector(".file-pick");
-  checkbox.checked = browseState.selected.has(item.path);
-  checkbox.addEventListener("change", () => {
-    if (checkbox.checked) browseState.selected.add(item.path);
-    else browseState.selected.delete(item.path);
-    updateSelectedControls();
-  });
-  row.querySelector(".file-restore-one").addEventListener("click", async (ev) => {
+  if (checkbox) {
+    checkbox.checked = browseState.selected.has(item.path);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) browseState.selected.add(item.path);
+      else browseState.selected.delete(item.path);
+      updateSelectedControls();
+    });
+  }
+  row.querySelector(".file-restore-one")?.addEventListener("click", async (ev) => {
     const btn = ev.target;
     btn.disabled = true;
     browseResult.textContent = "Restoring " + item.path + "…";
@@ -1182,7 +1194,7 @@ function renderBrowseSearch(query) {
   browseCount.textContent = filtered.length + " of " + browseState.files.length + " file(s)";
   browseList.innerHTML = "";
   for (const f of filtered) {
-    browseList.appendChild(makeFileRow({ name: f.path, path: f.path, size: f.size }));
+    browseList.appendChild(makeFileRow({ name: f.path, path: f.path, size: f.size, deleted: !!f.deleted }));
   }
 
   browseSelectAll.checked = filtered.length > 0 && filtered.every((f) => browseState.selected.has(f.path));
@@ -1240,7 +1252,7 @@ browseModal.addEventListener("click", (ev) => {
 browseSelectAll.addEventListener("change", () => {
   const query = browseSearch.value.trim().toLowerCase();
   const paths = query
-    ? browseState.files.filter((f) => f.path.toLowerCase().includes(query)).map((f) => f.path)
+    ? browseState.files.filter((f) => f.path.toLowerCase().includes(query) && !f.deleted).map((f) => f.path)
     : collectPaths(nodeAtPath(browseState.currentPath) || browseState.tree || { dirs: new Map(), items: [] });
   if (browseSelectAll.checked) {
     paths.forEach((p) => browseState.selected.add(p));
