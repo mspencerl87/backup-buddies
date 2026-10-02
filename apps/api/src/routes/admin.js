@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireAdmin } from '../middleware/require-admin.js';
+import { syncSubscriptionQuantity } from './billing.js';
 
 export const adminRouter = Router();
 
@@ -124,16 +125,30 @@ adminRouter.delete('/admin/accounts/:id/devices/:deviceId', async (req, res) => 
 
 // Remove a buddy pairing — scoped to pairings this account is actually
 // part of (as either side), same reasoning as the device route above.
+//
+// Ending a pairing changes what both sides are actually committed to, so
+// (same as the normal invite-redeem flow in invites.js) both accounts'
+// Stripe subscription quantities need resyncing afterward — missing this
+// previously meant a paid account kept being billed for storage pledged to
+// a pairing that no longer existed, with nothing to ever correct it short
+// of an unrelated pledge change.
 adminRouter.delete('/admin/accounts/:id/pairings/:pairingId', async (req, res) => {
   const result = await pool.query(
     `DELETE FROM buddy_pairings
       WHERE id = $1 AND (account_a_id = $2 OR account_b_id = $2)
-      RETURNING id`,
+      RETURNING id, account_a_id, account_b_id`,
     [req.params.pairingId, req.params.id],
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'pairing not found' });
   }
+
+  const { account_a_id, account_b_id } = result.rows[0];
+  await Promise.all([
+    syncSubscriptionQuantity(account_a_id),
+    syncSubscriptionQuantity(account_b_id),
+  ]);
+
   res.status(204).end();
 });
 
@@ -150,17 +165,35 @@ adminRouter.delete('/admin/accounts/:id/invites/:inviteId', async (req, res) => 
   res.status(204).end();
 });
 
-// Delete the whole account. devices/buddy_pairings/invites/sessions/
-// relay_usage_events all reference accounts with ON DELETE CASCADE (see
-// db/init.sql and migrations), so this one statement cleans up everything
-// in Postgres. It does NOT touch Stripe — a subscription there keeps
-// running and billing until it's cancelled separately in the Stripe
-// dashboard (or via its API). had_stripe_subscription in the response
-// flags when that manual step is needed; the dashboard UI warns on it too.
+// Delete the whole account. devices/buddy_pairings/invites(inviter
+// side)/sessions/relay_usage_events all reference accounts with ON DELETE
+// CASCADE (invites' redeemed_by_account_id instead SETs NULL — see
+// db/migrations/009 — since that invite belongs to the inviter, not this
+// account), so this one statement cleans up everything in Postgres. It
+// does NOT touch Stripe — a subscription there keeps running and billing
+// until it's cancelled separately in the Stripe dashboard (or via its
+// API). had_stripe_subscription in the response flags when that manual
+// step is needed; the dashboard UI warns on it too.
 adminRouter.delete('/admin/accounts/:id', async (req, res) => {
   if (req.params.id === req.account.id) {
     return res.status(400).json({ error: "can't delete your own account from here" });
   }
+
+  // Who this account is actively paired with, captured *before* the
+  // delete cascades the pairing rows away — needed both to tell the admin
+  // UI who's affected and to resync the survivor's Stripe quantity below
+  // (ending a pairing from either side changes what both are actually
+  // committed to; see the pairing-delete route above for the same fix).
+  const activePairings = await pool.query(
+    `SELECT other.email,
+            CEIL(buddy_pairings.pledged_bytes / 1073741824.0) AS pledged_gb,
+            CASE WHEN account_a_id = $1 THEN account_b_id ELSE account_a_id END AS other_account_id
+       FROM buddy_pairings
+       JOIN accounts other
+         ON other.id = CASE WHEN account_a_id = $1 THEN account_b_id ELSE account_a_id END
+      WHERE (account_a_id = $1 OR account_b_id = $1) AND status = 'active'`,
+    [req.params.id],
+  );
 
   const result = await pool.query(
     `DELETE FROM accounts WHERE id = $1 RETURNING id, stripe_subscription_id`,
@@ -170,8 +203,16 @@ adminRouter.delete('/admin/accounts/:id', async (req, res) => {
     return res.status(404).json({ error: 'account not found' });
   }
 
+  await Promise.all(
+    activePairings.rows.map((row) => syncSubscriptionQuantity(row.other_account_id)),
+  );
+
   res.json({
     ok: true,
     had_stripe_subscription: Boolean(result.rows[0].stripe_subscription_id),
+    ended_active_pairings: activePairings.rows.map((row) => ({
+      email: row.email,
+      pledged_gb: Number(row.pledged_gb),
+    })),
   });
 });

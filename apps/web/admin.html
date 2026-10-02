@@ -223,9 +223,22 @@
             alert("Can't delete your own account from here.");
             return;
           }
+
+          // Pulled from the already-loaded accounts list (has_subscription
+          // and buddies are both present there) so this warning shows
+          // before making a request, not after.
+          const account = allAccounts.find((a) => a.id === link.dataset.id);
+          const activeBuddies = (account?.buddies || []).filter((b) => b.status === 'active');
+          const pairingWarning = activeBuddies.length
+            ? ` They're actively paired with ${activeBuddies.map((b) => b.email).join(', ')} — ` +
+              `deleting ends that pairing immediately on both sides (their Stripe billing, if any, ` +
+              `is adjusted down automatically; their locally-stored data from this account is not deleted ` +
+              `but becomes orphaned — no longer tracked here).`
+            : '';
+
           if (!confirm(
             `Permanently delete ${link.dataset.email}? This removes the account and everything tied to it ` +
-            `(devices, buddy pairings, invites) from the database. This cannot be undone. ` +
+            `(devices, buddy pairings, invites) from the database. This cannot be undone.${pairingWarning} ` +
             `If they have an active Stripe subscription, cancel it separately in the Stripe dashboard — ` +
             `deleting here does not touch billing.`
           )) return;
@@ -240,8 +253,16 @@
               alert(data.error || 'Could not delete account.');
               return;
             }
+            const notes = [];
             if (data.had_stripe_subscription) {
-              alert('Account deleted. It had an active Stripe subscription — remember to cancel it in the Stripe dashboard, it is not affected by this.');
+              notes.push('It had an active Stripe subscription — remember to cancel it in the Stripe dashboard, it is not affected by this.');
+            }
+            if (data.ended_active_pairings?.length) {
+              const names = data.ended_active_pairings.map((p) => `${p.email} (${p.pledged_gb}GB)`).join(', ');
+              notes.push(`Ended active pairing(s) with: ${names}. Their Stripe subscription quantity, if any, was resynced to reflect this.`);
+            }
+            if (notes.length) {
+              alert(`Account deleted. ${notes.join(' ')}`);
             }
             document.getElementById('detail-card').style.display = 'none';
             await loadAccounts();
