@@ -67,15 +67,16 @@
   client:
     image: ghcr.io/mspencerl87/backup-buddies/client:latest
     restart: unless-stopped
+    network_mode: host
     env_file: .env
     environment:
       - BACKUP_DIR=/backup
-    ports:
-      - "${DASHBOARD_PORT:-8080}:8080"
-      - "${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"
     volumes:
       - ${DATA_DIR_HOST}:/data
       - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro</code></pre>
+          <p class="muted" style="margin-top:0.5rem">
+            <code>network_mode: host</code> runs the container directly on this machine's network instead of Docker's usual isolated one — it's what lets this device find a buddy on the same local network and connect directly, skipping the relay entirely. Linux only; if you're on Docker Desktop (Mac/Windows), see the troubleshooting section below.
+          </p>
           <p class="muted" style="margin:1rem 0 0.25rem">
             <code>.env</code> — this is the one you customize. Only <strong>DEVICE_TOKEN</strong> and <strong>BACKUP_PASSPHRASE</strong> are required; the rest have sensible defaults:
           </p>
@@ -92,10 +93,12 @@ RELAY_URL=https://relay.filegarden.net
 # Where this device's data lands — defaults to ./data next to this file.
 DATA_DIR_HOST=./data
 
-# The port the local status dashboard (see below) is reachable on from
-# this host. Defaults to 8080 — only set this if 8080 is already taken,
-# e.g. you're running more than one device's client on the same machine
-# (give each its own folder and a different DASHBOARD_PORT here).
+# The port the local status dashboard (see below) binds directly on this
+# host. Defaults to 8080 — only set this if 8080 is already taken, or
+# you're running more than one device's client on the same machine (give
+# each its own folder and a DIFFERENT DASHBOARD_PORT here — required,
+# not optional, when sharing a host, since this binds the port directly
+# rather than Docker mapping it for you).
 #DASHBOARD_PORT=8080
 
 # The UDP port used for the actual connection to your buddy (not the
@@ -103,8 +106,9 @@ DATA_DIR_HOST=./data
 # — it just relays through relay.filegarden.net instead of connecting
 # directly — but if you can forward a UDP port on your router, forward
 # this one to this machine for a shot at a faster direct connection.
-# Defaults to 11235; only change it if that's easier to forward, or
-# already taken by something else.
+# Defaults to 11235; change it if already taken, easier to forward
+# differently, or (same as DASHBOARD_PORT) you're running more than one
+# device's client on this same host.
 #SYNC_PORT=11235</code></pre>
           <p class="muted" style="margin-top:0.75rem">
             Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
@@ -159,7 +163,7 @@ cd backup-buddies-client</code></pre>
             <li>Scans your folder roughly every 30 seconds and sends only what's new or changed — unchanged files aren't re-sent each cycle</li>
             <li>Mirrors deletions too, so your buddy's copy matches yours rather than only ever growing</li>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
-            <li>Connects directly to your buddy's device when possible, falling back to the relay automatically when it's not</li>
+            <li>Connects directly to your buddy's device when possible — including finding them automatically on the same local network and connecting over it, never touching the relay — falling back to the relay automatically when a direct connection isn't possible</li>
             <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
             <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land under <code>data/restored/&lt;buddy&gt;/</code> next to this device's other data, and the dashboard shows the exact path once a restore finishes</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
@@ -193,7 +197,8 @@ cd backup-buddies-client</code></pre>
       <h2>Troubleshooting</h2>
       <ul class="tech-list">
         <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>. A 401 here means that exact token doesn't match any device on your dashboard — it's either stale (its device was removed and re-added since, which issues a new one) or the paste picked up extra whitespace; easiest fix is to remove the device, add it again, and paste the fresh token.</li>
-        <li><strong>"port is already allocated" on <code>docker compose up -d</code>:</strong> something else on this host — often another device's client — already has that host port. Set <code>DASHBOARD_PORT</code> to a free port in this device's <code>.env</code> (see above) and try again. Only the host-side port needs to be unique per device on the same machine; leave the container-side <code>:8080</code> in <code>docker-compose.yml</code> alone.</li>
+        <li><strong>Fails to start with an "address already in use" error, or logs show it exiting immediately:</strong> something else on this host — often another device's client — already has that <code>DASHBOARD_PORT</code> or <code>SYNC_PORT</code>. Give this device its own, different values for both in its <code>.env</code> (see above) and restart. With <code>network_mode: host</code>, these bind directly on the host, so they must be unique across every client running on the same machine.</li>
+        <li><strong>On Docker Desktop (Mac/Windows), the dashboard or buddy connections stop working after adding <code>network_mode: host</code>:</strong> host networking isn't fully supported there the way it is on Linux. Remove that line, add back a <code>ports:</code> section instead (<code>"${DASHBOARD_PORT:-8080}:8080"</code> and <code>"${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"</code>), and everything still works — you just won't get local-network (mDNS) direct connections to a buddy on the same LAN; relay and direct-over-internet connections are unaffected.</li>
         <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
         <li><strong>Lost your device token:</strong> remove the device on your dashboard and add it again — tokens can't be retrieved after creation, only replaced.</li>
       </ul>

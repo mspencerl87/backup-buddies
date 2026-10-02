@@ -30,8 +30,8 @@
 # last backup cycle, and a one-click restore — is served at
 # http://<this machine's address>:8080 once the container is up (change
 # DASHBOARD_PORT in .env to use a different port). It has no login of its
-# own and the restore button is a real action — see the port mapping
-# below if you want it restricted to this machine instead of your LAN.
+# own — see the network_mode note below if you want it restricted to this
+# machine instead of your LAN.
 
 services:
   client:
@@ -40,31 +40,31 @@ services:
     # package and it's been made public, pulling is faster than building:
     # image: ghcr.io/yourusername/backup-buddies/client:latest
     restart: unless-stopped
+    # Runs directly on this host's network instead of Docker's usual
+    # isolated bridge network. Two reasons this is necessary, not just
+    # convenient:
+    #   1. Local-network (mDNS) discovery — finding a buddy on the same
+    #      LAN directly, skipping the relay entirely — needs real access
+    #      to the host's network for multicast; a bridge-networked
+    #      container can't receive it no matter what ports are published.
+    #   2. It's what actually makes DASHBOARD_PORT/SYNC_PORT below mean
+    #      what they say: the app binds those ports directly on this
+    #      host, so no separate port-mapping step is needed (and none is
+    #      possible — Docker ignores a `ports:` list under this mode).
+    # Trade-off: the container loses Docker's network isolation — it sees
+    # (and can bind) this host's network directly, same as any other
+    # program running on this machine, rather than Docker managing what's
+    # exposed. Linux only — Docker Desktop (Mac/Windows) doesn't support
+    # host networking the same way; if that's you, drop this line and
+    # publish ports the usual way instead, with the understanding that
+    # mDNS/same-LAN direct connections won't work (everything still works
+    # via the relay or direct-over-internet, just not LAN-local).
+    network_mode: host
     env_file: .env
     environment:
       # Fixed mount point inside the container — BACKUP_DIR_HOST in .env
       # controls what's mounted there on the host side, below.
       - BACKUP_DIR=/backup
-    ports:
-      # Open on every interface, not just loopback — most people run this
-      # headless (a NAS, a home server, a VPS) and manage it from a
-      # browser elsewhere on their network, not sitting at that machine.
-      # It has no login of its own and the restore button is a real
-      # action, so anyone who can reach this machine on this port can see
-      # your pledge/buddy info and trigger a restore. If that's not
-      # acceptable for where this runs (exposed to the open internet, an
-      # untrusted network), bind it to loopback only instead:
-      #   - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
-      - "${DASHBOARD_PORT:-8080}:8080"
-      # The actual sync connection to your buddy, over UDP — separate from
-      # the dashboard port above. Published so a direct (peer-to-peer)
-      # connection is *possible*, same host port as SYNC_PORT in .env so
-      # the two stay in sync; it's optional in the sense that nothing
-      # breaks if you don't forward it on your router too, every transfer
-      # just relays instead, which still works fine, just costs more
-      # (latency, and relay bandwidth past the free tier) than direct
-      # would have.
-      - "${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"
     volumes:
       # A real, visible folder on this machine — not an opaque
       # Docker-managed volume — so it's easy to find, move, or point your

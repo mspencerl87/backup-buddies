@@ -219,11 +219,21 @@ in the same house, say — the client also runs local discovery over mDNS
 (same idea as Syncthing's LAN discovery): each client broadcasts/listens
 on the LAN and, if it finds its buddy there, connects over the private
 network directly. This sidesteps the relay and the router's NAT/hairpin
-behavior entirely rather than trying to traverse it, and needs no port
-forwarding or configuration — it's always on, and does nothing (falls
-back to the relay/direct-over-internet path above) when a buddy isn't on
-the same LAN. Look for `"found a buddy on the local network (mDNS)"` in
-the logs to confirm it's working.
+behavior entirely rather than trying to traverse it. Look for
+`"found a buddy on the local network (mDNS)"` in the logs to confirm
+it's working.
+
+This needs `network_mode: host` in `docker-compose.yml` (already set by
+default) — mDNS relies on real LAN multicast, which a normally-networked
+(bridge-mode) container can't receive no matter what ports are
+published, even to another container on the *same host*. Host networking
+means the app's `DASHBOARD_PORT`/`SYNC_PORT` now bind directly on the
+host rather than through a Docker port mapping, so **each device sharing
+a host needs its own distinct values for both** — no longer just "if the
+default's taken," but required. It's Linux-only; on Docker Desktop
+(Mac/Windows), drop `network_mode: host` and publish ports the normal
+way instead — everything still works, just without same-LAN direct
+connections (relay and direct-over-internet are unaffected).
 
 There's no live, mid-transfer rate (e.g. "currently uploading at 2MB/s") —
 cycles run every 30s and are usually short, so a last-cycle average is

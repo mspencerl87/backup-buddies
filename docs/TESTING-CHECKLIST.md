@@ -61,12 +61,34 @@ Logs `"found a buddy on the local network (mDNS) — direct LAN connection
 possible"` on discovery. `cargo build`/`test`/`clippy --all-targets` all
 clean. Not yet tested against real traffic.
 
-- [ ] testa/testb are both on the same host, which may or may not count
-      as "same LAN" for mDNS purposes depending on the container network
-      driver — confirm mDNS multicast actually reaches between the two
-      containers at all before reading anything into the result either
-      way (bridge networking can silently drop multicast between
-      containers on the same Docker bridge)
+- [x] Confirmed on testa/testb: bridge networking genuinely blocks mDNS
+      between containers, even same-host. `docker network ls` showed
+      `testa_default`/`testb_default` as two fully separate bridge
+      networks (each `docker compose` project gets its own by default),
+      and `docker compose logs client | grep -i mdns` was empty on both
+      sides after a clean restart — no discovery, no error, just silence.
+- [x] Decided: switched to `network_mode: host` in both
+      `apps/client/docker-compose.yml` and the customer-facing snippet in
+      `apps/web/setup.html`, rather than macvlan or leaving mDNS dormant
+      — it's the standard way to make mDNS work in Docker, at the cost of
+      losing Docker's network isolation (Linux only; Docker Desktop users
+      fall back to published ports and lose same-LAN direct connections
+      only, documented in both the README and setup.html).
+- [x] Found and fixed a real bug this surfaced: `DASHBOARD_PORT` only
+      ever controlled Docker's bridge-mode port *mapping* — the app
+      itself always bound a hardcoded `0.0.0.0:8080` internally. Under
+      `network_mode: host` there's no mapping layer, so two devices on
+      one host (testa/testb's exact setup) would've collided on port
+      8080 regardless of `DASHBOARD_PORT`. Fixed in
+      `apps/client/src/main.rs`: `DASHBOARD_PORT` now drives the actual
+      bind address (`DASHBOARD_BIND` still works as a full-address
+      override). `cargo build`/`test`/`clippy --all-targets` all clean.
+- [ ] Apply to testa/testb: update both `docker-compose.yml`s (add
+      `network_mode: host`, drop the now-ignored `ports:` section),
+      confirm `DASHBOARD_PORT`/`SYNC_PORT` are still distinct between the
+      two (already true: 8080/8081 and 11235/11236), pull the new image,
+      restart both, and confirm the dashboard is still reachable at its
+      usual address/port after losing Docker's port mapping
 - [ ] Real test: two clients on an actual shared LAN (e.g. two machines
       on the same home wifi, not same-host containers) — confirm the
       `"found a buddy on the local network"` log line appears on both
@@ -78,12 +100,6 @@ clean. Not yet tested against real traffic.
 - [ ] Confirm container restart doesn't leave stale mDNS records
       (re-advertise cleanly on startup, old record expires on the other
       side within a reasonable time — `DiscoveryEvent::Expired`)
-- [ ] Check whether `docker-compose.yml` needs any changes for mDNS to
-      work at all — multicast UDP (224.0.0.251:5353) typically needs
-      either host networking or an explicit port/network config; the
-      default Docker bridge network may block it silently, in which case
-      this feature does nothing without a compose change we haven't made
-      yet
 
 ## Verified working (2026-10-02)
 

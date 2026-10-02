@@ -35,11 +35,17 @@ struct Config {
     // the periodic backup cycle is skipped entirely, but this device still
     // accepts and stores whatever its buddy sends it.
     backup_dir: Option<PathBuf>,
-    // Local status/restore dashboard's bind address. Defaults to
-    // 0.0.0.0:8080 *inside the container* — safe by default in practice
-    // only because docker-compose.yml publishes it bound to 127.0.0.1 on
-    // the host side; binding to loopback here instead would make it
-    // unreachable through Docker's port mapping at all.
+    // Local status/restore dashboard's bind address. Built from
+    // DASHBOARD_PORT (0.0.0.0:<that port>) rather than a hardcoded 8080 —
+    // with network_mode: host (see docker-compose.yml) there's no Docker
+    // port-mapping layer to translate a fixed internal port to a chosen
+    // host one, so the app itself has to bind the real port directly.
+    // This matters for running more than one device's client on the same
+    // host (see DASHBOARD_PORT's own doc comment below): each needs a
+    // distinct DASHBOARD_PORT, same requirement as SYNC_PORT already has.
+    // DASHBOARD_BIND remains as an escape hatch to override the full
+    // address (e.g. to bind loopback-only) when DASHBOARD_PORT alone
+    // isn't enough.
     dashboard_bind: String,
     // How long since a buddy's last *successful* cycle before the
     // dashboard calls them stale rather than just "last synced a while
@@ -81,8 +87,13 @@ impl Config {
             .context("RELAY_URL is not a valid URL")?;
         let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "/data".to_string()).into();
         let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
-        let dashboard_bind =
-            std::env::var("DASHBOARD_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let dashboard_port = std::env::var("DASHBOARD_PORT")
+            .ok()
+            .map(|s| s.parse::<u16>().context("DASHBOARD_PORT must be a valid port number (1-65535)"))
+            .transpose()?
+            .unwrap_or(8080);
+        let dashboard_bind = std::env::var("DASHBOARD_BIND")
+            .unwrap_or_else(|_| format!("0.0.0.0:{dashboard_port}"));
         let stale_after_secs = std::env::var("STALE_AFTER_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
