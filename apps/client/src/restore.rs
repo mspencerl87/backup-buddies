@@ -1,8 +1,10 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use age::secrecy::SecretString;
 use anyhow::{Context, Result};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
+use serde::Serialize;
 
 use crate::netinfo::{self, ConnectionQuality};
 use crate::protocol::{
@@ -12,6 +14,30 @@ use crate::protocol::{
 use crate::receive::safe_join;
 
 const MAX_FILE_BYTES: usize = 5 * 1024 * 1024 * 1024; // matches receive.rs's per-file cap
+
+/// Live progress for one in-flight multi-file restore, polled by the
+/// dashboard (GET /api/buddies/:id/restore-progress) while the restore's
+/// own POST is still in flight — the two are separate requests so a slow
+/// restore doesn't leave the browser with nothing to show but a frozen
+/// "Restoring…" for however long it takes. `total_files`/`total_bytes`
+/// are set once up front by whoever creates the handle (they come from a
+/// List call, not from here); this module only ever advances
+/// `completed_files`/`bytes_done`/`current_path` as it goes, and never
+/// touches `done`/`error` — the caller sets those once the restore this
+/// handle belongs to actually finishes, success or not.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RestoreProgress {
+    pub total_files: usize,
+    pub completed_files: usize,
+    pub total_bytes: u64,
+    pub bytes_done: u64,
+    pub current_path: Option<String>,
+    pub started_unix: u64,
+    pub done: bool,
+    pub error: Option<String>,
+}
+
+pub type ProgressHandle = Arc<Mutex<RestoreProgress>>;
 
 /// What one restore actually did, including transfer metrics — mirrors
 /// backup.rs's BackupCycleStats so the dashboard can show both directions
@@ -162,7 +188,7 @@ pub async fn run_restore(
 
     let paths: Vec<String> = files.into_iter().map(|f| f.path).collect();
     let (files_restored, bytes_restored) =
-        restore_paths_on(&conn, passphrase, restore_dir, &paths).await?;
+        restore_paths_on(&conn, passphrase, restore_dir, &paths, None).await?;
     Ok(RestoreStats {
         files_restored,
         bytes_restored,
@@ -172,10 +198,16 @@ pub async fn run_restore(
 }
 
 /// Same as `run_restore`, but only the given paths (as returned by
-/// `list_buddy_files`) rather than everything — what the dashboard's file
-/// browser uses once the person has picked specific files. Connects once
-/// and restores every requested path over that one connection rather than
-/// reconnecting per file.
+/// `list_buddy_files`) rather than everything — what the dashboard uses
+/// for every restore it kicks off (a plain "Restore", "Restore all",
+/// "Restore selected", and a folder's "Restore" all resolve to a path
+/// list before calling this, so a deleted-but-recoverable entry never
+/// even gets attempted here — see the dashboard's restore_handler).
+/// Connects once and restores every requested path over that one
+/// connection rather than reconnecting per file. `progress`, if given,
+/// is updated after each file so a poller elsewhere can show live
+/// progress while this is still running — see `RestoreProgress`'s doc
+/// comment for who owns which fields.
 pub async fn restore_selected(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
@@ -183,11 +215,12 @@ pub async fn restore_selected(
     buddy_id: EndpointId,
     restore_dir: &Path,
     paths: &[String],
+    progress: Option<ProgressHandle>,
 ) -> Result<RestoreStats> {
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
     let (files_restored, bytes_restored) =
-        restore_paths_on(&conn, passphrase, restore_dir, paths).await?;
+        restore_paths_on(&conn, passphrase, restore_dir, paths, progress.as_ref()).await?;
     Ok(RestoreStats {
         files_restored,
         bytes_restored,
@@ -205,12 +238,18 @@ async fn restore_paths_on(
     passphrase: &SecretString,
     restore_dir: &Path,
     paths: &[String],
+    progress: Option<&ProgressHandle>,
 ) -> Result<(usize, u64)> {
     let identity = age::scrypt::Identity::new(passphrase.clone());
 
     let mut restored = 0;
+    let mut attempted = 0;
     let mut bytes = 0u64;
     for rel_path in paths {
+        if let Some(p) = progress
+            && let Ok(mut g) = p.lock() {
+                g.current_path = Some(rel_path.clone());
+            }
         match restore_one_file(conn, &identity, restore_dir, rel_path).await {
             Ok(ciphertext_len) => {
                 restored += 1;
@@ -218,6 +257,16 @@ async fn restore_paths_on(
             }
             Err(err) => tracing::warn!(path = %rel_path, ?err, "failed to restore file"),
         }
+        attempted += 1;
+        // completed_files tracks files *attempted*, not just successes —
+        // a failed file is still done being tried, and progress should
+        // keep visibly moving rather than appear to stall on it.
+        if let Some(p) = progress
+            && let Ok(mut g) = p.lock() {
+                g.completed_files = attempted;
+                g.bytes_done = bytes;
+                g.current_path = None;
+            }
     }
     Ok((restored, bytes))
 }

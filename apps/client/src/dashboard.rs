@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::bandwidth::{BandwidthBook, BandwidthTotals};
 use crate::manifest::Manifest;
 use crate::netinfo::ConnectionQuality;
+use crate::protocol::ListEntry;
 use crate::receive::{self, PledgeBook};
 
 // Brand assets, shared with apps/web/assets (the canonical copy — see
@@ -102,7 +103,16 @@ struct AppState {
     relay_url: RelayUrl,
     passphrase: SecretString,
     stale_after_secs: u64,
+    restore_progress: RestoreProgressBook,
 }
+
+/// One entry per buddy we've ever kicked off a restore for — only the
+/// latest one (a new restore to the same buddy just overwrites the
+/// previous entry). Lets GET /api/buddies/:id/restore-progress poll the
+/// state of a restore while the POST that started it is still in flight,
+/// as a second, separate request — see restore.rs's RestoreProgress doc
+/// comment for the fuller reasoning.
+type RestoreProgressBook = Arc<Mutex<HashMap<String, crate::restore::ProgressHandle>>>;
 
 #[derive(Serialize)]
 struct BuddyStatus {
@@ -232,6 +242,7 @@ pub async fn run(
         relay_url,
         passphrase,
         stale_after_secs,
+        restore_progress: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
@@ -243,6 +254,7 @@ pub async fn run(
         .route("/api/buddies/:node_id/disk", get(buddy_disk_handler))
         .route("/api/buddies/:node_id/versions", get(versions_handler))
         .route("/api/restore/:node_id", post(restore_handler))
+        .route("/api/buddies/:node_id/restore-progress", get(restore_progress_handler))
         .route("/api/restore-version/:node_id", post(restore_version_handler))
         .with_state(state);
 
@@ -476,8 +488,15 @@ async fn restore_version_handler(
 // location (separate per buddy, so restoring from two buddies in a row
 // can't clobber each other), unlike the `restore` CLI subcommand which
 // takes an explicit destination. An empty/absent `paths` in the request
-// body restores everything (restore::run_restore); specific paths (from
-// the file browser) restore just those (restore::restore_selected).
+// body means "restore everything"; specific paths (from the file
+// browser) mean just those. Either way, this always resolves against a
+// fresh file list first (rather than trusting an empty `paths` straight
+// to restore::run_restore, or specific paths straight to
+// restore::restore_selected) so it can: skip deleted-but-recoverable
+// entries up front instead of wasting a round trip on a Get that can
+// only fail, and know the total file count/bytes before starting, which
+// is what makes restore-progress polling possible (see
+// restore_progress_handler below).
 async fn restore_handler(
     State(state): State<AppState>,
     AxumPath(node_id_str): AxumPath<String>,
@@ -487,7 +506,7 @@ async fn restore_handler(
         Ok(id) => id,
         Err(_) => return (StatusCode::BAD_REQUEST, "not a valid Iroh node id".to_string()).into_response(),
     };
-    let paths = body.map(|Json(b)| b.paths).unwrap_or_default();
+    let requested = body.map(|Json(b)| b.paths).unwrap_or_default();
 
     let restore_dir = state.data_dir.join("restored").join(&node_id_str);
     if let Err(err) = tokio::fs::create_dir_all(&restore_dir).await {
@@ -495,20 +514,47 @@ async fn restore_handler(
             .into_response();
     }
 
-    let result = if paths.is_empty() {
-        crate::restore::run_restore(&state.endpoint, &state.relay_url, &state.passphrase, buddy_id, &restore_dir)
-            .await
-    } else {
-        crate::restore::restore_selected(
-            &state.endpoint,
-            &state.relay_url,
-            &state.passphrase,
-            buddy_id,
-            &restore_dir,
-            &paths,
-        )
-        .await
+    let all_files = match crate::restore::list_buddy_files(&state.endpoint, &state.relay_url, buddy_id).await {
+        Ok(files) => files,
+        Err(err) => {
+            return (StatusCode::BAD_GATEWAY, format!("couldn't reach buddy to list files: {err}"))
+                .into_response();
+        }
     };
+    let wanted: std::collections::HashSet<&str> = requested.iter().map(|s| s.as_str()).collect();
+    let selected: Vec<ListEntry> = all_files
+        .into_iter()
+        .filter(|f| !f.deleted && (requested.is_empty() || wanted.contains(f.path.as_str())))
+        .collect();
+    let total_bytes: u64 = selected.iter().map(|f| f.size).sum();
+    let paths: Vec<String> = selected.into_iter().map(|f| f.path).collect();
+
+    let progress: crate::restore::ProgressHandle = Arc::new(Mutex::new(crate::restore::RestoreProgress {
+        total_files: paths.len(),
+        total_bytes,
+        started_unix: unix_now(),
+        ..Default::default()
+    }));
+    state.restore_progress.lock().unwrap().insert(node_id_str.clone(), progress.clone());
+
+    let result = crate::restore::restore_selected(
+        &state.endpoint,
+        &state.relay_url,
+        &state.passphrase,
+        buddy_id,
+        &restore_dir,
+        &paths,
+        Some(progress.clone()),
+    )
+    .await;
+
+    if let Ok(mut g) = progress.lock() {
+        g.done = true;
+        g.current_path = None;
+        if let Err(err) = &result {
+            g.error = Some(err.to_string());
+        }
+    }
 
     match result {
         Ok(stats) => {
@@ -526,6 +572,26 @@ async fn restore_handler(
             .into_response()
         }
         Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
+    }
+}
+
+// Polled by the browser while a restore's own POST is still in flight
+// (see doRestore's onProgress in the JS below). `{"active": false}` when
+// nothing's ever been kicked off for this buddy; otherwise the latest
+// restore's progress, which stays queryable (with `done: true`) after it
+// finishes too, so a poll that lands just after completion still gets a
+// real answer instead of a stale "in progress".
+async fn restore_progress_handler(
+    State(state): State<AppState>,
+    AxumPath(node_id_str): AxumPath<String>,
+) -> impl IntoResponse {
+    let book = state.restore_progress.lock().unwrap();
+    match book.get(&node_id_str) {
+        Some(handle) => {
+            let snapshot = handle.lock().unwrap().clone();
+            Json(serde_json::json!({ "active": true, "progress": snapshot })).into_response()
+        }
+        None => Json(serde_json::json!({ "active": false })).into_response(),
     }
 }
 
@@ -778,6 +844,43 @@ function fmtRate(bytes, ms) {
   return fmtBytes(bytes / (ms / 1000)) + "/s";
 }
 
+// "45s" / "3m 12s" / "2h 05m" — coarse on purpose, an ETA that claims
+// second-level precision over a multi-hour restore is just noise.
+function fmtEta(seconds) {
+  seconds = Math.max(0, Math.round(seconds));
+  if (seconds < 60) return seconds + "s";
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return mins + "m " + (seconds % 60) + "s";
+  const hrs = Math.floor(mins / 60);
+  return hrs + "h " + String(mins % 60).padStart(2, "0") + "m";
+}
+
+// Turns one /restore-progress poll into the one line shown while a
+// restore is running. File-count progress (N of M) is always shown since
+// it's always known up front; byte progress and an ETA are layered on
+// top only once there's enough signal for them to mean anything — a
+// rate computed over under a second, or applied to a transfer that's
+// basically already done, is more misleading than no estimate at all.
+function describeRestoreProgress(p) {
+  let line = "Restoring " + p.completed_files + " of " + p.total_files + " file(s)";
+  if (p.total_bytes > 0) {
+    const pct = Math.min(100, Math.round((p.bytes_done / p.total_bytes) * 100));
+    line += " — " + fmtBytes(p.bytes_done) + " of " + fmtBytes(p.total_bytes) + " (" + pct + "%)";
+
+    const elapsed = p.started_unix ? Date.now() / 1000 - p.started_unix : 0;
+    const remaining = p.total_bytes - p.bytes_done;
+    if (elapsed > 1.5 && remaining > 0) {
+      const rate = p.bytes_done / elapsed; // bytes/sec — the only part of
+      // the "math equation": remaining ÷ rate so far, same idea as any
+      // download ETA, not a precise forecast of a connection that can
+      // speed up or stall.
+      if (rate > 0) line += " — ~" + fmtEta(remaining / rate) + " remaining at " + fmtBytes(rate) + "/s";
+    }
+  }
+  if (p.current_path) line += " — " + p.current_path;
+  return line;
+}
+
 // "direct, 14ms" / "via relay, 80ms" / "connecting…" — iroh tries a
 // direct peer-to-peer path first and falls back to relaying through
 // relay.filegarden.net when NAT traversal doesn't work out; this is the
@@ -854,22 +957,48 @@ async function fetchBuddyDisk(nodeId) {
   applyBuddyDisk(nodeId);
 }
 
-async function doRestore(nodeId, paths) {
-  const res = await fetch("/api/restore/" + encodeURIComponent(nodeId), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paths: paths || [] }),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
-  return body;
+// Kicks off a restore (POST /api/restore) and, if onProgress is given,
+// polls GET /restore-progress on a separate interval the whole time
+// that POST is in flight — the two are independent requests precisely
+// so a restore that takes a while doesn't leave onProgress's caller
+// with nothing to show but a frozen "Restoring…" until it's done. The
+// poller is stopped (not left running) once the POST itself resolves
+// either way, success or failure.
+async function doRestore(nodeId, paths, onProgress) {
+  let timer = null;
+  if (onProgress) {
+    timer = setInterval(async () => {
+      try {
+        const res = await fetch("/api/buddies/" + encodeURIComponent(nodeId) + "/restore-progress");
+        const body = await res.json().catch(() => ({}));
+        if (body && body.active) onProgress(body.progress);
+      } catch {
+        // a missed poll just means one stale tick of progress text —
+        // not worth surfacing as an error on top of the restore itself
+      }
+    }, 700);
+  }
+  try {
+    const res = await fetch("/api/restore/" + encodeURIComponent(nodeId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: paths || [] }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+    return body;
+  } finally {
+    if (timer) clearInterval(timer);
+  }
 }
 
 async function restoreNow(nodeId, btn, resultEl) {
   btn.disabled = true;
   resultEl.textContent = "Restoring…";
   try {
-    const body = await doRestore(nodeId, []);
+    const body = await doRestore(nodeId, [], (p) => {
+      resultEl.textContent = describeRestoreProgress(p);
+    });
     resultEl.textContent = describeRestoreResult(body);
     resultEl.style.color = "var(--ok)";
   } catch (err) {
@@ -1033,7 +1162,9 @@ function makeFileRow(item) {
     browseResult.textContent = "Restoring " + item.path + "…";
     browseResult.style.color = "";
     try {
-      const body = await doRestore(browseState.nodeId, [item.path]);
+      const body = await doRestore(browseState.nodeId, [item.path], (p) => {
+        browseResult.textContent = describeRestoreProgress(p);
+      });
       browseResult.textContent = describeRestoreResult(body);
       browseResult.style.color = "var(--ok)";
     } catch (err) {
@@ -1144,7 +1275,9 @@ function makeFolderRow(name, node, path) {
     browseResult.textContent = "Restoring " + paths.length + " file(s) from " + name + "/…";
     browseResult.style.color = "";
     try {
-      const body = await doRestore(browseState.nodeId, paths);
+      const body = await doRestore(browseState.nodeId, paths, (p) => {
+        browseResult.textContent = describeRestoreProgress(p);
+      });
       browseResult.textContent = describeRestoreResult(body);
       browseResult.style.color = "var(--ok)";
     } catch (err) {
@@ -1269,7 +1402,9 @@ browseRestoreSelected.addEventListener("click", async () => {
   browseResult.textContent = "Restoring " + paths.length + " file(s)…";
   browseResult.style.color = "";
   try {
-    const body = await doRestore(browseState.nodeId, paths);
+    const body = await doRestore(browseState.nodeId, paths, (p) => {
+      browseResult.textContent = describeRestoreProgress(p);
+    });
     browseResult.textContent = describeRestoreResult(body);
     browseResult.style.color = "var(--ok)";
   } catch (err) {
@@ -1285,7 +1420,9 @@ browseRestoreAll.addEventListener("click", async () => {
   browseResult.textContent = "Restoring everything…";
   browseResult.style.color = "";
   try {
-    const body = await doRestore(browseState.nodeId, []);
+    const body = await doRestore(browseState.nodeId, [], (p) => {
+      browseResult.textContent = describeRestoreProgress(p);
+    });
     browseResult.textContent = describeRestoreResult(body);
     browseResult.style.color = "var(--ok)";
   } catch (err) {
