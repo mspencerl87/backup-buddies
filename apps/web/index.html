@@ -50,7 +50,89 @@
         <p>Your files move straight between your two devices — we just handle the matchmaking.</p>
       </div>
     </section>
+
+    <section class="screenshots">
+      <h2>What the client looks like</h2>
+      <p class="muted">
+        Every device also runs its own local dashboard — disk, bandwidth, and
+        each buddy's pledge at a glance, plus a file browser to restore
+        anything (or roll back to an earlier version).
+      </p>
+      <div class="carousel" id="client-carousel">
+        <div class="carousel-viewport">
+        <div class="carousel-track">
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-overview.png" alt="Client dashboard overview, showing disk usage, bandwidth, and each buddy's backup status" loading="lazy">
+            <figcaption>Overview — disk, bandwidth, and every buddy's pledge in one place</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-browse.png" alt="File browser modal showing a buddy's backed-up folders" loading="lazy">
+            <figcaption>Browse a buddy's files and restore a folder, a selection, or everything</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-history.png" alt="File version history, showing two previous backed-up versions of a file" loading="lazy">
+            <figcaption>Pull back an earlier version — the last 2 replaced copies of any file</figcaption>
+          </figure>
+        </div>
+        </div>
+        <button type="button" class="carousel-arrow carousel-prev" aria-label="Previous screenshot">&#8249;</button>
+        <button type="button" class="carousel-arrow carousel-next" aria-label="Next screenshot">&#8250;</button>
+        <div class="carousel-dots" role="tablist" aria-label="Screenshot navigation"></div>
+      </div>
+    </section>
   </main>
+
+  <script>
+    (function () {
+      var root = document.getElementById("client-carousel");
+      var track = root.querySelector(".carousel-track");
+      var slides = Array.prototype.slice.call(root.querySelectorAll(".carousel-slide"));
+      var dotsWrap = root.querySelector(".carousel-dots");
+      var prevBtn = root.querySelector(".carousel-prev");
+      var nextBtn = root.querySelector(".carousel-next");
+      var index = 0;
+      var autoplayMs = 5000;
+      var timer = null;
+
+      slides.forEach(function (_, i) {
+        var dot = document.createElement("button");
+        dot.type = "button";
+        dot.className = "carousel-dot";
+        dot.setAttribute("role", "tab");
+        dot.setAttribute("aria-label", "Go to screenshot " + (i + 1));
+        dot.addEventListener("click", function () {
+          goTo(i);
+          restartAutoplay();
+        });
+        dotsWrap.appendChild(dot);
+      });
+      var dots = Array.prototype.slice.call(dotsWrap.children);
+
+      function render() {
+        track.style.transform = "translateX(-" + index * 100 + "%)";
+        dots.forEach(function (dot, i) {
+          dot.classList.toggle("active", i === index);
+          dot.setAttribute("aria-selected", i === index ? "true" : "false");
+        });
+      }
+
+      function goTo(i) {
+        index = (i + slides.length) % slides.length;
+        render();
+      }
+
+      function restartAutoplay() {
+        if (timer) clearInterval(timer);
+        timer = setInterval(function () { goTo(index + 1); }, autoplayMs);
+      }
+
+      prevBtn.addEventListener("click", function () { goTo(index - 1); restartAutoplay(); });
+      nextBtn.addEventListener("click", function () { goTo(index + 1); restartAutoplay(); });
+
+      render();
+      restartAutoplay();
+    })();
+  </script>
 
   <footer>
     <a href="/terms.html">Terms of Service</a>
