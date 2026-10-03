@@ -45,6 +45,31 @@ are virtually always on two different networks.
       the whole reason that override exists; untested against a real
       no-IPv6 host)
 
+**Real cross-network attempt (2026-10-03)**: testc runs on a genuinely
+separate host/network from testa/testb (`msl-ubuntu`, Spencer's company
+lab — confirmed not a same-host/same-NAT setup, so this *is* a valid test
+of hole-punching, unlike testa/testb). Triggered a real file send from
+testb to testc and checked the resulting cycle's connection indicator on
+testb's dashboard: `sent 1, deleted 0 · 10.5 KB in 2.8s (3.8 KB/s) · via
+relay, 133ms`. Also consistent with the "Their actual disk" probe
+connection on the same card, independently landing on `via relay, 131ms`.
+So: **hole-punching is not currently succeeding for this pairing** —
+relay fallback is working correctly (data did arrive), but the direct
+path SYNC_PORT is meant to enable isn't being established. Not yet root
+caused — most likely candidates, not yet checked:
+- [ ] Confirm `SYNC_PORT` (11235/udp) is actually port-forwarded on
+      *both* ends — testc's company-lab router (`msl-ubuntu`) and
+      whatever network testb itself is behind — missing it on either
+      side alone is enough to force relay-only
+- [ ] Corporate network/firewall on the company-lab side may apply
+      stricter NAT behavior (symmetric NAT) or filter outbound UDP in a
+      way typical home routers don't — worth checking with whoever
+      manages that network before assuming the client-side fix is wrong
+- [ ] Re-check once port-forwarding is confirmed on both sides; if it's
+      still relay-only after that, the bug is back on the client/code
+      side (worth re-reading iroh's hole-punch logs in `docker compose
+      logs` for both testb and testc at the moment of a transfer)
+
 ## Needs testing — local-network (mDNS) discovery
 
 Added after confirming testa/testb's same-host NAT hairpin makes the
