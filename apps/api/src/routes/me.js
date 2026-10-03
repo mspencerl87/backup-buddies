@@ -14,10 +14,21 @@ meRouter.get('/me', requireAuth, async (req, res) => {
         ORDER BY created_at`,
       [req.account.id],
     ),
+    // Only 'active' -- a revoked pairing is dead weight on the dashboard
+    // (nothing to do with it, no reactivate flow), so it's left off here
+    // rather than piling up as stale rows forever. Not deleted though: the
+    // marketplace's "completed pairings" trust signal on invites.js counts
+    // revoked pairings too (see GET /invites/public), so the row still
+    // needs to exist -- it's just not shown on the dashboard that created
+    // it. The admin account-detail view (admin.js, not this endpoint) is
+    // separate and still shows every status, since an admin investigating
+    // an account needs the full history, not just what the account's own
+    // dashboard considers current.
     pool.query(
       `SELECT id, account_a_id, account_b_id, pledged_bytes, status, created_at
          FROM buddy_pairings
-        WHERE account_a_id = $1 OR account_b_id = $1
+        WHERE (account_a_id = $1 OR account_b_id = $1)
+          AND status = 'active'
         ORDER BY created_at`,
       [req.account.id],
     ),
