@@ -583,18 +583,26 @@ git pull
 cd deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
   < ../../db/migrations/011_prevent_duplicate_pairings.sql
-docker compose up -d --build api
 ```
 
-**Apply the migration before restarting the API, not after.** Unlike
-#16's additive columns, this one changes existing data: it first revokes
-every pair's extra active row(s) down to the oldest (any that exist
-already, on whichever account this is), then adds the unique index. If
-you restart the API first, the new "already paired up" check still
-guards ordinary (non-racing) redemptions fine without the index — but the
-index is what actually closes the concurrent-redemption race, so there's
-a window where that's not yet enforced. Either order is safe, this one's
-just belt-and-suspenders. No downtime either way: existing pairings keep
-working untouched (or, for a duplicate, keep working as the one that
-survived), and nothing about an active pairing's id, pledge, or history
-changes — only its `status` on the rows being deduplicated.
+**That's the only manual step.** Do *not* also run
+`docker compose up -d --build api` by hand here — `invites.js` is under
+`apps/api/**`, a CI trigger path (section 7), so pushing this change to
+`main` already deploys it automatically, usually within well under a
+minute. Running the same `docker compose up` by hand at the same time
+races the CI-driven one for the `app-api-1` container name and fails
+both with "Error when allocating new name: Conflict" (this bit us live —
+see the git history around this migration's commit if you want the
+blow-by-blow). If you want to confirm the new code is live rather than
+just trusting the race didn't happen, check the Actions tab or
+`docker compose ps` / `docker compose logs api` instead of re-running the
+deploy.
+
+This migration changes existing data (revokes every pair's extra active
+row(s) down to the oldest, then adds the unique index), but that's all
+inside the `psql` step above — it doesn't interact with *when* the new
+API code lands, so there's no ordering requirement against the CI
+deploy either. No downtime: existing pairings keep working untouched (or,
+for a duplicate, keep working as the one that survived), and nothing
+about an active pairing's id, pledge, or history changes — only its
+`status` on the rows being deduplicated.
