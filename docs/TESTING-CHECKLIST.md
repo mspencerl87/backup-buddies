@@ -141,17 +141,41 @@ clean. Not yet tested against real traffic.
       intended; the cycle kept running afterward instead of going
       silent. Pledge-cap rejection test is now fully closed out (both
       the rejection math and the failure-handling path around it).
-- [ ] Minor oddity noticed during the re-test, not yet investigated:
-      `pledge-test-2`/`4`/`6` got re-sent by testa even though testb
-      already had them from before this restart — testa's manifest
-      should have remembered them as already-synced. Not a correctness
-      issue (same bytes, just redundant work), but worth a look if it
-      keeps happening — possibly the manifest not surviving the earlier
-      deadlock/restart cleanly. Also noticed a one-off `WARN ... failed
-      closing path err=ClosedPath` on testa mid-cycle that didn't stall
-      anything (a file landed on testb ~2 minutes later) — likely iroh's
-      multipath cleanup (direct LAN path + relay both available now)
-      logging noise rather than a real problem, but watch for recurrence.
+- [x] **Investigated and fixed** the redundant re-send oddity
+      (`pledge-test-2`/`4`/`6` got re-sent by testa even though testb
+      already had them). Root cause found by reading `backup.rs`:
+      `manifest.save()` was only called **once, after the entire
+      cycle's loop finished** — every successful put/delete only
+      updated the in-memory `Manifest`, not disk, until the whole
+      cycle was done. If the process gets killed partway through a
+      cycle (a manual restart, an OOM, or — exactly what happened here
+      — a later file in the same cycle deadlocking the connection
+      before the STOP_SENDING fix existed, which the user worked
+      around by restarting the container), every file that had already
+      landed successfully earlier in *that same cycle* never got
+      persisted, so the next cycle saw them as "changed" again and
+      re-sent them. Not a correctness bug (the buddy's put handling is
+      idempotent — same bytes land again, nothing breaks), just wasted
+      bandwidth/time, which matches exactly what was observed. Fixed in
+      `backup.rs`: `manifest.save()` now runs after *each* successful
+      put/delete, not just once at the end (a non-fatal `tracing::warn`
+      if an individual save fails, since losing one isn't data loss —
+      just a possible future redundant re-send of that one file). Also
+      hardened `manifest.rs` while in there: `save()` now writes to a
+      temp file and renames over the real path (atomic on the same
+      filesystem) instead of truncate-and-write-in-place, so a process
+      killed mid-write can't leave a corrupted/truncated manifest
+      behind; `load()` now logs a warning (rather than silently
+      defaulting to empty) when a manifest file exists but fails to
+      parse, so real corruption is visible instead of looking like a
+      brand-new buddy. `cargo build`/`test`/`clippy --all-targets`
+      clean. Not yet redeployed/reconfirmed on testa/testb.
+- [ ] Separately, a one-off `WARN ... failed closing path err=ClosedPath`
+      on testa mid-cycle that didn't stall anything (a file landed on
+      testb ~2 minutes later) — likely iroh's multipath cleanup (direct
+      LAN path + relay both available now) logging noise rather than a
+      real problem, but watch for recurrence. Not investigated — no
+      code change made for this one.
 - [ ] Confirm two buddies on *different* networks still behave exactly
       as before this change (mDNS finds nothing, falls through to
       relay/SYNC_PORT direct-over-internet) — must be a strict addition,

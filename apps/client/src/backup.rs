@@ -127,6 +127,27 @@ pub async fn run_backup_cycle(
                     ManifestEntry { size: *size, sha256: sha256.clone(), ciphertext_size },
                 );
                 put_count += 1;
+                // Persist right away rather than waiting for the whole
+                // cycle to finish — a cycle can be sending many files, and
+                // if this process gets killed partway through (a restart,
+                // an OOM, or a buddy blocking the connection on a later
+                // file), only saving once at the end would lose every
+                // already-landed file from *this* cycle, not just the one
+                // in flight when it died. The buddy's own put handling is
+                // idempotent, so a lost manifest update only costs a
+                // redundant re-send next cycle rather than corrupting
+                // anything — but there's no reason to pay that cost for
+                // more files than necessary. (This is exactly what
+                // happened to pledge-test-2/4/6 during the deadlock-bug
+                // investigation: the cycle got killed by a manual restart
+                // while a later file in the same cycle was stuck, and the
+                // single end-of-cycle save never ran.)
+                if let Err(err) = manifest.save(data_dir, &buddy_node_id).await {
+                    tracing::warn!(
+                        path = %rel_path, ?err,
+                        "backed up file but failed to persist the manifest update — may be re-sent next cycle"
+                    );
+                }
             }
             Err(err) => {
                 let reason = reject_reason_from_err(&err);
@@ -145,6 +166,14 @@ pub async fn run_backup_cycle(
             Ok(()) => {
                 manifest.entries.remove(rel_path);
                 delete_count += 1;
+                // Same reasoning as the put loop above — persist each
+                // deletion as it's confirmed, not just once at the end.
+                if let Err(err) = manifest.save(data_dir, &buddy_node_id).await {
+                    tracing::warn!(
+                        path = %rel_path, ?err,
+                        "told buddy about a deleted file but failed to persist the manifest update — may retry next cycle"
+                    );
+                }
             }
             Err(err) => {
                 tracing::warn!(path = %rel_path, ?err, "failed to tell buddy about a deleted file — will retry next cycle");
@@ -156,10 +185,10 @@ pub async fn run_backup_cycle(
         }
     }
 
-    // Save whatever progress we made even if some files above failed —
-    // partial progress shouldn't be lost, and the ones that failed simply
-    // stay in the "changed" diff next cycle since the manifest wasn't
-    // updated for them.
+    // One more save as a backstop — harmless (the in-memory state already
+    // matches disk in the common case, since every change above just
+    // persisted itself), but cheap insurance against a transient write
+    // error above getting silently left unresolved for an entire cycle.
     manifest.save(data_dir, &buddy_node_id).await?;
 
     // Read straight off the connection's own QUIC stats rather than

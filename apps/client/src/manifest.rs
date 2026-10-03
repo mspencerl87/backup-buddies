@@ -45,17 +45,43 @@ impl Manifest {
     }
 
     pub async fn load(data_dir: &Path, buddy_node_id: &str) -> Self {
-        match tokio::fs::read(Self::path_for(data_dir, buddy_node_id)).await {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        let path = Self::path_for(data_dir, buddy_node_id);
+        match tokio::fs::read(&path).await {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
+                // Distinct from "file doesn't exist" below — this is actual
+                // corruption (or truncation from a non-atomic write that got
+                // interrupted mid-syscall, which `save` below now avoids).
+                // Falling back to an empty manifest is still the right
+                // *recovery* — every local file will just look "changed"
+                // and get re-sent, which is safe (the buddy's put handling
+                // is idempotent) — but doing it silently would hide a real
+                // problem if it ever happens again, so it's worth a loud
+                // log line rather than pretending this was simply a fresh
+                // buddy with no manifest yet.
+                tracing::warn!(
+                    path = %path.display(), ?err,
+                    "manifest file exists but failed to parse — treating as empty and \
+                     will re-send every file to this buddy next cycle"
+                );
+                Self::default()
+            }),
             Err(_) => Self::default(),
         }
     }
 
     pub async fn save(&self, data_dir: &Path, buddy_node_id: &str) -> Result<()> {
+        let path = Self::path_for(data_dir, buddy_node_id);
         let json = serde_json::to_vec_pretty(self).context("failed to encode manifest")?;
-        tokio::fs::write(Self::path_for(data_dir, buddy_node_id), json)
-            .await
-            .context("failed to write manifest")?;
+        // Write to a temp file in the same directory, then rename over the
+        // real path — `rename` is atomic on the same filesystem, so a
+        // process killed mid-write (container restart, OOM, crash) leaves
+        // either the old manifest fully intact or the new one fully
+        // written, never a half-written/corrupted file in between. A plain
+        // `tokio::fs::write` truncates-then-writes in place, which has no
+        // such guarantee.
+        let tmp_path = path.with_extension("json.tmp");
+        tokio::fs::write(&tmp_path, &json).await.context("failed to write manifest temp file")?;
+        tokio::fs::rename(&tmp_path, &path).await.context("failed to finalize manifest write")?;
         Ok(())
     }
 }
