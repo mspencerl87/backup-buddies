@@ -448,6 +448,34 @@ this section out.
       restart for a genuinely new env var (§9, §10, §12, §13, §14, §15's
       enable step) kept it but dropped the redundant local `--build` and
       now say to let CI's own deploy finish first instead of racing it.
+- [x] **Found and fixed: the stale-buddy badge never tripped for a
+      genuinely unreachable buddy.** Surfaced by deliberately downing
+      testc and watching testb's dashboard — after 10+ minutes it still
+      showed testc as "backup ok", even though reconciliation was
+      logging repeated connection timeouts to it in the same logs.
+      Root cause: the ordinary ~30s backup cycle's "nothing new to send"
+      path never opens a connection at all (per `run_backup_cycle`'s own
+      doc comment), but the dashboard code handling that case
+      unconditionally set `made_progress: true` with a comment claiming
+      "we successfully connected and ran a cycle" — reachability was
+      assumed, never actually checked, so a dead buddy with nothing new
+      to resend could sit at "backup ok" indefinitely. Fixed in commit
+      `b5d3b98` (`apps/client/src/main.rs`): that idle case
+      (`files_sent == 0 && files_deleted == 0 && files_failed == 0`) now
+      runs the existing `Ping` protocol check (previously only used for
+      receive-only buddies with no `BACKUP_DIR`) and bases `ok`/
+      `made_progress` on whether the ping actually succeeds. The
+      permanently-stuck-file case (`files_failed > 0`) is unchanged,
+      since `run_backup_cycle` did open a connection there already.
+      `cargo build`/`test`/`clippy --all-targets` clean. **Confirmed live
+      on testb (2026-10-03)** after rebuilding/redeploying the client:
+      with testc still down, testb's log now reads `WARN ... nothing new
+      to back up, and connectivity check failed buddy=testc
+      detail=nothing new to back up, but connectivity check failed:
+      failed to connect to buddy over Iroh`, and the dashboard card shows
+      both `backup failed` and `stale — last synced 11m ago` badges
+      correctly tripped, agreeing with reconciliation's own independent
+      `reconciliation check failed` line for the same buddy.
 
 ## Needs testing (new — not yet exercised on testa/testb)
 
