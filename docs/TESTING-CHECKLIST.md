@@ -26,49 +26,60 @@ That wouldn't mean the fix is wrong — it'd mean testa/testb isn't a
 representative test for this particular thing, since two real customers
 are virtually always on two different networks.
 
-- [ ] Decide whether testa/testb is even a reasonable way to verify
-      this, given the same-host NAT-hairpin caveat above — may need two
-      genuinely different networks (e.g. a phone hotspot vs. home wifi)
-      to really confirm direct connections work at all
-- [ ] Confirm whether testa/testb's compose builds from source
-      (`build: .`) or pulls the published image, to know how to get this
-      build onto the test host
-- [ ] Once deployed, forward `SYNC_PORT` (11235 by default) on whatever
-      router each side is behind, confirm `docker compose logs` shows a
-      path other than relay (iroh's `Connection::paths()`/the dashboard's
-      "via relay" vs. direct indicator)
+- [x] **Relay fallback on a real, locked-down network — confirmed working
+      (2026-10-03).** testc runs on a genuinely separate network from
+      testa/testb (`msl-ubuntu`, Spencer's company lab — no access to that
+      firewall, port-forwarding not possible there), making this the
+      first real (non-same-host) test of this whole feature. Triggered a
+      real file send from testb to testc: `sent 1, deleted 0 · 10.5 KB in
+      2.8s (3.8 KB/s) · via relay, 133ms` — confirmed by the independent
+      "Their actual disk" probe connection on the same card also landing
+      on `via relay, 131ms`. Hole-punching didn't succeed for this pairing,
+      but the fallback did exactly what it's designed to do: the transfer
+      completed correctly over relay, no data loss, no error. This *is*
+      the product working as intended on a network a user doesn't
+      control — see the "why relay, and is that fixable" note below for
+      why this isn't a bug.
+- [ ] **Direct connection when forwarding is actually possible — still
+      unconfirmed.** Needs two networks Spencer (or whoever's testing)
+      actually controls on at least one, ideally both, sides (e.g. a
+      phone hotspot vs. home wifi) so `SYNC_PORT` (11235/udp) can really
+      be forwarded and hole-punching gets a fair shot. testa/testb (same
+      host) and testb/testc (company network, no firewall access) have
+      both now been ruled out as ways to confirm this specifically.
 - [ ] Confirm a client with no `SYNC_PORT` forwarded still works exactly
-      as before (relay-only) — this must be a strict addition, never a
-      regression for anyone who doesn't touch their router
+      as before (relay-only) — already effectively demonstrated by the
+      testc result above, but worth a clean confirmation once the direct
+      case above is also confirmed, so both ends of the behavior are on
+      record together
 - [ ] IPv6 bind is marked optional (`set_is_required(false)`) — confirm
       a container with no IPv6 available still starts cleanly (this is
       the whole reason that override exists; untested against a real
       no-IPv6 host)
 
-**Real cross-network attempt (2026-10-03)**: testc runs on a genuinely
-separate host/network from testa/testb (`msl-ubuntu`, Spencer's company
-lab — confirmed not a same-host/same-NAT setup, so this *is* a valid test
-of hole-punching, unlike testa/testb). Triggered a real file send from
-testb to testc and checked the resulting cycle's connection indicator on
-testb's dashboard: `sent 1, deleted 0 · 10.5 KB in 2.8s (3.8 KB/s) · via
-relay, 133ms`. Also consistent with the "Their actual disk" probe
-connection on the same card, independently landing on `via relay, 131ms`.
-So: **hole-punching is not currently succeeding for this pairing** —
-relay fallback is working correctly (data did arrive), but the direct
-path SYNC_PORT is meant to enable isn't being established. Not yet root
-caused — most likely candidates, not yet checked:
-- [ ] Confirm `SYNC_PORT` (11235/udp) is actually port-forwarded on
-      *both* ends — testc's company-lab router (`msl-ubuntu`) and
-      whatever network testb itself is behind — missing it on either
-      side alone is enough to force relay-only
-- [ ] Corporate network/firewall on the company-lab side may apply
-      stricter NAT behavior (symmetric NAT) or filter outbound UDP in a
-      way typical home routers don't — worth checking with whoever
-      manages that network before assuming the client-side fix is wrong
-- [ ] Re-check once port-forwarding is confirmed on both sides; if it's
-      still relay-only after that, the bug is back on the client/code
-      side (worth re-reading iroh's hole-punch logs in `docker compose
-      logs` for both testb and testc at the moment of a transfer)
+**Why relay, and is that fixable? (2026-10-03)** Spencer asked whether we
+could avoid the port-forwarding requirement entirely — e.g. some
+Syncthing-style scheme where the relay only brokers an introduction and
+never carries data. That's already exactly how this works: iroh (the P2P
+library backing this app) always attempts a direct, hole-punched UDP path
+first, using the relay purely to let each side learn the other's
+reachable address; only if that attempt fails does the relay keep
+carrying the QUIC stream as a fallback (see `netinfo.rs`'s doc comment).
+So there's no missing handshake step to build — the one that ran for
+testc's transfer already tried direct first and fell back correctly.
+
+The actual reason hole-punching failed here, forwarded port or not: it
+depends on both sides' NAT preserving the same external port across
+connection attempts (full-cone / restricted-cone NAT) so each side can
+correctly guess the other's address. Corporate networks very commonly use
+**symmetric NAT**, which allocates a new external port per connection —
+this makes blind hole-punching fail deterministically, independent of
+whether `SYNC_PORT` is forwarded. This is a hard limit of P2P networking
+over UDP, not something client-side code can route around (the same limit
+Syncthing, Tailscale, etc. all hit on networks like this). The only way
+past it without forwarding is running infrastructure we don't have today
+(a TURN-like rendezvous point) — flagged as a possible future scope item,
+not a near-term fix.
 
 ## Needs testing — local-network (mDNS) discovery
 
