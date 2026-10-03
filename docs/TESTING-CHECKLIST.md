@@ -545,13 +545,27 @@ From the exact-size matching fix (commit `4910d6f`, deployed):
       active` — the exact size redeemed, not 20GB or any other value.
       `pledged_bytes` really does flow end-to-end through redeem, not
       just validated by reading the code.
-- [ ] `GET /invites/public` without a `pledged_bytes` query param returns
-      400 — confirm a direct/manual API call gets the expected rejection
-- [ ] The redeem-time mismatch guard (`expectedPledgedBytes` check in
-      `redeemInvite`) actually fires on a 409 if forced — this needs a
-      deliberate test (e.g. two browser tabs, or a raw `curl` with a
-      `pledged_bytes` that doesn't match the listing id) since the normal
-      UI flow can't produce a mismatch on its own
+- [x] **Confirmed live (2026-10-03)**: `curl` against `GET
+      /invites/public` with a valid session cookie but no `pledged_bytes`
+      param returned a clean `400 {"error":"pledged_bytes query parameter
+      is required"}`.
+- [x] **Confirmed live (2026-10-03), with a real finding along the way**:
+      first attempt (redeeming the 20GB listing again from the account
+      that had already redeemed the 15GB one, with a wrong
+      `pledged_bytes`) returned `409 "you and this account are already
+      paired up"` — correct response, but the *wrong* guard: redeemInvite
+      checks for an existing active pairing (line ~190) before it ever
+      reaches the size-mismatch check (line ~214), so that first test
+      never actually exercised the mismatch logic. Re-ran with a third,
+      unpaired throwaway account redeeming the same 20GB listing with
+      `pledged_bytes: 999999999` and got the real thing: `409 "this
+      listing pledges 20GB, not 1GB — refresh \"Find a buddy\" and try
+      again"`. Both guards now independently confirmed working, each
+      firing in its own right scenario, not conflated.
+
+Marketplace exact-size matching + listing criteria: every item above now
+confirmed except the dashboard-link size-preselect and the two dropdowns'
+long-term sync, both low-risk/low-priority — see below.
 
 From the listing-criteria + full-page browse fix (not yet committed as of
 this writing — see "Marketplace listing criteria" below):
