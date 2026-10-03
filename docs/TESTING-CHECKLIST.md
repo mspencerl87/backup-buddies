@@ -531,13 +531,20 @@ everything from scratch.
 
 From the exact-size matching fix (commit `4910d6f`, deployed):
 
-- [ ] Picking a different size on "Find a buddy" actually re-queries and
-      swaps the listed buddies, including the now-you-see-it/now-you-
-      don't case of a size with zero listings (the empty-state message)
-- [ ] Redeeming a listing sends the selected size back to the API
-      (`pledged_bytes` in the POST body) and the resulting pairing's
-      `pledged_bytes` matches exactly — confirm end-to-end on
-      testa/testb, not just by reading the code
+- [x] **Confirmed live end-to-end (2026-10-03)**, using two fresh
+      throwaway accounts (not testa/testb/testc, to avoid disturbing
+      those pairings) rather than subscribing just to free up pledge
+      room: account A created both a 20GB and a 15GB public listing;
+      account B's "Find a buddy" page correctly showed only the matching
+      listing at each size filter, correctly showed the empty state at a
+      size with nothing listed (30GB), and correctly swapped results when
+      the filter was changed between sizes — re-querying works, not just
+      the initial load.
+- [x] **Confirmed live (2026-10-03)**: redeemed the 15GB listing from
+      account B; account B's own dashboard pairing table shows `15 GB,
+      active` — the exact size redeemed, not 20GB or any other value.
+      `pledged_bytes` really does flow end-to-end through redeem, not
+      just validated by reading the code.
 - [ ] `GET /invites/public` without a `pledged_bytes` query param returns
       400 — confirm a direct/manual API call gets the expected rejection
 - [ ] The redeem-time mismatch guard (`expectedPledgedBytes` check in
@@ -552,21 +559,28 @@ this writing — see "Marketplace listing criteria" below):
 - [x] Migration `010_marketplace_listing_criteria.sql` applied to
       production (4x `ALTER TABLE` + `CREATE INDEX`, no errors) — commit
       `6c2cab4`/deploy `37054888082` both confirmed clean
-- [ ] Creating an invite with country/speed tier/always-on/relay-only set
-      actually stores them — check "Invites you've sent" or query the DB
-      row directly, since that table doesn't display the new columns
+- [x] **Confirmed live (2026-10-03)**: account A's listing set country
+      "United States", speed tier "10-50 Mbps", and "usually online" —
+      account B's "Find a buddy" page rendered exactly that: "United
+      States · 10 – 50 Mbps · Usually online", with "relay-only" and the
+      note correctly absent since those were left blank/unchecked. Fields
+      really do save and render correctly, confirmed by sight, no DB
+      query needed.
 - [ ] Those same fields are only sent to the API when "List this
       publicly" is checked (`invite-criteria-rows` toggle) — confirm an
       unchecked private invite doesn't submit stale values from a
       previously-checked session
-- [ ] `find-a-buddy.html` loads standalone (not just as a tab inside
-      dashboard.html) — confirm the shared `api-utils.js`/
-      `pledge-options.js` scripts actually load given Caddy's static root
-      is `apps/web` (should be automatic, same directory, but confirm
-      post-deploy since this is a brand new page)
-- [ ] Pagination: `?limit=`/`?offset=` and `has_more`/`total_count` — hard
-      to exercise for real without 50+ listings at one size; at minimum
-      confirm "Load more" stays hidden when there's only a handful
+- [x] **Confirmed live (2026-10-03)**: navigated straight to
+      `app.filegarden.net/find-a-buddy.html` (not via a dashboard link) —
+      loaded correctly, size dropdown populated, listings rendered. The
+      shared `api-utils.js`/`pledge-options.js` scripts load fine given
+      Caddy's static root is `apps/web`, same directory.
+- [x] **Confirmed live (2026-10-03)**: "Load more" correctly stayed
+      hidden throughout, since every size filter tested had only 0 or 1
+      listing. `?limit=`/`?offset=`/`has_more`/`total_count` with a real
+      50+ listing page still untested — low priority, nothing about the
+      mechanism looks fragile and it's not easy to produce for real
+      without a lot of throwaway listings.
 - [ ] Landing on `find-a-buddy.html?pledged_bytes=<bytes>` from the
       dashboard's "Browse buddies" link pre-selects the right size in the
       dropdown
