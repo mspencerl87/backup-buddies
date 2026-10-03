@@ -170,12 +170,26 @@ clean. Not yet tested against real traffic.
       parse, so real corruption is visible instead of looking like a
       brand-new buddy. `cargo build`/`test`/`clippy --all-targets`
       clean. Not yet redeployed/reconfirmed on testa/testb.
-- [ ] Separately, a one-off `WARN ... failed closing path err=ClosedPath`
-      on testa mid-cycle that didn't stall anything (a file landed on
-      testb ~2 minutes later) — likely iroh's multipath cleanup (direct
-      LAN path + relay both available now) logging noise rather than a
-      real problem, but watch for recurrence. Not investigated — no
-      code change made for this one.
+- [x] Separately, a one-off `WARN ... failed closing path err=ClosedPath`
+      on testa mid-cycle that didn't stall anything — **investigated,
+      confirmed benign, understood root cause** (2026-10-03). Traced
+      through the vendored `iroh`/`noq-proto` 1.3.0 source: it's a race
+      between two pieces of *iroh's own* internal multipath logic, not
+      anything in our code. A per-path idle timer periodically closes a
+      path that's gone quiet, while separately iroh's "redundant direct
+      path cleanup" logic (`apply_selected_path` in
+      `remote_state.rs`) actively closes extra IP paths once multipath
+      selection settles on a winner — exactly what happens right after
+      mDNS gives a connection both a LAN path and a relay path and iroh
+      picks one. Whichever of the two actually closes the path first
+      wins; the other hits `ClosePathError::ClosedPath` ("already
+      closed, nothing to do") and logs a `WARN` purely cosmetically —
+      the path ends up correctly closed either way, nothing is left
+      half-done. No fix on our side exists short of globally silencing
+      that whole dependency's WARN-level logs (the way `swarm_discovery`
+      is quieted in `main.rs`'s `EnvFilter`), which isn't worth it for
+      one harmless, rare, non-stalling race. Closing this out as
+      understood rather than an open mystery; no code change made.
 - [ ] Confirm two buddies on *different* networks still behave exactly
       as before this change (mDNS finds nothing, falls through to
       relay/SYNC_PORT direct-over-internet) — must be a strict addition,
