@@ -23,7 +23,8 @@ adminRouter.use(requireAuth, requireAdmin);
 adminRouter.get('/admin/accounts', async (req, res) => {
   const result = await pool.query(
     `SELECT accounts.id, accounts.email, accounts.nickname, accounts.tier,
-            accounts.relay_status, accounts.created_at,
+            accounts.relay_status, accounts.relay_paused_at, accounts.relay_paused_reason,
+            accounts.created_at,
             (accounts.stripe_subscription_id IS NOT NULL) AS has_subscription,
             (SELECT count(*) FROM devices
               WHERE devices.account_id = accounts.id) AS device_count,
@@ -65,7 +66,8 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
 
   const [accountResult, devicesResult, pairingsResult, invitesResult] = await Promise.all([
     pool.query(
-      `SELECT id, email, nickname, tier, relay_status, created_at,
+      `SELECT id, email, nickname, tier, relay_status, relay_paused_at, relay_paused_reason,
+              created_at,
               stripe_customer_id, stripe_subscription_id,
               (password_hash <> '') AS has_password,
               (google_sub IS NOT NULL) AS has_google,

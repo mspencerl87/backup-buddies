@@ -171,6 +171,13 @@ struct BuddyDevice {
 #[derive(Deserialize)]
 struct BuddiesResponse {
     buddy_devices: Vec<BuddyDevice>,
+    // Set by the API when this account's relay syncing has been paused
+    // (today: a Stripe payment that failed after retries were exhausted —
+    // see apps/api/src/routes/stripe-webhook.js). `#[serde(default)]` so an
+    // older API that doesn't send this field yet still deserializes fine,
+    // defaulting to "not paused" rather than failing the whole poll.
+    #[serde(default)]
+    paused: bool,
 }
 
 #[tokio::main]
@@ -441,7 +448,22 @@ async fn main() -> Result<()> {
             const RECONCILE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
             loop {
                 match fetch_buddy_devices(&http, &config, &bandwidth_book).await {
-                    Ok(buddies) => {
+                    Ok((true, _buddies)) => {
+                        // Account is paused (relay_status != 'active' —
+                        // see stripe-webhook.js) — per product decision,
+                        // this stops ALL buddy syncing, not just relay
+                        // traffic, so nothing here opens a connection,
+                        // sends a file, pings, or reconciles until the
+                        // account is active again. The dashboard banner
+                        // (dashboard.html) and the payment-failed email
+                        // are what the account holder actually sees; this
+                        // is just honoring that pause on the wire.
+                        tracing::warn!(
+                            "this account's relay syncing is paused (billing issue) — \
+                             skipping all buddy activity this cycle"
+                        );
+                    }
+                    Ok((false, buddies)) => {
                         for buddy in buddies {
                             let Some(node_id_str) = &buddy.iroh_node_id else {
                                 tracing::info!(
@@ -811,11 +833,12 @@ async fn register_node_id(http: &reqwest::Client, config: &Config, endpoint_id: 
     Ok(())
 }
 
+// Returns (paused, buddy_devices) — see BuddiesResponse::paused.
 async fn fetch_buddy_devices(
     http: &reqwest::Client,
     config: &Config,
     bandwidth_book: &bandwidth::BandwidthBook,
-) -> Result<Vec<BuddyDevice>> {
+) -> Result<(bool, Vec<BuddyDevice>)> {
     // Piggyback relay-bandwidth reporting on this existing poll (see
     // apps/api/src/routes/devices.js) rather than a separate endpoint —
     // whole megabytes of relay traffic accumulated since the last
@@ -839,7 +862,7 @@ async fn fetch_buddy_devices(
     }
 
     let resp: BuddiesResponse = resp.json().await?;
-    Ok(resp.buddy_devices)
+    Ok((resp.paused, resp.buddy_devices))
 }
 
 // Connectivity check for a buddy we're not backing anything up to (no

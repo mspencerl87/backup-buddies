@@ -30,6 +30,11 @@
     <div class="card">
       <h2>Your account</h2>
       <p id="account-summary" class="muted">Loading…</p>
+      <p id="paused-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid #e5a443; border-radius:8px; background:#2a1d10;">
+        Buddy syncing is paused because of a billing issue — no new files are being sent or
+        received with your buddy until this is fixed. Your existing backups aren't affected.
+        <a href="#billing" style="margin-left:0.25rem">Fix billing</a>
+      </p>
       <p id="verify-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid var(--border); border-radius:8px; background:#2a2310;">
         Please verify your email — you'll need to before pairing with a buddy.
         <button class="btn btn-secondary" id="resend-verification-btn" type="button" style="margin-left:0.5rem">Resend verification email</button>
@@ -168,6 +173,15 @@
       document.getElementById('verify-banner').style.display = account.email_verified
         ? 'none'
         : 'block';
+
+      // relay_status comes straight from the accounts table (routes/me.js)
+      // — 'paused' today only ever means a Stripe payment failed after
+      // retries were exhausted (stripe-webhook.js), but this banner reacts
+      // to the status itself rather than assuming why, so it keeps working
+      // if a second pause reason (e.g. free-tier exhaustion) is ever wired
+      // up the same way.
+      document.getElementById('paused-banner').style.display =
+        account.relay_status === 'active' ? 'none' : 'block';
     }
 
     document.getElementById('resend-verification-btn').addEventListener('click', async () => {

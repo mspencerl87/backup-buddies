@@ -30,6 +30,7 @@
       <div class="admin-controls" id="accounts-controls" style="display:none">
         <input type="text" id="accounts-search" placeholder="Search by email or username…">
         <select id="accounts-sort">
+          <option value="paused_desc">Paused longest first</option>
           <option value="created_desc">Newest first</option>
           <option value="created_asc">Oldest first</option>
           <option value="email_asc">Email (A–Z)</option>
@@ -37,6 +38,10 @@
           <option value="buddies_desc">Most buddies</option>
           <option value="devices_desc">Most devices</option>
         </select>
+        <label class="muted" style="display:inline-flex; align-items:center; gap:0.35rem">
+          <input type="checkbox" id="accounts-paused-only">
+          Paused only
+        </label>
         <span class="muted" id="accounts-matched"></span>
       </div>
       <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
@@ -126,6 +131,15 @@
       `;
     }
 
+    // How long an account has been paused, in days — used both for the
+    // card badge and for sorting "paused longest" to the top, since that's
+    // the ordering that matters for deciding who to follow up with first
+    // (per the "manual for now" approach — see routes/admin.js).
+    function pausedDays(a) {
+      if (!a.relay_paused_at) return null;
+      return Math.floor((Date.now() - new Date(a.relay_paused_at).getTime()) / 86400000);
+    }
+
     function accountCardHtml(a) {
       // has_subscription (stripe_subscription_id IS NOT NULL, from
       // routes/admin.js) is the real signal — accounts.tier is set once at
@@ -141,11 +155,22 @@
       // subscription.
       const adminBadge = a.is_admin ? '<span class="tier-badge admin">admin</span>' : '';
 
+      // relay_status === 'paused' today only ever means a failed payment
+      // that exhausted Stripe's retries (stripe-webhook.js) — surfaced
+      // loudly here since nothing escalates this automatically; a person
+      // has to notice it and decide whether to follow up or clean up the
+      // account (see relay_paused_reason for why, if it's ever something
+      // other than 'payment_failed').
+      const days = pausedDays(a);
+      const pausedBadge = a.relay_status !== 'active'
+        ? `<span class="tier-badge paused">paused${days !== null ? ` ${days}d` : ''}</span>`
+        : '';
+
       return `
-        <div class="account-card">
+        <div class="account-card${a.relay_status !== 'active' ? ' account-card-paused' : ''}">
           <div class="row">
             <strong>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</strong>
-            <span style="display:inline-flex; gap:0.35rem">${adminBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span>
+            <span style="display:inline-flex; gap:0.35rem">${adminBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span>
           </div>
           <p class="muted" style="margin:0.3rem 0 0;">
             ${a.device_count} device${Number(a.device_count) === 1 ? '' : 's'} · joined ${formatDate(a.created_at)}
@@ -171,6 +196,19 @@
     let allAccounts = [];
 
     const SORTERS = {
+      // Paused accounts first, oldest pause first within those (the ones
+      // that have been sitting the longest are the ones most overdue for
+      // a look); non-paused accounts keep a stable newest-first order
+      // after them rather than being left in whatever order the API sent.
+      paused_desc: (a, b) => {
+        const aPaused = a.relay_status !== 'active';
+        const bPaused = b.relay_status !== 'active';
+        if (aPaused !== bPaused) return aPaused ? -1 : 1;
+        if (aPaused && bPaused) {
+          return new Date(a.relay_paused_at) - new Date(b.relay_paused_at);
+        }
+        return new Date(b.created_at) - new Date(a.created_at);
+      },
       created_desc: (a, b) => new Date(b.created_at) - new Date(a.created_at),
       created_asc: (a, b) => new Date(a.created_at) - new Date(b.created_at),
       email_asc: (a, b) => a.email.localeCompare(b.email),
@@ -192,10 +230,14 @@
       const query = document.getElementById('accounts-search').value.trim().toLowerCase();
       const sortKey = document.getElementById('accounts-sort').value;
       const sorter = SORTERS[sortKey] || SORTERS.created_desc;
+      const pausedOnly = document.getElementById('accounts-paused-only').checked;
 
-      const matched = allAccounts.filter((a) => matchesSearch(a, query)).sort(sorter);
+      const matched = allAccounts
+        .filter((a) => matchesSearch(a, query))
+        .filter((a) => !pausedOnly || a.relay_status !== 'active')
+        .sort(sorter);
       matchedEl.textContent =
-        query ? `${matched.length} of ${allAccounts.length} account(s) match` : '';
+        query || pausedOnly ? `${matched.length} of ${allAccounts.length} account(s) match` : '';
 
       if (matched.length === 0) {
         columns.style.display = 'none';
@@ -325,6 +367,7 @@
 
     document.getElementById('accounts-search').addEventListener('input', renderAccounts);
     document.getElementById('accounts-sort').addEventListener('change', renderAccounts);
+    document.getElementById('accounts-paused-only').addEventListener('change', renderAccounts);
 
     async function loadAccountDetail(accountId) {
       const card = document.getElementById('detail-card');
@@ -354,14 +397,29 @@
       // stripe_subscription_id presence (not tier — see accountCardHtml's
       // comment) is what actually reflects whether this account is paying.
       const planLabel = account.stripe_subscription_id ? 'subscribed' : 'free';
+      const relayLabel = account.relay_status === 'active'
+        ? 'relay active'
+        : `relay paused${account.relay_paused_at ? ` since ${formatDate(account.relay_paused_at)}` : ''}` +
+          `${account.relay_paused_reason ? ` (${account.relay_paused_reason})` : ''}`;
       document.getElementById('detail-summary').textContent =
-        `${account.email} — ${planLabel}, relay ${account.relay_status}` +
+        `${account.email} — ${planLabel}, ${relayLabel}` +
         (methods.length ? ` — signs in via ${methods.join(' & ')}` : '') +
         ` — joined ${formatDate(account.created_at)}`;
 
       const stripeNote = document.getElementById('detail-stripe-note');
+      const notes = [];
       if (account.stripe_subscription_id) {
-        stripeNote.textContent = 'Has an active Stripe subscription — deleting this account will not cancel it.';
+        notes.push('Has an active Stripe subscription — deleting this account will not cancel it.');
+      }
+      if (account.relay_status !== 'active') {
+        notes.push(
+          'Relay syncing is paused for this account — its client has stopped all buddy activity ' +
+          'and no further relay fees can accrue. Reach out, wait for them to update their payment ' +
+          'method, or delete the account below if it looks abandoned.',
+        );
+      }
+      if (notes.length) {
+        stripeNote.textContent = notes.join(' ');
         stripeNote.style.display = 'block';
       } else {
         stripeNote.style.display = 'none';

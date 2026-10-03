@@ -101,6 +101,16 @@ devicesRouter.get('/devices/me/buddies', requireDeviceAuth, async (req, res) => 
     await recordRelayUsage(req.device.account_id, relayMb);
   }
 
+  // Checked on every poll so a paused account's client finds out within
+  // one cycle (~30s), not just the next time it happens to restart — see
+  // stripe-webhook.js for what sets this, and relay-billing.js's
+  // recordRelayUsage for the server-side backstop that doesn't depend on
+  // the client actually honoring this flag.
+  const accountResult = await pool.query(`SELECT relay_status FROM accounts WHERE id = $1`, [
+    req.device.account_id,
+  ]);
+  const paused = accountResult.rows[0]?.relay_status !== 'active';
+
   const result = await pool.query(
     `SELECT devices.id, devices.account_id, devices.iroh_node_id, devices.label,
             buddy_pairings.pledged_bytes
@@ -116,5 +126,5 @@ devicesRouter.get('/devices/me/buddies', requireDeviceAuth, async (req, res) => 
     [req.device.account_id],
   );
 
-  res.json({ buddy_devices: result.rows });
+  res.json({ buddy_devices: result.rows, paused });
 });

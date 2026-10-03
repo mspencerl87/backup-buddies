@@ -606,6 +606,79 @@ this writing — see "Marketplace listing criteria" below):
       the API, so a future API-side step/max change needs the same edit
       made there too
 
+## Needs testing — payment-failed relay pause (not yet exercised live)
+
+Built per Spencer's explicit requirement: a failed payment must not let
+an account keep incurring relay fees, the account holder has to find out
+(GUI + email), and Spencer has to be able to find out too (so he can
+reach out or clean the account up) — "I don't want the problem ignored
+and never gets addressed by the user or myself." Three decisions locked
+in before building: pause only after Stripe's own retries are exhausted
+(not the first failed charge), pause *all* buddy syncing (not just
+relay), and keep escalation manual for now (no auto-reminders/auto-
+cancellation — see "Flagged, not yet scoped" below for what that would
+take later).
+
+What changed (migration `012_relay_pause_tracking.sql` — see
+`docs/DEPLOY.md` section 18 for the exact deploy steps and ordering
+notes):
+
+- `stripe-webhook.js`: `invoice.payment_failed` now only pauses once
+  `next_payment_attempt` is `null` (retries exhausted), stamps
+  `relay_paused_at`/`relay_paused_reason`, and emails the account holder.
+  `invoice.payment_succeeded` and `checkout.session.completed` both clear
+  the pause fields on reactivation.
+- `relay-billing.js`: `recordRelayUsage` now refuses to record usage for
+  a non-`'active'` account — this is the real backstop against more
+  fees, independent of the client.
+- `devices.js`: `GET /devices/me/buddies` now returns a `paused` boolean.
+- `apps/client/src/main.rs`: reads that flag and skips backup/reconcile/
+  ping entirely for the whole poll cycle while paused (logs a warning
+  instead). `cargo build`/`test`/`clippy --all-targets` all clean.
+- `dashboard.html`: banner when `relay_status !== 'active'`, linking to
+  `#billing`.
+- `admin.html`/`admin.js`: paused accounts get a badge (with days-paused)
+  and sort to the top by default ("Paused longest first"), plus a
+  "Paused only" filter checkbox and a clearer note in the account-detail
+  view.
+
+None of this has touched production yet — all written and locally
+verified (Rust build/test/clippy; Node files syntax-checked; inline
+`<script>` blocks in the two HTML files syntax-checked) but not run
+against a real Stripe test-mode failed/retried/exhausted invoice cycle,
+since that needs either waiting out Stripe's real retry schedule or
+using the Stripe CLI (`stripe trigger invoice.payment_failed`) against
+the live webhook, which I can't do myself (this sandbox's egress proxy
+blocks `app.filegarden.net` — see earlier entries in this file) —
+Spencer will need to run this against production or a Stripe test
+account:
+
+- [ ] A real `invoice.payment_failed` with `next_payment_attempt` still
+      set (mid-retry) does *not* pause anything
+- [ ] A real `invoice.payment_failed` with `next_payment_attempt: null`
+      (retries exhausted) pauses the account: `relay_status` → `'paused'`,
+      `relay_paused_at` set, `relay_paused_reason` = `'payment_failed'`,
+      and the account holder actually receives the email
+      (`SMTP_HOST`/`SMTP_USER`/`SMTP_PASS`/`MAIL_FROM` need to be
+      configured on `app-1` for this — same mailer used for verification
+      emails, so if those are landing, this should too)
+- [ ] Dashboard shows the paused banner for that account, and it goes
+      away again when `relay_status` returns to `'active'`
+      (`invoice.payment_succeeded` or a fresh checkout)
+- [ ] A paused account's client (rebuilt — see the "not part of the CI
+      deploy" note in `docs/DEPLOY.md` section 18) logs the "syncing is
+      paused" warning and genuinely stops — no new files sent/received,
+      no ping, no reconciliation — for as long as it stays paused
+- [ ] A paused account's `relay_usage_events` stays flat even if its
+      (old, not-yet-rebuilt) client keeps reporting `relay_mb` —
+      confirms the server-side backstop works independent of the client
+- [ ] Admin accounts page: a paused account shows the "paused Nd" badge,
+      sorts to the top under the default "Paused longest first" sort,
+      and the "Paused only" checkbox correctly narrows the list to just
+      paused accounts
+- [ ] Account-detail view's note correctly explains the pause and its
+      reason/since-date for a paused account
+
 ## Not yet exercised
 
 Restore path (single file, all files, per-version restore of a deleted
@@ -726,6 +799,17 @@ other migration there).
 
 ## Flagged, not yet scoped
 
+- [ ] Payment-failed handling is manual-escalation-only for now (per
+      Spencer's "manual for now" decision — see the payment-pause
+      section above): no auto-reminder emails after the initial
+      payment-failed one, and no auto-cancellation/auto-deletion of an
+      account that stays paused indefinitely. If paused accounts start
+      piling up faster than they get manually reviewed, worth adding
+      something like the existing stale-account digest job
+      (`jobs/stale-account-digest.js`) — a periodic admin-email summary
+      of accounts paused over N days — rather than a full auto-cancel
+      flow, to stay consistent with how stale accounts are already
+      handled (review-and-decide, not automatic).
 - [ ] Restore progress is now live, but the modal itself still has to
       stay open to see it (closing it doesn't cancel the restore,
       which keeps running server-side, but you lose the progress view

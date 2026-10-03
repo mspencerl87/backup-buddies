@@ -631,3 +631,56 @@ deploy either. No downtime: existing pairings keep working untouched (or,
 for a duplicate, keep working as the one that survived), and nothing
 about an active pairing's id, pledge, or history changes — only its
 `status` on the rows being deduplicated.
+
+## 18. Pause a paid account's buddy syncing when its payment fails
+
+`relay_status` ('active'/'paused') has existed on `accounts` since the
+very first schema, but until now nothing actually enforced it anywhere —
+`invoice.payment_failed` set it to `'paused'` on the very first failed
+charge, and no other code (API or client) ever read it. That's now wired
+up end to end, per Spencer's requirement that a failed payment can't
+silently keep incurring relay fees or silently never get noticed:
+
+- `stripe-webhook.js` only pauses once Stripe's own retries are
+  exhausted (`invoice.next_payment_attempt === null`), not on the first
+  failed attempt — a card declined once and successfully retried a few
+  days later (common — temporary holds, a bank's fraud check, etc.)
+  never pauses anything. When it does pause, it also emails the account
+  holder and stamps `relay_paused_at`/`relay_paused_reason`.
+- `relay-billing.js`'s `recordRelayUsage` now refuses to record usage for
+  a paused account — the actual backstop against more fees, independent
+  of whether the client is behaving.
+- `GET /devices/me/buddies` (`devices.js`) now returns a `paused` flag;
+  the Rust client checks it every ~30s poll and — per "pause everything,
+  not just relay" — skips backup, reconcile, and ping entirely for a
+  paused account until it clears.
+- The dashboard shows a banner when `relay_status !== 'active'`; the
+  admin accounts page sorts paused accounts to the top (longest-paused
+  first) and shows how long each has been paused, for manual follow-up —
+  no auto-reminders or auto-deletion yet (see "Flagged, not yet scoped"
+  in `docs/TESTING-CHECKLIST.md` if that changes).
+
+Apply the migration (adds `relay_paused_at`/`relay_paused_reason`,
+nullable with no default, so it's safe any time relative to the API
+deploy):
+
+```bash
+cd /opt/backup-buddies
+git pull
+cd deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/012_relay_pause_tracking.sql
+```
+
+Same note as section 17: `apps/api/**` and `apps/web/**` are both CI
+trigger paths, so pushing this to `main` deploys the API and web changes
+automatically — don't also run `docker compose up -d` by hand here, or
+you'll race the CI-driven deploy for the container name.
+
+The Rust client change (`apps/client/src/main.rs`) is **not** part of
+the CI deploy (`apps/client/**` isn't a trigger path — see section 7) —
+existing running clients won't skip syncing on a pause until whoever's
+running them pulls and rebuilds the client image themselves. Until then,
+the server-side backstop in `relay-billing.js` is what actually stops
+new fees from accruing; the client-side skip is the "stop bothering the
+other buddy's device too" half of the fix.

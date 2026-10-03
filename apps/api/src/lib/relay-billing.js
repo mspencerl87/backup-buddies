@@ -34,14 +34,24 @@ export const MAX_RELAY_MB_PER_REPORT = 100_000;
 // accumulates rows for free-tier traffic that could never be billed anyway.
 // Safe to call on every poll — it's one cheap lookup plus one insert, only
 // when the client actually reports nonzero relay bytes.
+//
+// Also discarded while relay_status isn't 'active' (a paused account —
+// e.g. a failed payment, see stripe-webhook.js) — the client is expected
+// to stop syncing entirely once it sees `paused` on this same endpoint
+// (devices.js), but that's enforced client-side, and a stale or
+// not-yet-updated client could still report usage in the meantime. This
+// is the actual backstop that guarantees a paused account can't accrue
+// more relay fees no matter what the client does.
 export async function recordRelayUsage(accountId, relayMb) {
   if (!Number.isInteger(relayMb) || relayMb <= 0) return;
   const clampedMb = Math.min(relayMb, MAX_RELAY_MB_PER_REPORT);
 
-  const account = await pool.query(`SELECT stripe_subscription_id FROM accounts WHERE id = $1`, [
-    accountId,
-  ]);
+  const account = await pool.query(
+    `SELECT stripe_subscription_id, relay_status FROM accounts WHERE id = $1`,
+    [accountId],
+  );
   if (!account.rows[0]?.stripe_subscription_id) return;
+  if (account.rows[0].relay_status !== 'active') return;
 
   const bytes = BigInt(clampedMb) * 1024n * 1024n;
   await pool.query(

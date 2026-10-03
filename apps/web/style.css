@@ -464,6 +464,15 @@ footer a {
   color: var(--accent);
   box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.25) inset;
 }
+.tier-badge.paused {
+  background: rgba(244, 163, 94, 0.15);
+  color: #f4a35e;
+  box-shadow: 0 0 0 1px rgba(244, 163, 94, 0.3) inset;
+}
+
+.account-card-paused {
+  border-color: rgba(244, 163, 94, 0.4);
+}
 
 .account-card .buddies {
   margin-top: 0.7rem;

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { stripe } from '../lib/stripe.js';
+import { sendMail } from '../lib/mailer.js';
 
 export const stripeWebhookRouter = Router();
 
@@ -26,9 +27,16 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
     switch (event.type) {
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object;
+        // Clears a pause from a previous failed invoice (either the retry
+        // that follows it succeeded, or the person fixed their card and a
+        // later invoice went through) — relay_paused_at/reason go back to
+        // NULL so the account doesn't carry a stale "paused since" date
+        // into the admin view once it's actually active again.
         await pool.query(
           `UPDATE accounts
-             SET relay_status = 'active'
+             SET relay_status = 'active',
+                 relay_paused_at = NULL,
+                 relay_paused_reason = NULL
            WHERE stripe_customer_id = $1`,
           [invoice.customer],
         );
@@ -37,14 +45,58 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
 
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
-        // TODO: decide on a grace period before pausing relay access —
-        // flagging immediately on the first failed charge may be too harsh.
-        await pool.query(
+        // Stripe retries a failed invoice automatically (its Smart
+        // Retries schedule) and sends this same event on each attempt.
+        // next_payment_attempt is set to the next retry's timestamp until
+        // retries are exhausted, when it comes through as null — that's
+        // the signal to actually pause, rather than reacting to the first
+        // failure, which could just be a card temporarily declined for an
+        // unrelated reason (e.g. the bank's fraud check) that clears
+        // itself on retry.
+        if (invoice.next_payment_attempt !== null) break;
+
+        const result = await pool.query(
           `UPDATE accounts
-             SET relay_status = 'paused'
-           WHERE stripe_customer_id = $1`,
+             SET relay_status = 'paused',
+                 relay_paused_at = now(),
+                 relay_paused_reason = 'payment_failed'
+           WHERE stripe_customer_id = $1 AND relay_status <> 'paused'
+           RETURNING id, email`,
           [invoice.customer],
         );
+
+        // RETURNING came back empty if the account was already paused
+        // (e.g. a duplicate webhook delivery, which Stripe does send on
+        // occasion) — nothing changed, so there's no reason to re-send
+        // the email.
+        if (result.rows.length > 0) {
+          const account = result.rows[0];
+          const appUrl = process.env.APP_URL || '';
+          try {
+            await sendMail({
+              to: account.email,
+              subject: 'Backup Buddies: payment failed — your buddy syncing is paused',
+              text:
+                `We weren't able to charge your card after several attempts, so your buddy syncing ` +
+                `has been paused — your existing backups are untouched, but your device won't send or ` +
+                `receive any new files with your buddy until this is fixed.\n\n` +
+                `Update your payment method here: ${appUrl}/dashboard.html#billing\n\n` +
+                `Syncing resumes automatically as soon as a payment goes through.`,
+              html:
+                `<p>We weren't able to charge your card after several attempts, so your buddy syncing ` +
+                `has been paused — your existing backups are untouched, but your device won't send or ` +
+                `receive any new files with your buddy until this is fixed.</p>` +
+                `<p><a href="${appUrl}/dashboard.html#billing">Update your payment method</a></p>` +
+                `<p>Syncing resumes automatically as soon as a payment goes through.</p>`,
+            });
+          } catch (err) {
+            // Don't fail the whole webhook over a flaky SMTP send — the
+            // account is already correctly paused in the DB (the thing
+            // that actually matters for stopping fees), and the admin
+            // view surfaces it either way.
+            console.error(`Failed to send payment-failed email to ${account.email}:`, err);
+          }
+        }
         break;
       }
 
@@ -70,7 +122,9 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
             `UPDATE accounts
                 SET stripe_subscription_id = $1,
                     stripe_subscription_item_id = $2,
-                    relay_status = 'active'
+                    relay_status = 'active',
+                    relay_paused_at = NULL,
+                    relay_paused_reason = NULL
               WHERE id = $3`,
             [subscription.id, storageItem?.id ?? null, session.client_reference_id],
           );
