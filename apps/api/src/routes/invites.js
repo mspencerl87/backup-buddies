@@ -179,6 +179,30 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
       return { status: 400, body: { error: "you can't redeem your own invite" } };
     }
 
+    // Catches the common case (redeeming a second invite between two
+    // accounts that already paired up, e.g. both sides sent each other a
+    // code and redeemed both) with a clear error instead of a bare 500.
+    // Not a race-safe guarantee by itself -- two redemptions between the
+    // same pair committing at the same instant could both pass this
+    // SELECT -- idx_pairings_unique_active_pair (migration 011) is what
+    // actually makes it impossible; this is just the friendlier front
+    // door for the ordinary, non-concurrent case.
+    const existingPairing = await client.query(
+      `SELECT id FROM buddy_pairings
+        WHERE status = 'active'
+          AND ((account_a_id = $1 AND account_b_id = $2)
+            OR (account_a_id = $2 AND account_b_id = $1))
+        LIMIT 1`,
+      [invite.inviter_account_id, redeemerAccountId],
+    );
+    if (existingPairing.rows[0]) {
+      await client.query('ROLLBACK');
+      return {
+        status: 409,
+        body: { error: 'you and this account are already paired up' },
+      };
+    }
+
     // Marketplace listings are matched by exact pledge size — see
     // "Find a buddy" in dashboard.html, which only ever shows the redeemer
     // one size tier at a time and sends that size back here. This re-checks
@@ -270,6 +294,17 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
     return { status: 201, body: { pairing: pairingResult.rows[0] } };
   } catch (err) {
     await client.query('ROLLBACK');
+    // The race the SELECT above can't catch: two redemptions between the
+    // same pair of accounts committing at the same instant. Postgres'
+    // 23505 (unique_violation) on idx_pairings_unique_active_pair
+    // (migration 011) is the real guarantee; surface it as the same
+    // friendly error rather than a bare 500.
+    if (err.code === '23505' && err.constraint === 'idx_pairings_unique_active_pair') {
+      return {
+        status: 409,
+        body: { error: 'you and this account are already paired up' },
+      };
+    }
     throw err;
   } finally {
     client.release();

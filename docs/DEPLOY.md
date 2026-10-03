@@ -562,3 +562,39 @@ deploy) is already running and queries these columns before they exist,
 every `GET`/`POST /invites*` call 500s until you run the command above —
 no restart needed once you do, it clears up on the next request. Applying
 it early, before the code ships, avoids that window entirely.
+
+## 17. Prevent duplicate buddy pairings
+
+Nothing stopped two accounts from ending up with two active
+`buddy_pairings` rows between them — e.g. each side sends the other an
+invite code and both get redeemed. Each row looks individually fine (same
+pledge either way), but a second row isn't a second relationship, it's
+the same relationship pledged twice: it double-counts toward both sides'
+50GB free-allowance checks and Stripe billing quantity, shows as a
+confusing duplicate row on the dashboard, and gives the client two buddy
+connections to reconcile against instead of one. `redeemInvite` in
+`invites.js` now rejects redeeming a second invite between a pair that's
+already actively paired (409, "you and this account are already paired
+up"), and a new unique index closes the race a check-then-insert can't:
+
+```bash
+cd /opt/backup-buddies
+git pull
+cd deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/011_prevent_duplicate_pairings.sql
+docker compose up -d --build api
+```
+
+**Apply the migration before restarting the API, not after.** Unlike
+#16's additive columns, this one changes existing data: it first revokes
+every pair's extra active row(s) down to the oldest (any that exist
+already, on whichever account this is), then adds the unique index. If
+you restart the API first, the new "already paired up" check still
+guards ordinary (non-racing) redemptions fine without the index — but the
+index is what actually closes the concurrent-redemption race, so there's
+a window where that's not yet enforced. Either order is safe, this one's
+just belt-and-suspenders. No downtime either way: existing pairings keep
+working untouched (or, for a duplicate, keep working as the one that
+survived), and nothing about an active pairing's id, pledge, or history
+changes — only its `status` on the rows being deduplicated.
