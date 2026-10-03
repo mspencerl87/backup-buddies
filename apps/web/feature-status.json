@@ -1,0 +1,73 @@
+{
+  "updated": "2026-10-03",
+  "available": [
+    {
+      "title": "Automatic encrypted backup",
+      "description": "Every ~30 seconds, new or changed files in your backup folder are encrypted on your device and sent to your buddy. Deleting a file locally removes it from your buddy's live copy too (older versions stay recoverable)."
+    },
+    {
+      "title": "Direct peer-to-peer transfer, with automatic relay fallback",
+      "description": "Your device and your buddy's device try to connect directly first. On the same local network, that's instant and automatic. Over the internet, it depends on both sides' network/router — when a direct connection isn't possible, your data still transfers reliably through our relay, which can never read it (see “Known limitations” below for when this applies)."
+    },
+    {
+      "title": "Restore, including file history",
+      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since deleted — with a live progress indicator while it runs."
+    },
+    {
+      "title": "Pledge-based storage limits",
+      "description": "Each buddy pairing has an agreed storage size. Going over it is refused automatically, and your dashboard tells you exactly why a file didn't send (pledge full, file too large, buddy's disk full)."
+    },
+    {
+      "title": "Drift detection (reconciliation)",
+      "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects — catching anything lost or changed outside the normal backup flow — and automatically re-sends anything missing."
+    },
+    {
+      "title": "Unreachable-buddy detection",
+      "description": "If your buddy's device genuinely can't be reached, your dashboard flags it as stale rather than silently showing “backup ok” — backed by a real connectivity check, not an assumption."
+    },
+    {
+      "title": "Dashboard",
+      "description": "Per-buddy backup status, your device's build/uptime/local file count, each buddy's real disk usage, and a lifetime direct-vs-relay bandwidth breakdown."
+    },
+    {
+      "title": "Find a buddy",
+      "description": "Browse public listings at an exact storage size, with optional self-reported country, upload-speed tier, always-on, and relay-only info to help you judge fit before pairing."
+    },
+    {
+      "title": "Free tier",
+      "description": "The first 50GB you pledge to buddies is free, no card required."
+    }
+  ],
+  "limitations": [
+    {
+      "title": "Direct connections aren't guaranteed on every network",
+      "status": "limitation",
+      "description": "Whether a direct connection is possible depends on your router/network's NAT behavior. Many home networks and local networks work great. Some networks — strict corporate firewalls especially — block the hole-punching direct connections need entirely, forwarded port or not. When that happens, your backups still complete normally through our relay; this is expected, graceful behavior, not a failure."
+    },
+    {
+      "title": "Marketplace listing filters",
+      "status": "in_progress",
+      "description": "Country, upload speed, “usually online”, and “relay-only” are currently shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
+    },
+    {
+      "title": "Low-disk protection",
+      "status": "in_progress",
+      "description": "Your device is designed to refuse new incoming files once its own disk runs low, independent of pledge size — built, but not yet exercised against a real low-disk machine."
+    },
+    {
+      "title": "Relay bandwidth billing",
+      "status": "in_progress",
+      "description": "Relay usage is metered and reported on paid accounts; full end-to-end confirmation against billing is still being verified."
+    },
+    {
+      "title": "Fixed backup interval, no file filtering",
+      "status": "limitation",
+      "description": "Backups run on a fixed ~30 second cycle and back up everything in your configured folder — there's no way yet to change the interval or exclude specific files/patterns."
+    },
+    {
+      "title": "One buddy per pledge",
+      "status": "limitation",
+      "description": "Each pledge is a 1:1 relationship with a single buddy — there's no way to share one backup folder across multiple buddies at once."
+    }
+  ]
+}

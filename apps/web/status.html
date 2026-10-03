@@ -41,98 +41,9 @@
       <p class="muted">
         Verified against real, live devices — not just "it compiles."
       </p>
-      <ul class="status-list">
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Automatic encrypted backup</strong>
-            <span>Every ~30 seconds, new or changed files in your backup
-              folder are encrypted on your device and sent to your buddy.
-              Deleting a file locally removes it from your buddy's live
-              copy too (older versions stay recoverable).</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Direct peer-to-peer transfer, with automatic relay
-              fallback</strong>
-            <span>Your device and your buddy's device try to connect
-              directly first. On the same local network, that's instant and
-              automatic. Over the internet, it depends on both sides'
-              network/router — when a direct connection isn't possible, your
-              data still transfers reliably through our relay, which can
-              never read it (see "Known limitations" below for when this
-              applies).</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Restore, including file history</strong>
-            <span>Restore a single file, restore everything your buddy has
-              for you at once, or pull back a specific earlier version of a
-              file you've since deleted — with a live progress indicator
-              while it runs.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Pledge-based storage limits</strong>
-            <span>Each buddy pairing has an agreed storage size. Going over
-              it is refused automatically, and your dashboard tells you
-              exactly why a file didn't send (pledge full, file too large,
-              buddy's disk full).</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Drift detection (reconciliation)</strong>
-            <span>Roughly every 10 minutes, your device double-checks that
-              what your buddy actually has on disk still matches what it
-              expects — catching anything lost or changed outside the
-              normal backup flow — and automatically re-sends anything
-              missing.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Unreachable-buddy detection</strong>
-            <span>If your buddy's device genuinely can't be reached, your
-              dashboard flags it as stale rather than silently showing
-              "backup ok" — backed by a real connectivity check, not an
-              assumption.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Dashboard</strong>
-            <span>Per-buddy backup status, your device's build/uptime/local
-              file count, each buddy's real disk usage, and a lifetime
-              direct-vs-relay bandwidth breakdown.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Find a buddy</strong>
-            <span>Browse public listings at an exact storage size, with
-              optional self-reported country, upload-speed tier,
-              always-on, and relay-only info to help you judge fit before
-              pairing.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-available">Available</span>
-          <span class="status-item-body">
-            <strong>Free tier</strong>
-            <span>The first 50GB you pledge to buddies is free, no card
-              required.</span>
-          </span>
+      <ul class="status-list" id="available-list">
+        <li class="status-item status-fallback">
+          <span class="status-item-body"><span>Loading…</span></span>
         </li>
       </ul>
     </section>
@@ -144,67 +55,12 @@
         proven under real conditions, or an inherent limit we want to be
         upfront about.
       </p>
-      <ul class="status-list">
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">Limitation</span>
-          <span class="status-item-body">
-            <strong>Direct connections aren't guaranteed on every
-              network</strong>
-            <span>Whether a direct connection is possible depends on your
-              router/network's NAT behavior. Many home networks and local
-              networks work great. Some networks — strict corporate
-              firewalls especially — block the hole-punching direct
-              connections need entirely, forwarded port or not. When that
-              happens, your backups still complete normally through our
-              relay; this is expected, graceful behavior, not a failure.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">In progress</span>
-          <span class="status-item-body">
-            <strong>Marketplace listing filters</strong>
-            <span>Country, upload speed, "usually online", and "relay-only"
-              are currently shown on listings to help you judge a buddy
-              yourself, but don't yet filter or auto-match search results.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">In progress</span>
-          <span class="status-item-body">
-            <strong>Low-disk protection</strong>
-            <span>Your device is designed to refuse new incoming files once
-              its own disk runs low, independent of pledge size — built,
-              but not yet exercised against a real low-disk machine.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">In progress</span>
-          <span class="status-item-body">
-            <strong>Relay bandwidth billing</strong>
-            <span>Relay usage is metered and reported on paid accounts;
-              full end-to-end confirmation against billing is still being
-              verified.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">Limitation</span>
-          <span class="status-item-body">
-            <strong>Fixed backup interval, no file filtering</strong>
-            <span>Backups run on a fixed ~30 second cycle and back up
-              everything in your configured folder — there's no way yet to
-              change the interval or exclude specific files/patterns.</span>
-          </span>
-        </li>
-        <li class="status-item">
-          <span class="status-badge status-badge-progress">Limitation</span>
-          <span class="status-item-body">
-            <strong>One buddy per pledge</strong>
-            <span>Each pledge is a 1:1 relationship with a single buddy —
-              there's no way to share one backup folder across multiple
-              buddies at once.</span>
-          </span>
+      <ul class="status-list" id="limitations-list">
+        <li class="status-item status-fallback">
+          <span class="status-item-body"><span>Loading…</span></span>
         </li>
       </ul>
+      <p class="muted" id="status-updated" style="margin-top:1rem; font-size:0.85rem"></p>
     </section>
 
     <section class="hero" style="padding-top:1rem">
@@ -216,5 +72,55 @@
   <footer>
     <a href="/terms.html">Terms of Service</a>
   </footer>
+
+  <script>
+    // Renders from feature-status.json rather than hand-written markup, so
+    // this page updates whenever that one data file changes — no HTML
+    // edits, no separate deploy step beyond the normal apps/web/** CI
+    // deploy that change already triggers. Same-origin fetch (no GitHub
+    // API/auth involved); if it fails for any reason, the static
+    // "Loading…" fallback is replaced with a plain error + a link
+    // straight to the client setup page so the page never looks broken.
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function renderList(el, items, badgeClass, badgeText) {
+      el.innerHTML = items.map((item) => {
+        const label = item.status === 'limitation' ? 'Limitation'
+          : item.status === 'in_progress' ? 'In progress'
+          : badgeText;
+        return `<li class="status-item">
+          <span class="status-badge ${badgeClass}">${escapeHtml(label)}</span>
+          <span class="status-item-body">
+            <strong>${escapeHtml(item.title)}</strong>
+            <span>${escapeHtml(item.description)}</span>
+          </span>
+        </li>`;
+      }).join('');
+    }
+
+    fetch('/feature-status.json', { cache: 'no-store' })
+      .then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then((data) => {
+        renderList(document.getElementById('available-list'), data.available || [], 'status-badge-available', 'Available');
+        renderList(document.getElementById('limitations-list'), data.limitations || [], 'status-badge-progress', 'In progress');
+        if (data.updated) {
+          document.getElementById('status-updated').textContent = 'Last updated ' + data.updated;
+        }
+      })
+      .catch(() => {
+        const msg = '<li class="status-item status-fallback"><span class="status-item-body">' +
+          '<span>Couldn’t load the live status list right now — ' +
+          '<a href="/setup.html">see client setup</a> or try refreshing.</span></span></li>';
+        document.getElementById('available-list').innerHTML = msg;
+        document.getElementById('limitations-list').innerHTML = '';
+      });
+  </script>
 </body>
 </html>
