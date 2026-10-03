@@ -494,17 +494,63 @@ async fn main() -> Result<()> {
                                     .await;
                                 }
                                 let record = match &result {
+                                    Ok(stats)
+                                        if stats.files_sent == 0
+                                            && stats.files_deleted == 0
+                                            && stats.files_failed == 0 =>
+                                    {
+                                        // Truly idle: run_backup_cycle found nothing new to
+                                        // send and, per its own doc comment, never opened a
+                                        // connection at all — so unlike the general "nothing
+                                        // sent" case below, reachability here has not actually
+                                        // been checked by anything yet. Piggyback the same
+                                        // lightweight Ping the no-BACKUP_DIR branch below already
+                                        // uses as its own connectivity check, so a dead buddy
+                                        // doesn't sit at "backup ok" forever just because there
+                                        // was nothing to resend.
+                                        let ping_result =
+                                            ping(&endpoint, &config.relay_url, buddy_id).await;
+                                        dashboard::CycleRecord {
+                                            label: label.clone(),
+                                            at: dashboard::unix_now(),
+                                            kind: "backup",
+                                            ok: ping_result.is_ok(),
+                                            detail: match &ping_result {
+                                                Ok(()) => {
+                                                    "nothing new to back up (connectivity check ok)"
+                                                        .to_string()
+                                                }
+                                                Err(err) => format!(
+                                                    "nothing new to back up, but connectivity \
+                                                     check failed: {err}"
+                                                ),
+                                            },
+                                            files_sent: Some(0),
+                                            files_deleted: Some(0),
+                                            bytes_sent: None,
+                                            duration_ms: None,
+                                            connection: None,
+                                            files_failed: Some(0),
+                                            failed_files: Vec::new(),
+                                            last_ok_at: None,
+                                            consecutive_failures: 0,
+                                            // This is now backed by a real Ping instead of an
+                                            // unconditional assumption — the actual reachability
+                                            // signal "stale" is meant to track.
+                                            made_progress: ping_result.is_ok(),
+                                            last_synced_at: None,
+                                        }
+                                    }
                                     Ok(stats) if stats.files_sent == 0 && stats.files_deleted == 0 => {
                                         dashboard::CycleRecord {
                                             label: label.clone(),
                                             at: dashboard::unix_now(),
                                             kind: "backup",
-                                            ok: stats.files_failed == 0,
-                                            detail: if stats.files_failed == 0 {
-                                                "nothing new to back up".to_string()
-                                            } else {
-                                                format!("{} file(s) still failing to sync", stats.files_failed)
-                                            },
+                                            ok: false,
+                                            detail: format!(
+                                                "{} file(s) still failing to sync",
+                                                stats.files_failed
+                                            ),
                                             files_sent: Some(0),
                                             files_deleted: Some(0),
                                             bytes_sent: None,
@@ -519,13 +565,14 @@ async fn main() -> Result<()> {
                                                 .collect(),
                                             last_ok_at: None,
                                             consecutive_failures: 0,
-                                            // We successfully connected and ran a cycle — that's
-                                            // what "stale" should track (can we reach this buddy
-                                            // at all), not whether specific files keep getting
-                                            // rejected. A permanently-stuck file (over pledge,
-                                            // too large, etc.) fails every single cycle forever
-                                            // by definition, so gating progress on files_failed
-                                            // == 0 would make a perfectly healthy connection look
+                                            // files_failed > 0 here means run_backup_cycle *did*
+                                            // open a connection and attempt to send (e.g. pledge
+                                            // enforcement rejected it) — reachability is already
+                                            // proven for this cycle, no extra ping needed. A
+                                            // permanently-stuck file (over pledge, too large,
+                                            // etc.) fails every single cycle forever by
+                                            // definition, so gating progress on files_failed == 0
+                                            // would make a perfectly healthy connection look
                                             // "stale — last synced never" permanently. That
                                             // specific-file problem is already called out loudly
                                             // by the failed-files line and the "backup failed"
@@ -579,10 +626,29 @@ async fn main() -> Result<()> {
                                         last_synced_at: None,
                                     },
                                 };
-                                dashboard::record_cycle(&cycle_stats, node_id_str, record);
+                                // Log against `record` (not `result` directly) so the idle
+                                // case's log reflects the ping we just ran instead of
+                                // re-deriving a verdict without it.
                                 match &result {
                                     Ok(stats) if stats.files_sent == 0 && stats.files_deleted == 0 => {
-                                        tracing::debug!(buddy = %label, "nothing new to back up")
+                                        if record.ok {
+                                            tracing::debug!(
+                                                buddy = %label,
+                                                "nothing new to back up (connectivity check ok)"
+                                            )
+                                        } else if stats.files_failed == 0 {
+                                            tracing::warn!(
+                                                buddy = %label,
+                                                detail = %record.detail,
+                                                "nothing new to back up, and connectivity check failed"
+                                            )
+                                        } else {
+                                            tracing::warn!(
+                                                buddy = %label,
+                                                files_failed = stats.files_failed,
+                                                "backup cycle complete with file(s) still failing to sync"
+                                            )
+                                        }
                                     }
                                     Ok(stats) => tracing::info!(
                                         buddy = %label,
@@ -594,6 +660,7 @@ async fn main() -> Result<()> {
                                     ),
                                     Err(err) => tracing::warn!(buddy = %label, ?err, "backup cycle failed"),
                                 }
+                                dashboard::record_cycle(&cycle_stats, node_id_str, record);
 
                                 // Periodic reconciliation — independent of
                                 // whether this particular cycle had anything
