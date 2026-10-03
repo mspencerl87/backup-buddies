@@ -692,8 +692,9 @@ file) is now fully exercised. Remaining:
       duplicate rather than leaving two contradictory lines.
 - [ ] Disk-space-floor rejection (2GB flat / 5% of filesystem,
       whichever's bigger) — never triggered
-- [ ] Stale-buddy badge (`STALE_AFTER_SECS`, default 10 min) — never
-      triggered
+- [x] ~~Stale-buddy badge~~ — stale entry, contradicted by "Found and
+      fixed: the stale-buddy badge never tripped..." above, which
+      confirms this live on testb (2026-10-03). Removing as a duplicate.
 - [ ] Relay-bandwidth billing report (the ~30s "how many MB since last
       report" cycle) — never specifically checked
 
