@@ -127,6 +127,27 @@ pub fn unix_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
+/// One buddy's most recent reconciliation result — see
+/// backup::reconcile_with_buddy for what this actually checks (the
+/// manifest vs. the buddy's real stored files, not just our local diff).
+/// Updated by main.rs's outbound loop every time it runs a reconciliation
+/// pass (roughly every 10 minutes per buddy, not every ordinary cycle).
+#[derive(Clone, Serialize)]
+pub struct ReconcileRecord {
+    pub at: u64,
+    pub checked: usize,
+    pub missing_on_buddy: Vec<String>,
+    pub unexpected_on_buddy: Vec<String>,
+    // Set when the reconciliation attempt itself failed (couldn't connect,
+    // couldn't list) rather than succeeding and finding drift — a
+    // different situation from "checked and it's clean" or "checked and
+    // found a mismatch", so the dashboard can tell them apart instead of
+    // an error silently looking identical to "never checked".
+    pub error: Option<String>,
+}
+
+pub type ReconcileBook = Arc<Mutex<HashMap<String, ReconcileRecord>>>;
+
 #[derive(Clone)]
 struct AppState {
     node_id: String,
@@ -135,6 +156,7 @@ struct AppState {
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
+    reconcile_stats: ReconcileBook,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -173,6 +195,10 @@ struct BuddyStatus {
     // computed here rather than left to the frontend so the threshold
     // lives in one place (Config::stale_after_secs).
     stale: bool,
+    // Most recent reconciliation result (see backup::reconcile_with_buddy)
+    // — absent until the first one has actually run, roughly 10 minutes
+    // after this buddy pairing starts sending files.
+    last_reconcile: Option<ReconcileRecord>,
 }
 
 /// Physical space on the filesystem backing `data_dir` — where every
@@ -282,6 +308,7 @@ pub async fn run(
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
+    reconcile_stats: ReconcileBook,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -294,6 +321,7 @@ pub async fn run(
         pledge_book,
         bandwidth_book,
         cycle_stats,
+        reconcile_stats,
         endpoint,
         relay_url,
         passphrase,
@@ -336,6 +364,7 @@ async fn mark_handler() -> impl IntoResponse {
 async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     let pledge_snapshot = { state.pledge_book.lock().unwrap().clone() };
     let cycle_snapshot = { state.cycle_stats.lock().unwrap().clone() };
+    let reconcile_snapshot = { state.reconcile_stats.lock().unwrap().clone() };
 
     // Union of "anyone we've received a pledge from" and "anyone we've
     // run a cycle against" — a buddy can appear in only one of the two
@@ -371,6 +400,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     for node_id in buddy_ids {
         let pledge = pledge_snapshot.get(&node_id).copied().unwrap_or_default();
         let cycle = cycle_snapshot.get(&node_id).cloned();
+        let last_reconcile = reconcile_snapshot.get(&node_id).cloned();
 
         let manifest = Manifest::load(&state.data_dir, &node_id).await;
         let sent_files = manifest.entries.len();
@@ -404,6 +434,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
             sent_bytes,
             last_cycle: cycle,
             stale,
+            last_reconcile,
         });
     }
 
@@ -1582,6 +1613,42 @@ function renderBuddy(b) {
       cycle.files_failed + " file(s) won't send/receive" + sample + "</div>";
   }
 
+  // Reconciliation runs on its own, much slower cadence (every ~10
+  // minutes, not every cycle — see backup::reconcile_with_buddy), so this
+  // is deliberately separate from the ordinary cycle detail above rather
+  // than folded into it.
+  let reconcileLine = "";
+  const rec = b.last_reconcile;
+  if (rec) {
+    if (rec.error) {
+      reconcileLine =
+        '<div class="muted" style="color: var(--danger); margin-top: 0.4rem;">⚠ reconciliation check failed ' +
+        fmtAgo(rec.at) + ": " + rec.error + "</div>";
+    } else if (rec.missing_on_buddy.length || rec.unexpected_on_buddy.length) {
+      const parts = [];
+      if (rec.missing_on_buddy.length) {
+        parts.push(
+          rec.missing_on_buddy.length + " missing on buddy (will re-send): " + rec.missing_on_buddy.join(", ")
+        );
+      }
+      if (rec.unexpected_on_buddy.length) {
+        parts.push(
+          rec.unexpected_on_buddy.length + " unexpected on buddy: " + rec.unexpected_on_buddy.join(", ")
+        );
+      }
+      reconcileLine =
+        '<div class="muted" style="color: var(--danger); margin-top: 0.4rem;">⚠ reconciliation (' +
+        fmtAgo(rec.at) + ") found drift — " + parts.join("; ") + "</div>";
+    } else if (rec.checked > 0) {
+      reconcileLine =
+        '<div class="muted" style="margin-top: 0.4rem;">✓ reconciled ' + fmtAgo(rec.at) +
+        " — " + rec.checked + " file(s) match the buddy's actual records</div>";
+    }
+    // checked === 0 with no error means an empty manifest — nothing to
+    // reconcile yet, so no line at all rather than a confusing "0 files
+    // match" message.
+  }
+
   const div = document.createElement("div");
   div.className = "card";
   div.innerHTML = `
@@ -1591,6 +1658,7 @@ function renderBuddy(b) {
     </div>
     <div class="muted">${cycleDetail}</div>
     ${failedLine}
+    ${reconcileLine}
     <div class="row" style="margin-top: 0.9rem;">
       <div>
         <div class="muted">You've sent them</div>

@@ -301,14 +301,29 @@ touches the network when something local actually changed:
   and destroying a buddy's data over a stale local manifest would be far
   worse than a loud warning asking a person to look into it.
 - Logs at `WARN` with both path lists when anything's found, `DEBUG` when
-  clean. Not yet surfaced on the dashboard itself — that's explicitly
-  deferred together with the Medium-tier "Global State rollup" item below
-  (same underlying data, worth building as one piece of dashboard work
-  rather than two).
+  clean.
+- **Now also surfaced on the dashboard** (2026-10-03, same session as the
+  core feature — the Medium-tier "Global State rollup" deferral note
+  turned out to be a small enough addition to just do immediately rather
+  than leave as a second follow-up): `dashboard::ReconcileRecord` /
+  `ReconcileBook` (new, mirrors `CycleRecord`/`CycleBook`'s shape) is
+  updated by the same outbound-loop reconciliation call and read by
+  `status_handler` into a new `BuddyStatus.last_reconcile` field. The
+  buddy card shows a line below the failed-files warning: "✓ reconciled
+  Xm ago — N file(s) match the buddy's actual records" when clean,
+  "⚠ reconciliation (Xm ago) found drift — …" listing both path lists
+  when not, or "⚠ reconciliation check failed Xm ago: …" if the
+  reconciliation attempt itself errored (couldn't connect/list) — kept
+  distinct from "checked and found drift" so one doesn't masquerade as
+  the other. No line at all for a buddy whose manifest is still empty
+  (nothing to reconcile yet) rather than a confusing "0 files match".
 
 `cargo build`/`test`/`clippy --all-targets` clean. Not yet exercised
 against real drift on testa/testb:
 
+- [ ] Confirm the dashboard line itself renders correctly once the first
+      10-minute reconciliation actually fires — this needs to be
+      confirmed visually, separately from the log-line check below.
 - [ ] Confirm the 10-minute interval actually fires — watch testa/testb's
       logs for the `DEBUG`-level "buddy's stored files match our
       manifest" line (needs `RUST_LOG=debug` or similar, since the
@@ -561,18 +576,11 @@ other migration there).
       the dashboard, plus version/uptime/local-file-count — shipped
       below). Remaining, roughly in order of how much they'd cost:
   - Medium:
-    - Global State rollup — Syncthing's Folders panel shows "Global
-      State" (what the whole cluster has) vs. "Local State" (what this
-      node has). Our closest equivalent would be, per buddy: our
-      manifest's file count/bytes (what we believe we've sent) vs. their
-      actual received/ count/bytes (available already via the existing
-      `List`/`DiskStats` requests) — i.e. a live reconciliation check.
-      `backup::reconcile_with_buddy` (now built — see "Needs testing —
-      reconciliation" above) already computes exactly this comparison
-      every 10 minutes per buddy, just doesn't surface it on the
-      dashboard yet; this item is now "wire reconcile_with_buddy's
-      output into StatusResponse/the buddy card" rather than building
-      the comparison logic from scratch.
+    - ~~Global State rollup~~ — **done** (2026-10-03), see "Needs testing
+      — reconciliation against the buddy's actual state" above:
+      `backup::reconcile_with_buddy` computes the manifest-vs-buddy
+      comparison every 10 minutes per buddy, and it's now surfaced on the
+      dashboard buddy card.
     - Rescan interval/toggle display — we don't have a configurable scan
       interval today (fixed ~30s cycle, see "Documented, intentional
       limits" above), so this would first need that to become

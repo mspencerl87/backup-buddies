@@ -351,6 +351,12 @@ async fn main() -> Result<()> {
     // dashboard reads this directly rather than probing anything itself.
     let cycle_stats: dashboard::CycleBook = Arc::new(Mutex::new(std::collections::HashMap::new()));
 
+    // Same idea, for reconciliation results (see
+    // backup::reconcile_with_buddy) — a separate book since it updates on
+    // its own, much less frequent cadence, not every ordinary cycle.
+    let reconcile_stats: dashboard::ReconcileBook =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
     let dashboard_task = {
         let endpoint = endpoint.clone();
         let config_dashboard_bind = config.dashboard_bind.clone();
@@ -360,6 +366,7 @@ async fn main() -> Result<()> {
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
+        let reconcile_stats = reconcile_stats.clone();
         let relay_url = config.relay_url.clone();
         let passphrase = config.passphrase.clone();
         let stale_after_secs = config.stale_after_secs;
@@ -372,6 +379,7 @@ async fn main() -> Result<()> {
                 pledge_book,
                 bandwidth_book,
                 cycle_stats,
+                reconcile_stats,
                 endpoint,
                 relay_url,
                 passphrase,
@@ -418,6 +426,7 @@ async fn main() -> Result<()> {
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
+        let reconcile_stats = reconcile_stats.clone();
         async move {
             // When each buddy's manifest was last reconciled against what
             // they actually report holding for us (see
@@ -599,14 +608,31 @@ async fn main() -> Result<()> {
                                 if reconcile_due {
                                     last_reconcile
                                         .insert(node_id_str.clone(), std::time::Instant::now());
-                                    match backup::reconcile_with_buddy(
+                                    let reconcile_result = backup::reconcile_with_buddy(
                                         &endpoint,
                                         &config.relay_url,
                                         &config.data_dir,
                                         buddy_id,
                                     )
-                                    .await
-                                    {
+                                    .await;
+                                    let record = match &reconcile_result {
+                                        Ok(stats) => dashboard::ReconcileRecord {
+                                            at: dashboard::unix_now(),
+                                            checked: stats.checked,
+                                            missing_on_buddy: stats.missing_on_buddy.clone(),
+                                            unexpected_on_buddy: stats.unexpected_on_buddy.clone(),
+                                            error: None,
+                                        },
+                                        Err(err) => dashboard::ReconcileRecord {
+                                            at: dashboard::unix_now(),
+                                            checked: 0,
+                                            missing_on_buddy: Vec::new(),
+                                            unexpected_on_buddy: Vec::new(),
+                                            error: Some(err.to_string()),
+                                        },
+                                    };
+                                    reconcile_stats.lock().unwrap().insert(node_id_str.clone(), record);
+                                    match reconcile_result {
                                         Ok(stats)
                                             if stats.missing_on_buddy.is_empty()
                                                 && stats.unexpected_on_buddy.is_empty() =>
