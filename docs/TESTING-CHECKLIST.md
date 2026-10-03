@@ -347,17 +347,24 @@ touches the network when something local actually changed:
 - [x] No false positives on a healthy pairing — covered by the clean
       "✓ reconciled" dashboard line above, seen repeatedly across several
       ordinary cycles with no spurious drift reported.
-- [ ] Confirm an *unexpected* file (something manually copied into
-      testb's `received/<testa>/` directory that testa never sent) shows
-      up under `unexpected_paths` in the `WARN` line, and is correctly
-      left alone rather than deleted — not exercised yet, only the
-      missing-file side was tested
-- [ ] Confirm a receive-only device (no `BACKUP_DIR`, empty manifest)
-      never opens a reconciliation connection at all — `checked: 0`
-      cycles should cost nothing over the network, confirm via a quiet
-      `docker compose logs` on such a device with no unexpected traffic.
-      testc (new 2026-10-03, receive-only, paired with testb) is up and
-      could be used for this, just not specifically checked yet.
+- [x] Confirmed the *unexpected*-file case (2026-10-03): manually dropped
+      `unexpected-test.bin` directly into testb's
+      `received/<testa>/` dir (bypassing the protocol, same as the
+      missing-file test but in reverse). testa's next reconciliation tick
+      logged `WARN ... missing_on_buddy=0 missing_paths=[]
+      unexpected_on_buddy=1 unexpected_paths=["unexpected-test.bin"]` —
+      correctly isolated from the missing-file case. Confirmed via `ls`
+      on testb afterward that the file was left untouched — reconciliation
+      only reports unexpected files, never deletes them.
+- [x] Confirmed a receive-only device never reconciles (2026-10-03):
+      testc (new this session, no `BACKUP_DIR`, empty manifest, paired
+      with testb) shows no reconciliation line at all on its testb buddy
+      card — neither a clean "✓ reconciled" nor a drift warning, just the
+      ordinary backup/pledge/disk info. Matches the documented "no line
+      for a buddy whose manifest is still empty" behavior exactly.
+
+Reconciliation feature: every checklist item above now confirmed. Closing
+this section out.
 
 ## Verified working (2026-10-02)
 
@@ -498,8 +505,12 @@ this writing — see "Marketplace listing criteria" below):
 Restore path (single file, all files, per-version restore of a deleted
 file) is now fully exercised. Remaining:
 
-- [ ] Pledge-enforcement rejection: a buddy sending more than they're
-      pledged should be rejected — never triggered
+- [x] ~~Pledge-enforcement rejection~~ — stale, contradicted the
+      "Pledge-cap rejection, functionally confirmed (2026-10-02)" entry
+      above and today's reconciliation close-out, both of which exercise
+      this extensively (`pledge-test-1`/`-3`/`-5`, rejected correctly on
+      every cycle for over half an hour straight). Removing as a
+      duplicate rather than leaving two contradictory lines.
 - [ ] Disk-space-floor rejection (2GB flat / 5% of filesystem,
       whichever's bigger) — never triggered
 - [ ] Stale-buddy badge (`STALE_AFTER_SECS`, default 10 min) — never
