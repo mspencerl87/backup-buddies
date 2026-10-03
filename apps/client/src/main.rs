@@ -419,6 +419,17 @@ async fn main() -> Result<()> {
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         async move {
+            // When each buddy's manifest was last reconciled against what
+            // they actually report holding for us (see
+            // backup::reconcile_with_buddy) — separate from the ordinary
+            // ~30s cycle above, and deliberately much less frequent, since
+            // it costs the buddy a full file listing rather than only
+            // touching the network when something local changed. Declared
+            // here, outside the loop below, so it persists across ticks
+            // for the life of this process.
+            let mut last_reconcile: std::collections::HashMap<String, std::time::Instant> =
+                std::collections::HashMap::new();
+            const RECONCILE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
             loop {
                 match fetch_buddy_devices(&http, &config, &bandwidth_book).await {
                     Ok(buddies) => {
@@ -573,6 +584,55 @@ async fn main() -> Result<()> {
                                         "backup cycle complete"
                                     ),
                                     Err(err) => tracing::warn!(buddy = %label, ?err, "backup cycle failed"),
+                                }
+
+                                // Periodic reconciliation — independent of
+                                // whether this particular cycle had anything
+                                // to send, since the whole point is to catch
+                                // drift that never shows up as a local file
+                                // change in the first place (see
+                                // backup::reconcile_with_buddy's doc comment).
+                                let reconcile_due = last_reconcile
+                                    .get(node_id_str)
+                                    .map(|at: &std::time::Instant| at.elapsed() >= RECONCILE_INTERVAL)
+                                    .unwrap_or(true);
+                                if reconcile_due {
+                                    last_reconcile
+                                        .insert(node_id_str.clone(), std::time::Instant::now());
+                                    match backup::reconcile_with_buddy(
+                                        &endpoint,
+                                        &config.relay_url,
+                                        &config.data_dir,
+                                        buddy_id,
+                                    )
+                                    .await
+                                    {
+                                        Ok(stats)
+                                            if stats.missing_on_buddy.is_empty()
+                                                && stats.unexpected_on_buddy.is_empty() =>
+                                        {
+                                            tracing::debug!(
+                                                buddy = %label,
+                                                checked = stats.checked,
+                                                "reconciliation: buddy's stored files match our manifest"
+                                            );
+                                        }
+                                        Ok(stats) => tracing::warn!(
+                                            buddy = %label,
+                                            checked = stats.checked,
+                                            missing_on_buddy = stats.missing_on_buddy.len(),
+                                            missing_paths = ?stats.missing_on_buddy,
+                                            unexpected_on_buddy = stats.unexpected_on_buddy.len(),
+                                            unexpected_paths = ?stats.unexpected_on_buddy,
+                                            "reconciliation found drift between our manifest and \
+                                             the buddy's actual files — missing ones will be \
+                                             re-sent automatically next cycle"
+                                        ),
+                                        Err(err) => tracing::warn!(
+                                            buddy = %label, ?err,
+                                            "reconciliation check against buddy's actual files failed"
+                                        ),
+                                    }
                                 }
                             } else {
                                 let result = ping(&endpoint, &config.relay_url, buddy_id).await;

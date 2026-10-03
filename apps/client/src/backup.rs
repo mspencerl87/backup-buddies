@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
 };
 
@@ -204,6 +204,96 @@ pub async fn run_backup_cycle(
         failed_paths,
     };
     Ok(stats)
+}
+
+/// Result of comparing our manifest against what the buddy actually
+/// reports holding for us — see `reconcile_with_buddy` below.
+#[derive(Debug, Clone, Default)]
+pub struct ReconcileStats {
+    /// How many manifest entries were checked against the buddy's list.
+    pub checked: usize,
+    /// Paths our manifest believes landed, but the buddy either doesn't
+    /// have (at all, or only as a `.versions/` backup slot — see
+    /// `ListEntry::deleted`) or has at a different size. Already dropped
+    /// from the manifest by the time this is returned, so the very next
+    /// ordinary cycle re-sends them automatically — no separate re-send
+    /// logic needed here.
+    pub missing_on_buddy: Vec<String>,
+    /// Paths the buddy has (live, not a `.versions/`-only slot) that our
+    /// manifest has no record of sending. Reported only, never acted on
+    /// automatically — deleting these from the buddy based on a guess
+    /// would be destructive if the guess is wrong (e.g. a manifest this
+    /// process just hasn't caught up on yet), so this is purely a loud
+    /// surface for a person to look into.
+    pub unexpected_on_buddy: Vec<String>,
+}
+
+/// Checks that the buddy's own actual stored files still match what our
+/// manifest believes we sent them — unlike `run_backup_cycle` above,
+/// which only ever diffs *local* files against the manifest (what we
+/// believe we already sent), this catches drift that happens entirely
+/// outside the normal put/delete flow: manual filesystem surgery on the
+/// receiver, a bug, partial data loss on their end, restoring from an
+/// old snapshot. None of those change anything about our local source
+/// files, so an ordinary cycle has no way to ever notice them on its
+/// own — this is what does. Meant to be called periodically rather than
+/// every cycle (see main.rs's reconcile interval) since it costs the
+/// buddy a full `List` of everything they're holding for us, heavier
+/// than the ordinary diff-driven cycle which only touches the network
+/// when something local actually changed.
+pub async fn reconcile_with_buddy(
+    endpoint: &Endpoint,
+    relay_url: &RelayUrl,
+    data_dir: &Path,
+    buddy_id: EndpointId,
+) -> Result<ReconcileStats> {
+    let buddy_node_id = buddy_id.to_string();
+    let mut manifest = Manifest::load(data_dir, &buddy_node_id).await;
+    if manifest.entries.is_empty() {
+        // Nothing we believe we've sent this buddy, so nothing to check
+        // — and no reason to open a connection just to confirm that.
+        return Ok(ReconcileStats::default());
+    }
+
+    let buddy_files = crate::restore::list_buddy_files(endpoint, relay_url, buddy_id)
+        .await
+        .context("failed to list buddy's files for reconciliation")?;
+
+    // Only live files count as "the buddy still has this" — a
+    // `deleted: true` entry is a `.versions/` backup slot from something
+    // that was overwritten or deleted, not the live file our manifest is
+    // tracking (see ListEntry's doc comment in protocol.rs).
+    let buddy_live: HashMap<&str, u64> =
+        buddy_files.iter().filter(|f| !f.deleted).map(|f| (f.path.as_str(), f.size)).collect();
+
+    let checked = manifest.entries.len();
+    let known_paths: HashSet<String> = manifest.entries.keys().cloned().collect();
+
+    let mut missing_on_buddy = Vec::new();
+    for (path, entry) in &manifest.entries {
+        let landed_correctly =
+            buddy_live.get(path.as_str()).is_some_and(|&size| size == entry.ciphertext_size);
+        if !landed_correctly {
+            missing_on_buddy.push(path.clone());
+        }
+    }
+    for path in &missing_on_buddy {
+        manifest.entries.remove(path);
+    }
+    if !missing_on_buddy.is_empty() {
+        manifest
+            .save(data_dir, &buddy_node_id)
+            .await
+            .context("failed to persist manifest after reconciliation")?;
+    }
+
+    let unexpected_on_buddy: Vec<String> = buddy_live
+        .keys()
+        .filter(|path| !known_paths.contains(**path))
+        .map(|path| path.to_string())
+        .collect();
+
+    Ok(ReconcileStats { checked, missing_on_buddy, unexpected_on_buddy })
 }
 
 // Returns the ciphertext size on success — what actually got sent over

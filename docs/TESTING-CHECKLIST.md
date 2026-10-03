@@ -262,6 +262,80 @@ Not yet exercised on testa/testb (built, compiles clean, not yet deployed
       correctly. Staleness now correctly reflects reachability, not
       per-file rejects.
 
+## Needs testing — reconciliation against the buddy's actual state
+
+Raised by Spencer after manually `rm -r`'ing files on testb's disk
+(bypassing the protocol) and the sender never noticing — moved from
+"Flagged, not yet scoped" to here now that it's built (2026-10-03). Right
+now `run_backup_cycle` only ever diffs local files against its own
+manifest (what it *believes* it already sent) — a failed `put` does retry
+automatically next cycle (manifest isn't updated on failure, so it
+naturally stays in the "changed" diff — already confirmed working by the
+deadlock-fix finding earlier), but if the manifest and the buddy's actual
+stored files ever drift for any reason *outside* that normal put/delete
+flow — manual filesystem surgery on the receiver, a bug, partial data
+loss on their end, restoring from an old snapshot — nothing about the
+local source file changed, so it was never re-evaluated and the sender
+had no way to detect it.
+
+Implemented as `backup::reconcile_with_buddy` in `backup.rs`, called
+periodically (every 10 minutes per buddy, independent of the ordinary
+~30s cycle — see `RECONCILE_INTERVAL` in `main.rs`'s outbound loop, not
+gated on whether that cycle had anything to send, since the whole point
+is to catch drift that *never* shows up as a local change) rather than
+every cycle, since it costs the buddy a full `List` of everything they're
+holding for us — heavier than the ordinary diff-driven cycle, which only
+touches the network when something local actually changed:
+
+- Compares every manifest entry against the buddy's live `List` response
+  (a `deleted: true` entry — a `.versions/`-only backup slot — counts as
+  "buddy doesn't have this live", same as not being listed at all) by
+  both presence and ciphertext size.
+- Anything the manifest believes landed but doesn't actually match on the
+  buddy's side gets dropped from the manifest right there — no separate
+  re-send logic needed, the very next ordinary cycle sees that local file
+  as "changed" (no longer in the manifest) and re-sends it automatically
+  through the existing, already-tested path.
+- Anything the buddy has live that our manifest has no record of is only
+  *reported*, never auto-deleted from the buddy's side — guessing wrong
+  and destroying a buddy's data over a stale local manifest would be far
+  worse than a loud warning asking a person to look into it.
+- Logs at `WARN` with both path lists when anything's found, `DEBUG` when
+  clean. Not yet surfaced on the dashboard itself — that's explicitly
+  deferred together with the Medium-tier "Global State rollup" item below
+  (same underlying data, worth building as one piece of dashboard work
+  rather than two).
+
+`cargo build`/`test`/`clippy --all-targets` clean. Not yet exercised
+against real drift on testa/testb:
+
+- [ ] Confirm the 10-minute interval actually fires — watch testa/testb's
+      logs for the `DEBUG`-level "buddy's stored files match our
+      manifest" line (needs `RUST_LOG=debug` or similar, since the
+      default filter is `info`) or, more usefully, force a mismatch (see
+      next item) and watch for the `WARN` line instead
+- [ ] **The actual scenario that prompted this**: manually delete a file
+      from testb's `received/<testa's node id>/` directory on disk
+      (bypassing the protocol entirely, same as before), wait for the
+      next reconciliation tick on testa (up to 10 minutes), and confirm
+      testa's logs show a `WARN` naming that exact path under
+      `missing_paths`, and that the file actually gets re-sent on the
+      very next ordinary ~30s cycle afterward (not just detected —
+      recovered)
+- [ ] Confirm an *unexpected* file (something manually copied into
+      testb's `received/<testa>/` directory that testa never sent) shows
+      up under `unexpected_paths` in the `WARN` line, and is correctly
+      left alone rather than deleted
+- [ ] Confirm a receive-only device (no `BACKUP_DIR`, empty manifest)
+      never opens a reconciliation connection at all — `checked: 0`
+      cycles should cost nothing over the network, confirm via a quiet
+      `docker compose logs` on such a device with no unexpected traffic
+- [ ] Watch at least one full real cycle (10+ minutes) on an otherwise
+      healthy, fully-synced pairing to confirm reconciliation doesn't
+      produce any false positives on its own — i.e. it should log the
+      clean/`DEBUG` path, not spuriously flag files that are actually
+      fine
+
 ## Verified working (2026-10-02)
 
 - [x] Backup cycle: testa → testb, new/changed files detected and sent
@@ -480,27 +554,6 @@ other migration there).
       and (b) `devices.last_seen_at` history turned into an actual uptime
       percentage rather than a point-in-time timestamp. Worth it only if
       self-reports turn out unreliable in practice.
-- [ ] **Reconciliation against the buddy's actual state, not just the
-      local manifest.** Raised by Spencer after manually `rm -r`'ing
-      files on testb's disk (bypassing the protocol) and the sender
-      never noticing — do after the current deadlock-fix re-test is
-      clean. Right now `run_backup_cycle` only ever diffs local files
-      against its own manifest (what it *believes* it already sent); a
-      failed `put` does retry automatically next cycle (manifest isn't
-      updated on failure, so it naturally stays in the "changed" diff —
-      that part already works, confirmed by the deadlock-fix finding
-      above), but if the manifest and the buddy's actual stored files
-      ever drift for any reason *outside* that normal put/delete flow —
-      manual filesystem surgery on the receiver, a bug, partial data
-      loss on their end, restoring from an old snapshot — the sender has
-      no way to detect it. Nothing about the local source file changed,
-      so it's never re-evaluated. Proposed fix: periodically (not every
-      30s cycle — this is heavier) call the buddy's existing `List`
-      request (already used by restore/browse) and diff the *response*
-      against the manifest too, not just local-vs-manifest. Any mismatch
-      (buddy's missing something the manifest thinks landed, or has
-      something stale) triggers a re-send or at minimum a loud,
-      visible warning rather than silent, permanent drift.
 - [ ] **Syncthing-style dashboard visibility — Medium and Bigger-lift
       tiers.** Spencer shared a screenshot of Syncthing's Folders/"This
       Device" panels as a template and asked for a cheap tier now, the
@@ -513,9 +566,13 @@ other migration there).
       node has). Our closest equivalent would be, per buddy: our
       manifest's file count/bytes (what we believe we've sent) vs. their
       actual received/ count/bytes (available already via the existing
-      `List`/`DiskStats` requests) — i.e. a live reconciliation check,
-      which overlaps a lot with the reconciliation backlog item above;
-      probably worth doing as one piece of work rather than two.
+      `List`/`DiskStats` requests) — i.e. a live reconciliation check.
+      `backup::reconcile_with_buddy` (now built — see "Needs testing —
+      reconciliation" above) already computes exactly this comparison
+      every 10 minutes per buddy, just doesn't surface it on the
+      dashboard yet; this item is now "wire reconcile_with_buddy's
+      output into StatusResponse/the buddy card" rather than building
+      the comparison logic from scratch.
     - Rescan interval/toggle display — we don't have a configurable scan
       interval today (fixed ~30s cycle, see "Documented, intentional
       limits" above), so this would first need that to become
