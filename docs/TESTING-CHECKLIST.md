@@ -207,14 +207,17 @@ Not yet exercised on testa/testb (built, compiles clean, not yet deployed
       file(s) won't send/receive: pledge-test-5.bin (your buddy's
       pledge to you is full), pledge-test-1.bin (your buddy's pledge to
       you is full)" — reason text displaying correctly next to each path.
-- [ ] New "This Device" card: build version (`CARGO_PKG_VERSION`) and
-      process uptime — confirm uptime resets to ~0 right after a
-      container restart and climbs normally afterward.
-- [ ] Same card: local backup-dir file count + total size (a live
+- [x] New "This Device" card: build version (`CARGO_PKG_VERSION`) and
+      process uptime. **Confirmed live on testa (2026-10-03)**: shows
+      "Version 0.1.0, Uptime 2m" right after a fresh restart — climbing
+      from near-zero as expected.
+- [x] Same card: local backup-dir file count + total size (a live
       re-scan via `backup::local_backup_summary`, not anything from the
-      manifest) — confirm it shows on a device with a `BACKUP_DIR` set
-      and stays hidden (no empty/zero row) on a receive-only device with
-      none.
+      manifest). **Confirmed live on testa (2026-10-03)**: "Local files
+      13, Local size 6.0 GB", matching testa's real `BACKUP_DIR`
+      contents. Still worth a glance on a receive-only device sometime
+      to confirm the two stats stay hidden there, but not blocking —
+      the code path is a simple `Option` check.
 - [x] **Found and fixed while confirming the above**: the same testb
       screenshot showed "stale — last synced never" even though 11
       files / 4.0 GB had clearly synced successfully — `last_ok_at`
