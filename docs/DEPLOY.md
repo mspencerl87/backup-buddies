@@ -229,13 +229,18 @@ unset and the "Continue with Google" button just redirects to a
    GOOGLE_REDIRECT_URI=https://app.filegarden.net/api/auth/google/callback
    ```
 5. Apply the new migration (adds `google_sub`, makes `password_hash`
-   optional) and restart the API so it picks up both the new env vars and
-   the new `google-auth-library` dependency:
+   optional), then restart — the `google-auth-library` dependency itself
+   deploys automatically on push (`apps/api/**` is a CI trigger path), but
+   the new env vars from step 4 only take effect on a restart, and CI has
+   no reason to do one just because you edited `.env`. If that push is
+   still fresh, check the Actions tab first and let CI's own deploy land
+   before running this — restarting at the same moment races it for the
+   `app-api-1` container name (see section 11's note):
    ```bash
    cd /opt/backup-buddies/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/003_google_oauth.sql
-   docker compose up -d --build api
+   docker compose up -d
    ```
 6. Test it: visit `/login.html`, click **Continue with Google**, and
    confirm you land on the dashboard afterward. Signing in with a Google
@@ -274,12 +279,15 @@ section 13.
    `invoice.payment_failed` — matching the handler in
    `apps/api/src/routes/stripe-webhook.js`. Copy its signing secret into
    `.env` as `STRIPE_WEBHOOK_SECRET`.
-4. **Apply the migration and restart:**
+4. **Apply the migration, then restart to pick up the env vars from steps
+   1-3** (the billing code itself already deployed on push — if that was
+   just now, let CI's own deploy finish first; see section 11's note on
+   why running this concurrently races it):
    ```bash
    cd /opt/backup-buddies/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/005_billing.sql
-   docker compose up -d --build api
+   docker compose up -d
    ```
 5. **Test it end to end** (test mode): sign up or log into a test account,
    go to the dashboard's Billing card, click **Subscribe**, and use
@@ -303,19 +311,22 @@ agent customers run in Docker. This section is server-side setup; see
 `apps/client/README.md` and the dashboard's **Set up the client** page
 (`/setup.html`) for what the customer does on their own machine.
 
-1. **Apply the migration and restart:**
+1. **Apply the migration:**
    ```bash
    cd /opt/backup-buddies/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/006_devices_and_marketplace.sql
-   docker compose up -d --build api
    ```
-2. That same `git pull` + `docker compose up -d` already picks up the
-   Caddyfile and docker-compose.yml changes that make `apps/client/`
-   served publicly at `https://app.filegarden.net/client/` — this is how
-   customers get the client without needing access to this (private)
-   repo. Nothing else to do here; the client itself never runs on app-1,
-   only its source files are served from it.
+   That's it — no manual restart needed. `apps/api/**` and `deploy/app/**`
+   (the Caddyfile/docker-compose.yml changes that serve `apps/client/`
+   publicly) are both CI trigger paths, so pushing this feature's code
+   already deployed itself automatically; running `docker compose up -d`
+   by hand too just races CI's own deploy for the `app-api-1` container
+   name (see section 17's note on this — it's what broke a later
+   deploy). Check the Actions tab or `docker compose logs api` if you
+   want to confirm it's live rather than re-running anything.
+2. Nothing else to do here; the client itself never runs on app-1, only
+   its source files are served from it.
 
 **Distributing the client:** since the repo is private, customers can't
 `git clone` it. Two ways around that, both already wired up:
@@ -356,8 +367,13 @@ you. Unset or empty, `/admin/*` 403s for everyone, you included.
 ```bash
 cd /opt/backup-buddies/deploy/app
 # edit .env: add/confirm ADMIN_EMAILS=mspencerl87@gmail.com (or your real list)
-docker compose up -d --build api
+docker compose up -d
 ```
+(No `--build` — the admin page's code already deployed on whatever push
+added it, via CI; this restart is only to pick up the env var. If you're
+doing this right after that push, let CI's own deploy finish first —
+running this at the same moment races it for the `app-api-1` container
+name, see section 11's note.)
 
 A few things worth knowing before using the delete actions:
 
@@ -391,10 +407,12 @@ into Stripe Billing Meter events on a 15-minute schedule
    what gets added to checkout and what gates the sync job) and
    `STRIPE_RELAY_METER_ID` (kept for reference only; nothing reads it).
    Start in **test mode**, same reasoning as section 10.
-2. **Restart the API** so it picks up the new env vars:
+2. **Restart the API** so it picks up the new env vars (no `--build` — the
+   sync-job code already deployed on push, via CI; if that was just now,
+   let CI's own deploy finish first, see section 11's note):
    ```bash
    cd /opt/backup-buddies/deploy/app
-   docker compose up -d --build api
+   docker compose up -d
    ```
    No new migration — `relay_usage_events` already exists (`db/init.sql`).
 3. **Backfill existing subscribers**, if there are any accounts that
@@ -447,12 +465,15 @@ already have a mailbox. This was set up against **Purelymail**
    number automatically. Leaving these unset doesn't break anything: the
    API just logs what it would have sent instead of erroring, which is
    fine for local dev but means no real emails go out in that state.
-2. **Apply the migration and restart:**
+2. **Apply the migration, then restart to pick up the SMTP env vars from
+   step 1** (the verification code itself already deployed on push — if
+   that was just now, let CI's own deploy finish first; see section 11's
+   note on why running this concurrently races it):
    ```bash
    cd /opt/backup-buddies/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/007_email_verification.sql
-   docker compose up -d --build api
+   docker compose up -d
    ```
    This backfills every *existing* account as already-verified — only new
    signups from here on need to click the link.
@@ -491,12 +512,14 @@ Off by default — turning it on starts emailing real signups the moment
 someone's inactive for a month, so don't flip it on until SMTP (section 14)
 is actually working.
 
-1. **Apply the migration and restart:**
+1. **Apply the migration** (no restart needed yet — `apps/api/**` is a CI
+   trigger path, so the matching job code already deployed itself on
+   push; see section 11's note on why running `docker compose up` by
+   hand here too would just race it):
    ```bash
    cd /opt/backup-buddies/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/008_stale_account_cleanup.sql
-   docker compose up -d --build api
    ```
 2. **Exempt any accounts you want left alone regardless of activity** —
    e.g. `testa`/`testb` if you keep those around for troubleshooting
@@ -511,8 +534,10 @@ is actually working.
    STALE_ACCOUNT_CLEANUP_ENABLED=true
    ```
    ```bash
-   docker compose up -d --build api
+   docker compose up -d
    ```
+   (No `--build` needed — this is just picking up the env var; see
+   section 11's note if you're doing this right after a fresh push.)
 4. **Test it** (test mode, with a disposable test account): backdate that
    account's `created_at` and make sure it has no `devices` row (or an old
    `last_seen_at`) so it already qualifies as stale —
