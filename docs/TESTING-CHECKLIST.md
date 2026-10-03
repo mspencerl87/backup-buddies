@@ -318,38 +318,46 @@ touches the network when something local actually changed:
   the other. No line at all for a buddy whose manifest is still empty
   (nothing to reconcile yet) rather than a confusing "0 files match".
 
-`cargo build`/`test`/`clippy --all-targets` clean. Not yet exercised
-against real drift on testa/testb:
+`cargo build`/`test`/`clippy --all-targets` clean.
 
-- [ ] Confirm the dashboard line itself renders correctly once the first
-      10-minute reconciliation actually fires — this needs to be
-      confirmed visually, separately from the log-line check below.
-- [ ] Confirm the 10-minute interval actually fires — watch testa/testb's
-      logs for the `DEBUG`-level "buddy's stored files match our
-      manifest" line (needs `RUST_LOG=debug` or similar, since the
-      default filter is `info`) or, more usefully, force a mismatch (see
-      next item) and watch for the `WARN` line instead
-- [ ] **The actual scenario that prompted this**: manually delete a file
-      from testb's `received/<testa's node id>/` directory on disk
-      (bypassing the protocol entirely, same as before), wait for the
-      next reconciliation tick on testa (up to 10 minutes), and confirm
-      testa's logs show a `WARN` naming that exact path under
-      `missing_paths`, and that the file actually gets re-sent on the
-      very next ordinary ~30s cycle afterward (not just detected —
-      recovered)
+- [x] Confirmed the dashboard line renders correctly (2026-10-03):
+      testb showed "✓ reconciled 9m ago — 11 file(s) match the buddy's
+      actual records" on a clean pairing before any deliberate drift was
+      introduced — same pass also covers the "no false positives on a
+      healthy pairing" item below.
+- [x] Confirmed the periodic tick actually fires and finds real drift
+      (2026-10-03): manually deleted `pledge-test-3.bin` from testb's
+      `received/<testa>/` dir, and testa's very next reconciliation tick
+      logged `WARN ... reconciliation found drift ... checked=10
+      missing_on_buddy=1 missing_paths=["pledge-test-3.bin"]
+      unexpected_on_buddy=0 unexpected_paths=[]` — exact path, clean
+      unexpected-side too (nothing spuriously flagged).
+- [x] **The actual scenario that prompted this — fully closed out
+      (2026-10-03)**: after the `WARN` above, testa retried
+      `pledge-test-3.bin` every ordinary cycle exactly like any other
+      pending file (not a special reconciliation-only path) — correctly
+      blocked each time by the pre-existing pledge cap
+      (`sending stopped by peer: error 1 reason="your buddy's pledge to
+      you is full"`, same reason code as `pledge-test-1`/`-5`, not a new
+      failure mode). Once pledge headroom was freed (deleted an already-
+      landed file to make room), the very next cycle succeeded: testb
+      logged `INFO ... stored file from buddy ... path=pledge-test-3.bin
+      bytes=1074004134`. Detection → retry-under-constraint → successful
+      recovery, all confirmed end to end.
+- [x] No false positives on a healthy pairing — covered by the clean
+      "✓ reconciled" dashboard line above, seen repeatedly across several
+      ordinary cycles with no spurious drift reported.
 - [ ] Confirm an *unexpected* file (something manually copied into
       testb's `received/<testa>/` directory that testa never sent) shows
       up under `unexpected_paths` in the `WARN` line, and is correctly
-      left alone rather than deleted
+      left alone rather than deleted — not exercised yet, only the
+      missing-file side was tested
 - [ ] Confirm a receive-only device (no `BACKUP_DIR`, empty manifest)
       never opens a reconciliation connection at all — `checked: 0`
       cycles should cost nothing over the network, confirm via a quiet
-      `docker compose logs` on such a device with no unexpected traffic
-- [ ] Watch at least one full real cycle (10+ minutes) on an otherwise
-      healthy, fully-synced pairing to confirm reconciliation doesn't
-      produce any false positives on its own — i.e. it should log the
-      clean/`DEBUG` path, not spuriously flag files that are actually
-      fine
+      `docker compose logs` on such a device with no unexpected traffic.
+      testc (new 2026-10-03, receive-only, paired with testb) is up and
+      could be used for this, just not specifically checked yet.
 
 ## Verified working (2026-10-02)
 
@@ -386,6 +394,53 @@ against real drift on testa/testb:
       `POST /invites/public/:id/redeem` requires it too and 409s on a
       mismatch. Still not manually exercised end-to-end on testa/testb —
       see below.
+
+## Verified working (2026-10-03)
+
+- [x] **Found and fixed: duplicate active buddy pairings.** Nothing
+      stopped two accounts from ending up with two active
+      `buddy_pairings` rows between them (each side invites the other,
+      both get redeemed) — caught live on testa/testb's dashboard as two
+      identical-looking 5GB rows for the same buddy. Fixed in commit
+      `8ed4f4d`: `redeemInvite` now 409s on a second invite between an
+      already-paired pair; migration `011_prevent_duplicate_pairings.sql`
+      dedupes existing doubles (keeps the oldest active row, revokes the
+      rest) and adds a unique index on the normalized pair (scoped to
+      `status = 'active'`) that closes the race a check-then-insert
+      can't. Verified against a real local Postgres before deploying
+      (migrations apply cleanly in sequence, dedup keeps the right row,
+      the index rejects a fresh duplicate, re-pairing after a revoke
+      still works) and confirmed live on prod: testb's billing total
+      correctly dropped from 60GB (double-counted) to 55GB, and the
+      duplicate pairing row showed `revoked` instead of a second
+      `active`.
+- [x] **Hide revoked pairings from the dashboard** (commit `1a44f61`):
+      a revoked pairing has nothing left to do with it (no reactivate
+      flow), so `GET /me` now filters to `status = 'active'` for the
+      dashboard's pairings table. Deliberately not deleted — the
+      marketplace's "completed pairings" trust signal
+      (`GET /invites/public`) counts revoked pairings too. Confirmed live
+      on testb: the `revoked` row from the dedup above disappeared from
+      the dashboard after redeploy.
+- [x] **Found and fixed: CI deploy vs. manual deploy race.**
+      `deploy.yml` already auto-deploys any push touching `apps/api/**`/
+      `deploy/app/**`/`db/migrations/**`, but `docs/DEPLOY.md`'s
+      migration instructions (going back to section 9) also told you to
+      manually `docker compose up -d --build api` right after — pushing
+      the duplicate-pairings commit above auto-triggered CI's own deploy
+      at the same moment that instruction had someone running the
+      identical command by hand over SSH, and both `docker compose up`
+      invocations raced for the `app-api-1` container name (one failed
+      outright: "Error when allocating new name: Conflict", visible both
+      in the failed Actions run for that commit and live in the
+      terminal). No lasting damage — confirmed `app-api-1` ended up
+      healthy on the correct image either way — but fixed the actual
+      instructions in commits `f253958`/`2754371`: sections that only
+      ever needed the restart for code already covered by CI (§11, §15's
+      migration step) dropped the manual redeploy entirely; sections that
+      restart for a genuinely new env var (§9, §10, §12, §13, §14, §15's
+      enable step) kept it but dropped the redundant local `--build` and
+      now say to let CI's own deploy finish first instead of racing it.
 
 ## Needs testing (new — not yet exercised on testa/testb)
 
