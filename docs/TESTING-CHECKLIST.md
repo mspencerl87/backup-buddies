@@ -515,6 +515,20 @@ this section out.
 
 ## Needs testing (new — not yet exercised on testa/testb)
 
+**Partial prior confirmation (predates this list, recalled 2026-10-03):**
+Spencer tested the underlying find-a-buddy mechanism early in this
+project's testing, before the items below existed — generated fresh
+testa/testb device tokens and, instead of using a direct invite code,
+used the public "list publicly"/find-a-buddy browse flow, which correctly
+showed a single listing at the then-current pledge size (500GB, before
+`PLEDGE_STEP_BYTES` was lowered to 5GB). That's real confirmation the
+basic idea works — browsing by size, instead of a code, finds and shows
+the right listing. It predates (so doesn't cover) the exact-size
+redeem-time validation (`4910d6f`), `find-a-buddy.html` becoming its own
+standalone page, and the listing-criteria fields below — all shipped
+later. Narrowing the list below accordingly rather than re-testing
+everything from scratch.
+
 From the exact-size matching fix (commit `4910d6f`, deployed):
 
 - [ ] Picking a different size on "Find a buddy" actually re-queries and
