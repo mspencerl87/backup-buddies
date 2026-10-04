@@ -980,13 +980,33 @@ device+inode, not path. Nothing is ever moved automatically.
         folder → reported, and *no* deletions that cycle (its files used to
         be silently skipped and so mirrored as deleted). Unit tests,
         including a real permission-denied folder run as uid 1000
-- [ ] testa/testb on 0.4.0: add `PUID=1000`/`PGID=1000` to `.env`, `up -d`
-      → one-time "Setting ownership" lines in the logs, then files under
-      `~/docker/<dev>/config` and `~/bbdata/<dev>/{buddy-files,restored}`
-      owned by sleblanc; syncing and a restore still work
-- [ ] Missing-drive guard live: `docker compose down`, point
-      `BUDDY_FILES_DIR_HOST` at an empty folder, `up -d` → refuses to start
-      with the marker error; point it back → starts
+- [x] **0.4.0 + layout B on real network shares, confirmed live
+      (2026-10-04).** TrueNAS (192.168.10.15) dataset `NFSSMBTEST`, one
+      dataset reached two ways: testa's buddy files on it via SMB
+      (`/mnt/testa-smb/testa-buddy-files`, cifs `uid=gid=sleblanc`), testb's
+      via NFS (`/mnt/testb-nfs/testb-buddy-files`). Separate subfolders per
+      device — the same folder for both would make them overwrite each
+      other's marker. Both with `PUID=PGID=1000`:
+      - testa (SMB): entrypoint chowned only `/data` and `/restored` —
+        `/buddy-files` already appeared as 1000 via the mount options, as
+        expected. Started, registered, found testb via mDNS
+      - testb (NFS): chowned all three including the share (this export
+        lets root through). Started, registered; its buddy-files folder on
+        the share holds `.backup-buddies-id` + testa's folder, all owned by
+        sleblanc
+- [x] **Missing-drive guard confirmed live on SMB.** `docker compose down`,
+      `umount /mnt/testa-smb`, `up -d` → testa refused with "has no Backup
+      Buddies marker … may not be mounted yet" and Docker kept restarting
+      it; no marker or buddy files written to the local disk. Remounted →
+      next automatic restart started it normally (20:37:44), no manual
+      step. Side effect: Docker auto-creates a missing bind-mount source,
+      so an empty `testa-buddy-files` folder appeared on the local disk
+      under the mount point (now hidden by the mount). Harmless — the
+      guard stops anything being stored there. `create_host_path: false`
+      in compose would prevent it but would make new users create folders
+      by hand first; left as is
+- [ ] SMB receiving: a file from testb (`~/bbdata/testb/my-files/`) lands
+      in `/mnt/testa-smb/testa-buddy-files/<testb id>/`
 - [ ] Empty-backup-folder guard live: move testa's `my-files` contents
       aside → card shows "backup failed: your backup folder looks
       empty…", nothing deleted on testb; move them back → normal
