@@ -933,13 +933,19 @@ Raised while discussing the size-matching fix above: exact pledge size
 alone doesn't rule out a US-based buddy matching with one in a country with
 terrible mutual latency, or someone on gigabit fiber pairing with someone
 on a 2 Mbps uplink. Added four optional, self-reported fields to invite
-creation, shown on marketplace listings but — unlike pledged_bytes — never
-used to filter what's returned, so browsing still shows everyone at a
-given size and lets the person judge fit themselves:
+creation, shown on marketplace listings, originally none of them used to
+filter what's returned (unlike pledged_bytes) — browsing showed everyone at
+a given size and left the person to judge fit themselves.
 
 - **Country** (dropdown, `invites.country`) — country only, deliberately;
   no state/city/postal code, consistent with the marketplace's existing
-  "nothing here reveals who someone is" stance on identity.
+  "nothing here reveals who someone is" stance on identity. ~~Display
+  only~~ — **done** (2026-10-04): `GET /invites/public` now takes an
+  optional `?country=` query param and filters to an exact match against
+  the same closed `COUNTRY_OPTIONS` dropdown list (not partial/`ILIKE`
+  matching); `find-a-buddy.html` has a "Country" filter select next to the
+  size filter, defaulting to "Any country". The other three fields below
+  are still display-only.
 - **Upload speed tier** (`invites.speed_tier`, one of `under_10` /
   `10_50` / `50_200` / `200_plus`) — bucketed rather than a typed Mbps
   number, since a raw figure is rarely accurate anyway (varies by time of

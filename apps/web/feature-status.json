@@ -59,7 +59,7 @@
     {
       "title": "Marketplace listing filters",
       "status": "in_progress",
-      "description": "Country, upload speed, “usually online”, and “relay-only” are currently shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
+      "description": "You can now filter “Find a buddy” by country. Upload speed, “usually online”, and “relay-only” are still shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
     },
     {
       "title": "Fixed backup interval, no file filtering",

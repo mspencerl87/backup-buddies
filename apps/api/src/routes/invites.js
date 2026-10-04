@@ -343,13 +343,21 @@ invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, a
 // find-a-buddy.html pages through them with a "Load more" button instead
 // of ever asking for all of them in one response. Also includes, per
 // listing, the inviter's self-reported country/speed_tier/always_on/
-// relay_only (display-only — see the comment above on why these aren't
-// filters) plus two things derived from the inviter's own account history
-// rather than self-reported: how long they've had an account, and how
-// many pairings (of any outcome — active or revoked) they've actually
+// relay_only, plus two things derived from the inviter's own account
+// history rather than self-reported: how long they've had an account, and
+// how many pairings (of any outcome — active or revoked) they've actually
 // completed before. Not a trust/rating system, just a lightweight signal
 // a browser can use the same way they'd eyeball an account's age on any
 // other marketplace.
+//
+// Optional ?country=<exact string> narrows to that one self-reported
+// country (an exact match against COUNTRY_OPTIONS in pledge-options.js,
+// same list the invite-creation form writes from — not a partial/ILIKE
+// match, since the field is a closed dropdown, not free text). This is
+// the first of the four self-reported fields (country/speed_tier/
+// always_on/relay_only) to become a real filter rather than display-only
+// — see docs/TESTING-CHECKLIST.md's "Marketplace listing filters" entry;
+// speed/always_on/relay_only stay display-only for now.
 invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
   const pledgedBytes = Number(req.query.pledged_bytes);
   if (!Number.isInteger(pledgedBytes) || pledgedBytes <= 0) {
@@ -363,6 +371,11 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
   if (!Number.isInteger(offset) || offset < 0) {
     return res.status(400).json({ error: 'offset must be 0 or greater' });
   }
+  // Empty string (an unselected "Any country" filter) is the same as not
+  // filtering at all, not a search for invites with an empty country.
+  const country = typeof req.query.country === 'string' && req.query.country.length > 0
+    ? req.query.country
+    : null;
 
   const result = await pool.query(
     `SELECT invites.id, invites.pledged_bytes, invites.note, invites.created_at,
@@ -379,9 +392,10 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
         AND invites.status = 'pending'
         AND invites.inviter_account_id <> $1
         AND invites.pledged_bytes = $2
+        AND ($5::text IS NULL OR invites.country = $5)
       ORDER BY invites.created_at DESC
       LIMIT $3 OFFSET $4`,
-    [req.account.id, pledgedBytes, limit, offset],
+    [req.account.id, pledgedBytes, limit, offset, country],
   );
   const totalCount = result.rows[0] ? Number(result.rows[0].total_count) : 0;
   const listings = result.rows.map(({ total_count, ...listing }) => listing);

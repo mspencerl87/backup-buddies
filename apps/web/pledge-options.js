@@ -72,8 +72,12 @@ const COUNTRY_OPTIONS = [
   'Costa Rica', 'Other',
 ].sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
 
-function populateCountrySelect(selectEl) {
-  selectEl.innerHTML = '<option value="">Prefer not to say</option>';
+// unselectedLabel defaults to the invite-creation form's framing ("skip
+// this field") — find-a-buddy.html's filter passes "Any country" instead,
+// since there the empty option means "don't narrow by country" rather
+// than "I'd rather not share mine".
+function populateCountrySelect(selectEl, unselectedLabel) {
+  selectEl.innerHTML = `<option value="">${unselectedLabel || 'Prefer not to say'}</option>`;
   for (const country of COUNTRY_OPTIONS) {
     const option = document.createElement('option');
     option.value = country;
