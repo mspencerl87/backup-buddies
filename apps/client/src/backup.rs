@@ -326,7 +326,7 @@ pub async fn run_backup_cycle(
             }
             tracker.update(|p| {
                 p.files_sent += 1;
-                p.bytes_sent += *size;
+                p.bytes_to_send = p.bytes_to_send.saturating_sub(*size);
             });
             continue;
         }
@@ -335,11 +335,18 @@ pub async fn run_backup_cycle(
         } else {
             put_one_file_legacy(&conn, rel_path, abs_path, *size).await
         };
-        // Failed files count as done too: the bar shows how far through the
-        // list this cycle is; failures are listed separately.
+        // A failed file still moves the file count on (failures are listed
+        // separately), but its bytes come off the total instead of counting
+        // as sent — a buddy refusing files instantly would otherwise show a
+        // huge speed and a near-zero time left.
+        let ok = result.is_ok();
         tracker.update(|p| {
             p.files_sent += 1;
-            p.bytes_sent += *size;
+            if ok {
+                p.bytes_sent += *size;
+            } else {
+                p.bytes_to_send = p.bytes_to_send.saturating_sub(*size);
+            }
         });
         match result {
             Ok(ciphertext_size) => {

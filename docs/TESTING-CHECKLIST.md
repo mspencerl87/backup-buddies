@@ -1019,6 +1019,24 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.6.1: pledge usage corrected from disk (2026-10-04)
+
+Found live: testa → testb, 500 photos refused "your buddy's pledge to you is
+full" with only 2.3 GB of a 5 GB pledge used. testb's pledge usage is a
+running total saved in `config/usage.json`, and it had drifted (most likely
+still counting the ISOs from the earlier test). Now every start measures
+each buddy's live files under BUDDY_FILES_DIR (not `.versions/` slots or
+half-received uploads) and corrects the saved total, logging
+"corrected pledge usage to match what's on disk" with both numbers.
+Also: files the buddy refuses no longer count as sent in the progress bar
+(they were inflating the speed, e.g. "216.8 MB/s, ~4s left").
+
+- [x] Unit test (`usage_from_disk_counts_only_live_files`); all tests pass.
+- [ ] Live: update testb to 0.6.1, check its log for the correction line,
+      then testa's next cycle sends the photos up to the 5 GB pledge
+      (5.6 GB of photos won't all fit, so a few refusals at the end are
+      expected).
+
 ## Needs testing — client 0.5.1: backup progress on the dashboard (2026-10-04)
 
 Each buddy card shows live progress while a backup cycle runs, instead of

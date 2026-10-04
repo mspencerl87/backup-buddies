@@ -681,13 +681,28 @@ async fn main() -> Result<()> {
     // it in on its first run, before accept_task can enforce anything
     // meaningfully; until then, incoming data is rejected, which is the
     // safe default for an unknown pledge).
+    //
+    // The saved ledger is a running total, so it's checked against what's
+    // really on disk at every start and corrected if it drifted — otherwise
+    // a buddy could be refused as "pledge full" with space to spare (seen
+    // live: ISOs long gone still counted against a 5 GB pledge).
+    let saved_usage = receive::load_usage_ledger(&config.data_dir).await;
+    let disk_usage = receive::usage_from_disk(&config.buddy_files_dir).await;
+    for (id, &saved) in &saved_usage {
+        let actual = disk_usage.get(id).copied().unwrap_or(0);
+        if saved != actual {
+            tracing::info!(buddy = %id, saved_bytes = saved, actual_bytes = actual, "corrected pledge usage to match what's on disk");
+        }
+    }
     let pledge_book: PledgeBook = Arc::new(Mutex::new(
-        receive::load_usage_ledger(&config.data_dir)
-            .await
+        disk_usage
             .into_iter()
             .map(|(id, received_bytes)| (id, PledgeState { received_bytes, ..Default::default() }))
             .collect(),
     ));
+    if let Err(err) = receive::save_usage_ledger(&config.data_dir, &pledge_book).await {
+        tracing::warn!(?err, "failed to save corrected usage ledger");
+    }
 
     // Lifetime relay-vs-direct byte totals — see bandwidth.rs. Loaded once
     // at startup so a restart doesn't reset the counter back to zero.

@@ -129,6 +129,27 @@ pub async fn load_usage_ledger(data_dir: &Path) -> HashMap<String, u64> {
     }
 }
 
+/// What each buddy actually has stored with us right now: the total size
+/// of their live files under BUDDY_FILES_DIR/<their node id>/ (not
+/// `.versions/` backup slots or half-received uploads — the same things
+/// the pledge counts). Used at startup to correct the saved ledger, which
+/// is a running total and can drift: files removed or a folder reset by
+/// hand, an older client's bookkeeping, a crash between writing a file and
+/// saving the ledger.
+pub async fn usage_from_disk(buddy_files_dir: &Path) -> HashMap<String, u64> {
+    let mut usage = HashMap::new();
+    let Ok(mut entries) = tokio::fs::read_dir(buddy_files_dir).await else { return usage };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || !entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let live: u64 = list_sender_files(&entry.path()).await.iter().filter(|f| !f.deleted).map(|f| f.size).sum();
+        usage.insert(name, live);
+    }
+    usage
+}
+
 pub async fn save_usage_ledger(data_dir: &Path, book: &PledgeBook) -> Result<()> {
     let snapshot: HashMap<String, u64> = {
         let book = book.lock().unwrap();
@@ -833,6 +854,31 @@ async fn handle_get_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The startup correction for a drifted usage ledger: only live files
+    // count — not backup-version slots, half-received uploads, or the
+    // folder marker at the top of BUDDY_FILES_DIR.
+    #[tokio::test]
+    async fn usage_from_disk_counts_only_live_files() {
+        let root = std::env::temp_dir().join(format!("bb-usage-from-disk-test-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        let sender = root.join("buddyA");
+        tokio::fs::create_dir_all(sender.join("photos")).await.unwrap();
+        tokio::fs::create_dir_all(sender.join(".versions/photos")).await.unwrap();
+        tokio::fs::create_dir_all(sender.join(INCOMING_DIR)).await.unwrap();
+        tokio::fs::create_dir_all(root.join("buddyB")).await.unwrap();
+        tokio::fs::write(root.join(".backup-buddies-id"), b"marker").await.unwrap();
+        tokio::fs::write(sender.join("a.txt"), vec![0u8; 10]).await.unwrap();
+        tokio::fs::write(sender.join("photos/b.jpg"), vec![0u8; 20]).await.unwrap();
+        tokio::fs::write(sender.join(".versions/photos/b.jpg.v1"), vec![0u8; 500]).await.unwrap();
+        tokio::fs::write(sender.join(INCOMING_DIR).join("partial"), vec![0u8; 700]).await.unwrap();
+
+        let usage = usage_from_disk(&root).await;
+        assert_eq!(usage.get("buddyA"), Some(&30));
+        assert_eq!(usage.get("buddyB"), Some(&0));
+        assert_eq!(usage.len(), 2);
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
 
     // Regression test for a deleted file disappearing from the dashboard's
     // file browser entirely (reported against a live setup: delete a file
