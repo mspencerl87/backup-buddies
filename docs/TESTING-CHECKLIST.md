@@ -1040,18 +1040,35 @@ other migration there).
       dedup set (`main.rs`) is now a shared `Arc<Mutex<HashSet<EndpointId>>>`
       instead of task-local, and "This Device" shows a live
       "Discovery (LAN): N peers" count alongside the existing log lines.
-  - Bigger lift:
+  - **Long term goals for client features** (parked 2026-10-04 — each
+    needs real architecture work, not just more dashboard plumbing;
+    revisit when there's appetite for that, not as a cosmetic pass):
     - Live streaming transfer rate (bytes/sec updating during an
       in-progress cycle, not just the after-the-fact rate computed from
-      a finished cycle's bytes_sent/duration_ms). Needs the backup loop
-      to report progress incrementally rather than only at cycle end —
-      similar shape to the restore-progress work already done, but for
-      the outbound/backup path.
+      a finished cycle's bytes_sent/duration_ms). Same *pattern* as the
+      restore-progress work already shipped (an `Arc<Mutex<Progress>>`
+      handle plus a separate poll endpoint), just not yet applied to the
+      outbound/backup path: `backup::run_backup_cycle` would need a
+      progress handle threaded in and updated per-file in its send loop
+      (mirroring `restore.rs`'s `ProgressHandle`/`RestoreProgress`), a
+      new `Arc<Mutex<HashMap<buddy, BackupProgress>>>` book alongside
+      `cycle_stats`/`reconcile_stats` in main.rs, a new
+      `GET /api/buddies/:id/backup-progress` route in dashboard.rs, and
+      a frontend poller matching `doRestore()`'s `onProgress` pattern.
+      The contained, lowest-risk one of the three below if this ever
+      gets picked back up.
     - Listener reachability checks — Syncthing actively verifies each
-      configured listen address is actually reachable from outside.
-      We have no equivalent concept; would need an active probe (self-
-      connect through the relay, or ask a buddy to connect back) rather
-      than just reporting the configured SYNC_PORT.
+      configured listen address is actually reachable from outside; we
+      have no equivalent, only the configured SYNC_PORT value with no
+      confirmation it's actually reachable. Needs a design decision
+      before any code: either a new wire-protocol message asking a buddy
+      to dial back and report the result (cheap, but only proves
+      reachability from that one buddy's network — protocol.rs has no
+      such message today), or new relay-side echo/probe infrastructure
+      at relay.filegarden.net (not just client code). Whichever is
+      chosen, the result needs a shared state slot and a dashboard card
+      — that part's easy; the real cost is the "how do we find out"
+      plumbing.
     - Multi-buddy "Shared With" — Syncthing's model is one folder shared
       with N devices; ours is 1:1 (one buddy relationship = one pledge,
       one manifest). Showing "shared with" as a list doesn't map onto
