@@ -953,7 +953,8 @@ device+inode, not path. Nothing is ever moved automatically.
 - [ ] Layout B for real: buddy files on a different mount/disk than
       config — Disk card and the buddy's "Their actual disk" probe report
       that disk's numbers, not the config disk's
-- [ ] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
+- [x] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
+      (confirmed 2026-10-04, see below)
 - [x] Client 0.3.1 (2026-10-04), from Spencer's testb screenshot: restoring
       from a buddy holding nothing of ours said "Restored 0 file(s) to
       /restored/<id>". Now says "Nothing to restore — this buddy isn't
@@ -990,9 +991,10 @@ device+inode, not path. Nothing is ever moved automatically.
       restore has finished. Reproduced in headless Chromium against the
       deployed 0.3.2 page (slow progress endpoint) — stuck forever — and
       confirmed fixed with the 0.3.3 page
-- [ ] Re-check on testa after pulling 0.3.3: restore result line reads
-      "Restored 1 file(s) to /home/sleblanc/bbdata/testa/restored/…" and
-      stays; button re-enables
+- [x] Confirmed live on testa with 0.3.3 (2026-10-04): result line read
+      "Restored 1 file(s) to /home/sleblanc/bbdata/testa/restored/<testb
+      id> — 199 B in 1.2s (165 B/s) · direct, 0ms" and stayed — host path,
+      persists across refreshes, no stuck progress
 - [ ] Note for a follow-up: everything the client creates is owned by root
       (container runs as root), so users need `sudo` to move/inspect their
       folders. Consider `PUID`/`PGID` support like linuxserver.io images
