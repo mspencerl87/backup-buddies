@@ -874,9 +874,17 @@ can change that.
    - [x] Reply-To confirmed live (2026-10-04): hitting Reply in Purelymail
          addressed the user, and the reply arrived in their Gmail inbox from
          support@filegarden.net, threaded as "Re: [Support] …". Support form
-         fully closed out. Note: a reply quotes the account-details block
-         back to the user by default — it's their own data, but trim the
-         quote when replying if you'd rather not send IDs back
+         fully closed out
+   - [x] Account-details block now sits below a standard `-- ` signature
+         delimiter (was a row of dashes), so Roundcube/Purelymail strips it
+         from the quote on reply instead of sending IDs back to the user.
+         Verified locally the delimiter survives encoding (`--=20` in the
+         quoted-printable body, i.e. exactly `-- `)
+   - [ ] Confirm live: reply to a new support email in Purelymail and check
+         the quote contains only the user's message. If it still includes
+         the details, Roundcube's "remove original signature when
+         replying" setting is off (Settings → Preferences → Composing
+         Messages)
    - [ ] Optional later: if volume grows, point `SUPPORT_EMAIL` at a
          helpdesk inbox (e.g. self-hosted FreeScout/Zammad) — no code change
          needed, the email format already carries everything

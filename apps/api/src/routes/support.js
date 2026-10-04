@@ -104,11 +104,17 @@ supportRouter.post('/support', requireAuth, async (req, res) => {
   const subjectLine = oneLine(subject || '', MAX_SUBJECT_LENGTH);
   const emailSubject = `[Support] ${categoryLabel}${subjectLine ? `: ${subjectLine}` : ''} (${account.email})`;
 
+  // The account details go below a standard signature delimiter ("-- ",
+  // dash dash space, on its own line). Roundcube — Purelymail's webmail —
+  // strips the quoted signature when replying, so the user gets back only
+  // their own message quoted, not the internal-looking details block.
+  // Thunderbird and most desktop clients do the same.
+  //
   // Plain text only: the message is user-written, so an HTML part would mean
   // escaping it carefully for no real benefit in a support inbox.
   const text =
     `${message.trim()}\n\n` +
-    `----------------------------------------\n` +
+    `-- \n` +
     `From:          ${account.email}${account.nickname ? ` (${account.nickname})` : ''}\n` +
     `Category:      ${categoryLabel}\n` +
     `Account ID:    ${account.id}\n` +
@@ -125,7 +131,7 @@ supportRouter.post('/support', requireAuth, async (req, res) => {
     `Active pairings: ${pairings.rows.length} (${pledgedGb.toFixed(0)} GB pledged)\n` +
     `Devices:\n${deviceLines}\n` +
     `Browser:       ${oneLine(String(req.get('user-agent') || 'unknown'), 200)}\n` +
-    `----------------------------------------\n` +
+    `\n` +
     `Reply to this email to answer ${account.email} directly. ` +
     `Look the account up by email on /admin.html.`;
 
