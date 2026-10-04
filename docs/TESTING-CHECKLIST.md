@@ -943,16 +943,22 @@ device+inode, not path. Nothing is ever moved automatically.
       `iroh_secret_key`, `usage.json`, `bandwidth.json` — no `received/`
       or `restored/`. testa's `hello.txt` landed encrypted (199 B) in
       `~/bbdata/testb/buddy-files/<testa node id>/hello.txt`
-- [ ] Upgrade path on a real old install (no longer testable on testa/
-      testb since they were wiped — testc is still on the old layout):
-      pull 0.3.0 with the old compose → unchanged behaviour; new compose +
-      old `.env` → "still in the old location" warning and keeps syncing;
-      then `mv data/received/* <new folder>/`, set
-      `BUDDY_FILES_DIR_HOST` → no warning, reconciliation clean, pledge
-      usage unchanged
-- [ ] Layout B for real: buddy files on a different mount/disk than
-      config — Disk card and the buddy's "Their actual disk" probe report
-      that disk's numbers, not the config disk's
+- [x] ~~Upgrade path on a real old install~~ — dropped (2026-10-04): no
+      old-layout devices remain (testa/testb redeployed fresh, testc retired
+      — account deleted, container stopped). The fallback logic was
+      exercised with the real binary against real folders (see above);
+      `install.sh --update` on image installs pulls only and never touches
+      the compose file (4eeb462), so old image installs simply stay on the
+      old layout, which keeps working
+- [ ] Layout B (low risk — same code path as layout A, just a different
+      filesystem): buddy files on a different mount/disk than config — Disk
+      card and the buddy's "Their actual disk" probe report that disk's
+      numbers, not the config disk's
+- [ ] Consider: guard against an unmounted data drive. If a mount point
+      isn't mounted when the container starts, Docker binds the empty
+      folder and buddy files get written to the OS disk, then hidden once
+      the drive mounts. A marker file in BUDDY_FILES_DIR checked at startup
+      (refuse to start with a clear error if missing) would catch it
 - [x] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
       (confirmed 2026-10-04, see below)
 - [x] Client 0.3.1 (2026-10-04), from Spencer's testb screenshot: restoring
@@ -995,9 +1001,11 @@ device+inode, not path. Nothing is ever moved automatically.
       "Restored 1 file(s) to /home/sleblanc/bbdata/testa/restored/<testb
       id> — 199 B in 1.2s (165 B/s) · direct, 0ms" and stayed — host path,
       persists across refreshes, no stuck progress
-- [ ] Note for a follow-up: everything the client creates is owned by root
-      (container runs as root), so users need `sudo` to move/inspect their
-      folders. Consider `PUID`/`PGID` support like linuxserver.io images
+- [ ] Before r/homelab launch: `PUID`/`PGID` support. The container runs as
+      root, so everything it creates is root-owned: restored files can't be
+      edited/deleted without `sudo`, and buddy files on an NFS share with
+      the default `root_squash` may not be writable at all. Run as the
+      user's own UID/GID instead (like linuxserver.io images)
 
 ## Housekeeping (not bugs)
 
