@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { pool } from '../db/pool.js';
 import { SESSION_COOKIE, requireAuth } from '../middleware/require-auth.js';
 import { sendVerificationEmail, verifyEmailToken } from '../lib/email-verification.js';
-import { resetPasswordWithToken } from '../lib/password-reset.js';
+import { requestPasswordReset, resetPasswordWithToken } from '../lib/password-reset.js';
 
 export const authRouter = Router();
 
@@ -297,25 +297,55 @@ authRouter.post('/auth/resend-verification', requireAuth, async (req, res) => {
 
 // --- Password reset ---
 
+// Self-service, from forgot-password.html. Always the same 200 and message,
+// whether or not the email belongs to an account (or is a Google-only
+// account, or hit a cooldown) — otherwise this form becomes a way to check
+// who's registered. The actual work runs in the background for the same
+// reason: awaiting the SMTP send would make "account exists" respond
+// measurably slower than "no such account".
+authRouter.post('/auth/forgot-password', (req, res) => {
+  const { email } = req.body ?? {};
+  if (typeof email !== 'string' || !email.trim()) {
+    return res.status(400).json({ error: 'email is required' });
+  }
+
+  requestPasswordReset(email).catch((err) => {
+    console.error('Password reset request failed:', err);
+  });
+
+  res.json({
+    ok: true,
+    message:
+      "If an account exists for that email, we've sent a link to reset its password. It expires in 24 hours.",
+  });
+});
+
 // Called from reset-password.html with the token out of the emailed link
-// (issued by an admin — see routes/admin.js and lib/password-reset.js).
-// No auth required, same reasoning as /auth/verify-email: the single-use,
-// expiring token is the credential. Success logs out every existing session
-// for the account, so they sign in fresh with the new password.
+// (issued self-service above, or by an admin — see routes/admin.js and
+// lib/password-reset.js). No auth required, same reasoning as
+// /auth/verify-email: the single-use, expiring token is the credential.
+// Success logs out every existing session for the account, so they sign in
+// fresh with the new password.
 authRouter.post('/auth/reset-password', async (req, res) => {
   const { token, password } = req.body ?? {};
   const result = await resetPasswordWithToken(token, password);
 
-  if (result === 'reset') return res.json({ ok: true });
+  if (result === 'reset') {
+    // Every session was just deleted, including any this browser had.
+    res.clearCookie(SESSION_COOKIE);
+    return res.json({ ok: true });
+  }
   if (result === 'weak_password') {
     return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
   if (result === 'expired') {
     return res
       .status(410)
-      .json({ error: 'That reset link has expired — contact support for a new one.' });
+      .json({ error: 'That reset link has expired. Request a new one from the "Forgot password?" page.' });
   }
-  return res.status(400).json({ error: 'That reset link is invalid or has already been used.' });
+  return res
+    .status(400)
+    .json({ error: 'That reset link is invalid or has already been used. Request a new one.' });
 });
 
 authRouter.post('/logout', requireAuth, async (req, res) => {

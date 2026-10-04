@@ -711,3 +711,30 @@ Password reset emails use the existing SMTP settings. Without SMTP, the
 admin UI shows the reset link to paste into a support reply instead.
 Admin actions are logged to the API container's stdout as
 `[admin] <admin email> <action> account=<id>`.
+
+## 20. Self-service password reset ("Forgot password?")
+
+Adds "Forgot password?" on the login page (`forgot-password.html` →
+emailed link → the same `reset-password.html` the admin button uses),
+backed by `POST /auth/forgot-password` and `requestPasswordReset` in
+`lib/password-reset.js`. Self-service and admin-issued links are the same
+kind of token: hashed, single-use, 24-hour expiry, and a new link
+invalidates any earlier one. A successful reset (either kind) now also
+marks the email verified and emails a "your password was changed" notice;
+device tokens are untouched, so running clients keep syncing.
+Self-service specifics: the response is identical whether or not the
+address is registered; a 60-second per-account cooldown plus a global cap
+of 20 emails/minute stop the form being used to flood inboxes; Google-only
+accounts get a "sign in with Google" email instead of a link (an admin can
+still issue one from the account-detail view).
+
+**No new migration.** It uses the columns from `013_password_reset.sql`
+(section 19). If that's already applied, there's nothing manual to do here
+— `apps/api/**`/`apps/web/**` are CI trigger paths, so pushing to `main`
+deploys it. If it isn't applied yet, apply it as in section 19; until then
+reset emails don't go out (the forgot-password page still shows its
+generic message and the error is logged), and nothing else is affected.
+
+Uses the existing `SMTP_*`/`MAIL_FROM`/`APP_URL` env vars. Optional:
+`SUPPORT_EMAIL` overrides the support address shown in reset emails
+(defaults to `support@filegarden.net`).

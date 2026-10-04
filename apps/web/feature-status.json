@@ -44,13 +44,17 @@
     {
       "title": "Low-disk protection",
       "description": "Your device refuses incoming files once its own disk runs low (a flat 2GB, or 5% of the disk, whichever's bigger), independent of pledge size — so a buddy's data can never fill your disk to nothing."
+    },
+    {
+      "title": "Password reset and account support",
+      "description": "Forgot your password? Use “Forgot password?” on the login page to get a reset link by email. For account, login, or billing questions, email support@filegarden.net from your account's email address. Resetting your website password never affects your backups: files are encrypted with the passphrase on your own device, which is separate from your account password. That also means nobody, including us, can recover that passphrase if it's lost, so keep it somewhere safe."
     }
   ],
   "limitations": [
     {
-      "title": "Password reset and account support",
+      "title": "In-app “Contact support” form",
       "status": "in_progress",
-      "description": "Self-service password reset, a dedicated support email, and an in-app “Contact support” form for account, login, and billing questions are being added. Resetting your website password will never affect your backups: files are encrypted with the passphrase on your own device, which is separate from your account password. That also means nobody, including us, can recover that passphrase if it's lost, so keep it somewhere safe."
+      "description": "A support form on your dashboard that sends your request along with your account details is on the way. Until then, email support@filegarden.net."
     },
     {
       "title": "Direct connections aren't guaranteed on every network",

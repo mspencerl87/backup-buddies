@@ -769,33 +769,63 @@ website account password. Flip side worth putting in the support FAQ:
 **we can never recover a lost `BACKUP_PASSPHRASE`**, and no support request
 can change that.
 
-1. **Self-service password reset** (none exists today; `routes/auth.js`
-   has no reset/forgot route and `login.html` has no link)
-   - [ ] Migration adding `password_reset_token_hash` /
-         `password_reset_sent_at` to `accounts` (same hash-only-in-DB
-         pattern as `007_email_verification.sql` / `devices.token_hash`)
-   - [ ] `POST /auth/forgot-password`: always returns the same generic
-         response whether or not the email exists (no account
-         enumeration), rate-limited per email and per IP, sends the link via
-         the existing `lib/mailer.js` `sendMail`
-   - [ ] `POST /auth/reset-password`: token is single-use, short expiry
-         (~1 hour), cleared on use; invalidates all existing sessions for
-         that account after a successful reset
-   - [ ] Google-only accounts (no password hash): the reset email says
-         "this account signs in with Google" instead of sending a reset link
-   - [ ] `forgot-password.html` + `reset-password.html` pages, and a
-         "Forgot password?" link on `login.html`
-   - [ ] Confirm live: request → email arrives → reset works → old
-         password rejected → old session logged out → reused/expired link
-         rejected
+1. **Self-service password reset — built 2026-10-04** (`forgot-password.html`,
+   `POST /auth/forgot-password`, link on `login.html`; `docs/DEPLOY.md`
+   §20). Merged onto the admin "Send password reset link" feature that
+   landed in parallel (`7da9305`, §19): one shared `lib/password-reset.js`,
+   one `reset-password.html`, one `POST /auth/reset-password`, one
+   migration `013`, so admin-issued and self-service links are the same
+   kind of token
+   - [x] Migration `013` adds `password_reset_token_hash` /
+         `password_reset_sent_at` (hash-only, same pattern as 007).
+         Applied cleanly after 001–012 on a scratch local Postgres 16
+   - [x] `POST /auth/forgot-password`: identical 200 + message whether or
+         not the email exists, and the DB lookup + SMTP send run in the
+         background so response time doesn't reveal it either (measured
+         ~1–2ms both ways locally). Limits: 60s per-account cooldown, plus
+         a global cap of 20 reset emails/minute across all accounts
+   - [x] `POST /auth/reset-password`: 24-hour expiry (shared with
+         admin-issued links, which may sit in a support reply for a
+         while), single use (the token-hash match in the `UPDATE` means
+         two simultaneous submits can't both win), 8-char minimum (matches signup), deletes every
+         website session for the account, marks the email verified (the
+         link proves ownership), and emails a "password was changed"
+         notice. Device tokens untouched, so clients keep syncing
+   - [x] Google-only accounts (no `password_hash`) get a "this account
+         signs in with Google" email instead of a reset link
+   - [x] `reset-password.html` strips the token from the address bar on
+         load and sets `referrer: no-referrer`, so the token doesn't linger
+         in history or leak via Referer
+   - [x] **Tested end to end locally (2026-10-04)** against the real API +
+         scratch Postgres + a local SMTP sink: request → email → reset
+         `200`; same link again `400`; short password `400` (token left
+         usable); expired link `410`; old session `401`; old password
+         `401`; new password `200`; second request inside 60s sent no
+         second email; Google-only account got the Google email;
+         password-changed notice sent
+   - [x] Re-tested after merging with the admin feature (same scenarios
+         as above, against the merged code)
+   - [ ] Apply migration `013` on production (`docs/DEPLOY.md` §19 — one
+         command, shared with the admin reset button; until then reset
+         emails don't go out, nothing else is affected)
+   - [ ] Confirm live on production with a throwaway account: the email
+         actually lands from Purelymail (and not in spam), the link points
+         at `app.filegarden.net`, the reset works, and the password-changed
+         notice arrives
+   - [ ] Per-IP rate limiting not done: the API has no `trust proxy`
+         setting and sits behind Caddy + Cloudflare, so `req.ip` isn't the
+         real client. Would need Caddy/Cloudflare's client-IP header
+         trusted correctly first. Low priority while the per-account
+         cooldown and global cap are in place
 2. **Recovery story for the encryption passphrase** — no code change
    needed (see above), docs only:
    - [ ] `setup.html` / `getting-started.html` tell users plainly to store
          `BACKUP_PASSPHRASE` somewhere safe (password manager), and that
          neither a password reset nor support can recover it
 3. **support@filegarden.net**
-   - [ ] Create it in Purelymail (alias forwarding to Spencer, or its own
-         mailbox)
+   - [x] Created in Purelymail by Spencer (2026-10-04)
+   - [x] Linked from `forgot-password.html` / `reset-password.html` (body
+         and footer) and from every reset-related email
    - [ ] Linked from `login.html`, the forgot/reset pages, the site
          footer, `status.html`, and the payment-failed email (a paused
          account is exactly who'll need it)

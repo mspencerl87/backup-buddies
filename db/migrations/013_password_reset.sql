@@ -1,5 +1,6 @@
 -- Password reset links, sent from the admin account-detail view
--- (POST /admin/accounts/:id/password-reset) and consumed by
+-- (POST /admin/accounts/:id/password-reset) or self-service from
+-- forgot-password.html (POST /auth/forgot-password), and consumed by
 -- apps/web/reset-password.html (POST /auth/reset-password).
 --
 -- Same pattern as email verification (migration 007): only the SHA-256 of
