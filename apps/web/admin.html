@@ -29,14 +29,11 @@
       <h2>All accounts</h2>
       <div class="admin-controls" id="accounts-controls" style="display:none">
         <input type="text" id="accounts-search" placeholder="Search by email or username…">
-        <select id="accounts-sort">
-          <option value="paused_desc">Paused longest first</option>
-          <option value="created_desc">Newest first</option>
-          <option value="created_asc">Oldest first</option>
-          <option value="email_asc">Email (A–Z)</option>
-          <option value="email_desc">Email (Z–A)</option>
-          <option value="buddies_desc">Most buddies</option>
-          <option value="devices_desc">Most devices</option>
+        <select id="accounts-plan-filter">
+          <option value="all">All plans</option>
+          <option value="admin">Admins</option>
+          <option value="paid">Paid</option>
+          <option value="free">Free</option>
         </select>
         <label class="muted" style="display:inline-flex; align-items:center; gap:0.35rem">
           <input type="checkbox" id="accounts-paused-only">
@@ -47,19 +44,20 @@
       <p id="accounts-empty" class="muted" style="display:none">No accounts yet.</p>
       <p class="muted" id="accounts-no-match" style="display:none">No accounts match that search.</p>
       <p class="error" id="accounts-error"></p>
-      <div class="admin-columns" id="accounts-columns" style="display:none">
-        <div class="admin-column">
-          <h2>Admins — <span class="count" id="admin-count">0</span></h2>
-          <div id="admin-accounts"></div>
-        </div>
-        <div class="admin-column">
-          <h2>Free — <span class="count" id="free-count">0</span></h2>
-          <div id="free-accounts"></div>
-        </div>
-        <div class="admin-column">
-          <h2>Paid — <span class="count" id="paid-count">0</span></h2>
-          <div id="paid-accounts"></div>
-        </div>
+      <div class="table-scroll" id="accounts-table-wrap" style="display:none">
+        <table class="sortable-table" id="accounts-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort-key="email">Account</th>
+              <th class="sortable" data-sort-key="plan">Plan</th>
+              <th class="sortable" data-sort-key="devices">Devices</th>
+              <th class="sortable" data-sort-key="buddies">Buddies</th>
+              <th class="sortable" data-sort-key="created">Joined</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="accounts-tbody"></tbody>
+        </table>
       </div>
 
       <div class="card" id="detail-card" style="display:none">
@@ -121,39 +119,33 @@
 
     let selfAccountId = null;
 
-    function buddyRowHtml(b) {
-      const statusClass = b.status === 'pending' ? ' pending' : '';
-      return `
-        <div class="buddy-row">
-          <span>${b.email}</span>
-          <span class="buddy-status${statusClass}">${formatBytes(Number(b.pledged_bytes))} pledged · ${b.status}</span>
-        </div>
-      `;
-    }
-
     // How long an account has been paused, in days — used both for the
-    // card badge and for sorting "paused longest" to the top, since that's
-    // the ordering that matters for deciding who to follow up with first
+    // badge and for the "paused longest first" grouping, since that's the
+    // ordering that matters for deciding who to follow up with first
     // (per the "manual for now" approach — see routes/admin.js).
     function pausedDays(a) {
       if (!a.relay_paused_at) return null;
       return Math.floor((Date.now() - new Date(a.relay_paused_at).getTime()) / 86400000);
     }
 
-    function accountCardHtml(a) {
+    // admin > paid > free — used both for the Plan column's text/badges and
+    // as the numeric rank sorting that column goes by.
+    function planRank(a) {
+      if (a.is_admin) return 2;
+      return a.has_subscription ? 1 : 0;
+    }
+
+    function accountRowHtml(a) {
+      // is_admin (ADMIN_EMAILS allowlist, from routes/admin.js) gets its own
+      // badge on top of the free/paid one — it's a separate axis, not a
+      // replacement, since an admin account can also have a real
+      // subscription.
+      const adminBadge = a.is_admin ? '<span class="tier-badge admin">admin</span>' : '';
       // has_subscription (stripe_subscription_id IS NOT NULL, from
       // routes/admin.js) is the real signal — accounts.tier is set once at
       // signup and nothing ever updates it afterward, so it can't be used
       // to tell a paying account apart from a free one.
       const isPaid = a.has_subscription;
-      const buddiesHtml = a.buddies.length
-        ? a.buddies.map(buddyRowHtml).join('')
-        : '<div class="muted" style="font-size:0.85rem;">No buddies yet.</div>';
-      // is_admin (ADMIN_EMAILS allowlist, from routes/admin.js) gets its
-      // own badge on top of the free/paid one — it's a separate axis, not
-      // a replacement, since an admin account can also have a real
-      // subscription.
-      const adminBadge = a.is_admin ? '<span class="tier-badge admin">admin</span>' : '';
 
       // relay_status === 'paused' today only ever means a failed payment
       // that exhausted Stripe's retries (stripe-webhook.js) — surfaced
@@ -166,56 +158,78 @@
         ? `<span class="tier-badge paused">paused${days !== null ? ` ${days}d` : ''}</span>`
         : '';
 
+      const rowClass = a.relay_status !== 'active' ? ' class="account-row-paused"' : '';
+
       return `
-        <div class="account-card${a.relay_status !== 'active' ? ' account-card-paused' : ''}">
-          <div class="row">
-            <strong>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</strong>
-            <span style="display:inline-flex; gap:0.35rem">${adminBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span>
-          </div>
-          <p class="muted" style="margin:0.3rem 0 0;">
-            ${a.device_count} device${Number(a.device_count) === 1 ? '' : 's'} · joined ${formatDate(a.created_at)}
-          </p>
-          <div class="buddies">
-            <div class="buddies-label">Buddies (${a.buddies.length})</div>
-            ${buddiesHtml}
-          </div>
-          <div class="actions">
+        <tr${rowClass}>
+          <td>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</td>
+          <td><span style="display:inline-flex; gap:0.35rem; flex-wrap:wrap">${adminBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span></td>
+          <td>${a.device_count}</td>
+          <td>${a.buddies.length}</td>
+          <td>${formatDate(a.created_at)}</td>
+          <td>
             <a href="#" class="view-account-link" data-id="${a.id}">View</a>
             <a href="#" class="delete-account-link" data-id="${a.id}" data-email="${a.email}">Delete</a>
-          </div>
-        </div>
+          </td>
+        </tr>
       `;
     }
 
-    // The full list from the last fetch — search and sort both work
+    // The full list from the last fetch — search, filter, and sort all work
     // against this in memory rather than re-fetching, so typing in the
-    // search box or switching the sort order is instant. Fine at the
+    // search box or clicking a column header is instant. Fine at the
     // account counts this is actually built for; if that ever grows into
     // the tens of thousands, this is the spot that would need to become a
     // server-side search/paginated query instead.
     let allAccounts = [];
 
-    const SORTERS = {
-      // Paused accounts first, oldest pause first within those (the ones
-      // that have been sitting the longest are the ones most overdue for
-      // a look); non-paused accounts keep a stable newest-first order
-      // after them rather than being left in whatever order the API sent.
-      paused_desc: (a, b) => {
+    // Default sort: paused accounts first (oldest pause first within
+    // those), then everyone else newest-first — same ordering the old
+    // card layout's "paused longest first" option gave, now the starting
+    // point rather than something to pick from a dropdown.
+    let currentSort = { key: 'paused', dir: 'desc' };
+
+    // Per-column comparator, ascending. Column click handlers flip the
+    // direction and reverse() the result when dir is 'desc'.
+    const COMPARATORS = {
+      email: (a, b) => a.email.localeCompare(b.email),
+      plan: (a, b) => planRank(a) - planRank(b),
+      devices: (a, b) => Number(a.device_count) - Number(b.device_count),
+      buddies: (a, b) => a.buddies.length - b.buddies.length,
+      created: (a, b) => new Date(a.created_at) - new Date(b.created_at),
+      // Not a real column — the initial/default ordering described above.
+      // Clicking a header never re-selects this; it's only reachable as
+      // the starting state.
+      paused: (a, b) => {
         const aPaused = a.relay_status !== 'active';
         const bPaused = b.relay_status !== 'active';
-        if (aPaused !== bPaused) return aPaused ? -1 : 1;
+        if (aPaused !== bPaused) return aPaused ? 1 : -1;
         if (aPaused && bPaused) {
-          return new Date(a.relay_paused_at) - new Date(b.relay_paused_at);
+          return new Date(b.relay_paused_at) - new Date(a.relay_paused_at);
         }
-        return new Date(b.created_at) - new Date(a.created_at);
+        return new Date(a.created_at) - new Date(b.created_at);
       },
-      created_desc: (a, b) => new Date(b.created_at) - new Date(a.created_at),
-      created_asc: (a, b) => new Date(a.created_at) - new Date(b.created_at),
-      email_asc: (a, b) => a.email.localeCompare(b.email),
-      email_desc: (a, b) => b.email.localeCompare(a.email),
-      buddies_desc: (a, b) => b.buddies.length - a.buddies.length,
-      devices_desc: (a, b) => Number(b.device_count) - Number(a.device_count),
     };
+
+    // Sensible default direction the first time a column is clicked — text
+    // ascending (A-Z), everything else descending (highest/newest first).
+    const DEFAULT_DIR = { email: 'asc', plan: 'desc', devices: 'desc', buddies: 'desc', created: 'desc' };
+
+    function sortAccounts(list) {
+      const comparator = COMPARATORS[currentSort.key] || COMPARATORS.paused;
+      const sorted = [...list].sort(comparator);
+      if (currentSort.dir === 'desc') sorted.reverse();
+      return sorted;
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('#accounts-table th.sortable').forEach((th) => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sortKey === currentSort.key) {
+          th.classList.add(currentSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+      });
+    }
 
     function matchesSearch(a, query) {
       if (!query) return true;
@@ -223,56 +237,50 @@
       return haystack.includes(query);
     }
 
+    function matchesPlan(a, plan) {
+      if (plan === 'all') return true;
+      if (plan === 'admin') return a.is_admin;
+      if (plan === 'paid') return !a.is_admin && a.has_subscription;
+      return !a.is_admin && !a.has_subscription; // 'free'
+    }
+
     function renderAccounts() {
-      const columns = document.getElementById('accounts-columns');
+      const tableWrap = document.getElementById('accounts-table-wrap');
+      const tbody = document.getElementById('accounts-tbody');
       const noMatch = document.getElementById('accounts-no-match');
       const matchedEl = document.getElementById('accounts-matched');
       const query = document.getElementById('accounts-search').value.trim().toLowerCase();
-      const sortKey = document.getElementById('accounts-sort').value;
-      const sorter = SORTERS[sortKey] || SORTERS.created_desc;
+      const plan = document.getElementById('accounts-plan-filter').value;
       const pausedOnly = document.getElementById('accounts-paused-only').checked;
 
-      const matched = allAccounts
-        .filter((a) => matchesSearch(a, query))
-        .filter((a) => !pausedOnly || a.relay_status !== 'active')
-        .sort(sorter);
+      const matched = sortAccounts(
+        allAccounts
+          .filter((a) => matchesSearch(a, query))
+          .filter((a) => matchesPlan(a, plan))
+          .filter((a) => !pausedOnly || a.relay_status !== 'active'),
+      );
       matchedEl.textContent =
-        query || pausedOnly ? `${matched.length} of ${allAccounts.length} account(s) match` : '';
+        query || pausedOnly || plan !== 'all' ? `${matched.length} of ${allAccounts.length} account(s) match` : '';
+      updateSortIndicators();
 
       if (matched.length === 0) {
-        columns.style.display = 'none';
+        tableWrap.style.display = 'none';
         noMatch.style.display = 'block';
         return;
       }
-      columns.style.display = 'flex';
+      tableWrap.style.display = 'block';
       noMatch.style.display = 'none';
 
-      // Admin / free / paid, not a height-balanced split — see the
-      // .admin-columns CSS comment for why this differs from the
-      // dashboard's masonry layout. Sort order applies within each column.
-      // Admins get their own column regardless of subscription status —
-      // pulled out first so one never also shows up under free/paid too.
-      // Split on has_subscription, not tier — see accountCardHtml's
-      // comment on why tier can't be trusted for this.
-      const admins = matched.filter((a) => a.is_admin);
-      const free = matched.filter((a) => !a.is_admin && !a.has_subscription);
-      const paid = matched.filter((a) => !a.is_admin && a.has_subscription);
+      tbody.innerHTML = matched.map(accountRowHtml).join('');
 
-      document.getElementById('admin-count').textContent = admins.length;
-      document.getElementById('free-count').textContent = free.length;
-      document.getElementById('paid-count').textContent = paid.length;
-      document.getElementById('admin-accounts').innerHTML = admins.map(accountCardHtml).join('');
-      document.getElementById('free-accounts').innerHTML = free.map(accountCardHtml).join('');
-      document.getElementById('paid-accounts').innerHTML = paid.map(accountCardHtml).join('');
-
-      columns.querySelectorAll('.view-account-link').forEach((link) => {
+      tbody.querySelectorAll('.view-account-link').forEach((link) => {
         link.addEventListener('click', (e) => {
           e.preventDefault();
           loadAccountDetail(link.dataset.id);
         });
       });
 
-      columns.querySelectorAll('.delete-account-link').forEach((link) => {
+      tbody.querySelectorAll('.delete-account-link').forEach((link) => {
         link.addEventListener('click', async (e) => {
           e.preventDefault();
           if (link.dataset.id === selfAccountId) {
@@ -331,7 +339,7 @@
 
     async function loadAccounts() {
       const controls = document.getElementById('accounts-controls');
-      const columns = document.getElementById('accounts-columns');
+      const tableWrap = document.getElementById('accounts-table-wrap');
       const empty = document.getElementById('accounts-empty');
       const noMatch = document.getElementById('accounts-no-match');
       const errorEl = document.getElementById('accounts-error');
@@ -354,7 +362,7 @@
 
       if (allAccounts.length === 0) {
         controls.style.display = 'none';
-        columns.style.display = 'none';
+        tableWrap.style.display = 'none';
         noMatch.style.display = 'none';
         empty.style.display = 'block';
         return;
@@ -366,8 +374,20 @@
     }
 
     document.getElementById('accounts-search').addEventListener('input', renderAccounts);
-    document.getElementById('accounts-sort').addEventListener('change', renderAccounts);
+    document.getElementById('accounts-plan-filter').addEventListener('change', renderAccounts);
     document.getElementById('accounts-paused-only').addEventListener('change', renderAccounts);
+
+    document.querySelectorAll('#accounts-table th.sortable').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.sortKey;
+        if (currentSort.key === key) {
+          currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          currentSort = { key, dir: DEFAULT_DIR[key] || 'asc' };
+        }
+        renderAccounts();
+      });
+    });
 
     async function loadAccountDetail(accountId) {
       const card = document.getElementById('detail-card');
@@ -394,7 +414,7 @@
       const methods = [];
       if (account.has_password) methods.push('password');
       if (account.has_google) methods.push('Google');
-      // stripe_subscription_id presence (not tier — see accountCardHtml's
+      // stripe_subscription_id presence (not tier — see accountRowHtml's
       // comment) is what actually reflects whether this account is paying.
       const planLabel = account.stripe_subscription_id ? 'subscribed' : 'free';
       const relayLabel = account.relay_status === 'active'

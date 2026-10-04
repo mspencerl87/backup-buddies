@@ -358,9 +358,6 @@ footer a {
   }
 }
 
-/* Admin accounts: two genuinely separate columns (free vs. paid), not a
-   height-balanced masonry split like .dashboard-grid above — which column
-   an account lands in is decided by its tier, not by what fits where. */
 .admin-main {
   max-width: 1120px;
 }
@@ -390,57 +387,52 @@ footer a {
   font-size: 0.82rem;
 }
 
-.admin-columns {
-  display: flex;
-  gap: 1.25rem;
-  align-items: flex-start;
+/* Account list: a single sortable table rather than a card-per-account
+   layout, so it stays usable once there are thousands of accounts. See
+   th.sortable / .table-scroll below. */
+.table-scroll {
+  overflow-x: auto;
 }
 
-.admin-column {
-  flex: 1;
-  min-width: 0;
+#accounts-table {
+  min-width: 720px;
 }
 
-.admin-column h2 {
-  font-size: 1rem;
-  margin: 0 0 1rem;
-  color: var(--text-muted);
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
 }
 
-.admin-column h2 .count {
+th.sortable:hover {
   color: var(--text);
-  font-weight: 700;
 }
 
-@media (max-width: 860px) {
-  .admin-columns {
-    flex-direction: column;
-  }
+th.sortable::after {
+  content: "";
+  display: inline-block;
+  width: 0.9em;
+  margin-left: 0.2rem;
+  opacity: 0.5;
 }
 
-.account-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1rem 1.25rem;
-  margin-bottom: 1rem;
-  transition: border-color 0.2s var(--ease);
+th.sortable.sort-asc::after {
+  content: "▲";
+  opacity: 1;
 }
 
-.account-card:hover {
-  border-color: #394055;
+th.sortable.sort-desc::after {
+  content: "▼";
+  opacity: 1;
 }
 
-.account-card .row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+.account-row-paused {
+  background-color: rgba(244, 163, 94, 0.06);
 }
 
-.account-card .row strong {
-  font-size: 0.98rem;
+#accounts-tbody a.delete-account-link {
+  color: var(--danger);
+  margin-left: 0.75rem;
 }
 
 .tier-badge {
@@ -468,52 +460,6 @@ footer a {
   background: rgba(244, 163, 94, 0.15);
   color: #f4a35e;
   box-shadow: 0 0 0 1px rgba(244, 163, 94, 0.3) inset;
-}
-
-.account-card-paused {
-  border-color: rgba(244, 163, 94, 0.4);
-}
-
-.account-card .buddies {
-  margin-top: 0.7rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
-}
-
-.account-card .buddies-label {
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  margin-bottom: 0.3rem;
-}
-
-.buddy-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  font-size: 0.85rem;
-  padding: 0.15rem 0;
-}
-
-.buddy-row .buddy-status {
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.buddy-row .buddy-status.pending {
-  color: #e5a443;
-}
-
-.account-card .actions {
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--border);
-  display: flex;
-  gap: 1rem;
-  font-size: 0.85rem;
-}
-
-.account-card .actions a.delete-account-link {
-  color: var(--danger);
 }
 
 .marketplace-tier {
