@@ -10,6 +10,7 @@ mod crypto;
 mod e2e_tests;
 mod index;
 mod restore;
+mod update_check;
 
 use std::{
     path::{Path, PathBuf},
@@ -715,6 +716,20 @@ async fn main() -> Result<()> {
     // "This Device" reads as something recognizable rather than a token.
     let self_label: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
+    // Newest client version the server advertises — see update_check.rs.
+    // Checked in the background; the dashboard compares it to this build's
+    // own version. UPDATE_CHECK_URL overrides where to look ("off" disables
+    // the check entirely); by default it's derived from API_URL.
+    let latest_version: update_check::LatestVersion = Arc::new(Mutex::new(None));
+    let update_url = match std::env::var("UPDATE_CHECK_URL").ok().map(|s| s.trim().to_string()) {
+        Some(s) if s.eq_ignore_ascii_case("off") => None,
+        Some(s) if !s.is_empty() => Some(s),
+        _ => update_check::default_check_url(&config.api_url),
+    };
+    if let Some(url) = update_url {
+        tokio::spawn(update_check::run(http.clone(), url, latest_version.clone()));
+    }
+
     let dashboard_task = {
         let endpoint = endpoint.clone();
         let node_id_str = endpoint_id.to_string();
@@ -731,6 +746,7 @@ async fn main() -> Result<()> {
         let cycle_progress = cycle_progress.clone();
         let self_label = self_label.clone();
         let mdns_peers = mdns_peers.clone();
+        let latest_version = latest_version.clone();
         let relay_url = config.relay_url.clone();
         let passphrase = config.passphrase.clone();
         let stale_after_secs = config.stale_after_secs;
@@ -750,6 +766,7 @@ async fn main() -> Result<()> {
                 cycle_progress,
                 self_label,
                 mdns_peers,
+                latest_version,
                 config.scan_interval_secs,
                 endpoint,
                 relay_url,

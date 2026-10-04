@@ -163,6 +163,15 @@ and the web dashboard compares it to the version in `apps/client/Cargo.toml`
 that reports no version (anything before 0.2.0), gets an "update available"
 badge with the command above.
 
+Since 0.6.0 the client's own local dashboard does the same check: every 6
+hours it reads that same `/client/Cargo.toml` (the `app.` sibling of
+`API_URL`'s `api.` host, or `UPDATE_CHECK_URL`; `off` disables it) and the
+"This Device" card shows "Up to date" or "Update available: x.y.z" with the
+update command. If the check can't complete (offline), nothing is shown
+rather than a false "up to date". It deliberately doesn't use GitHub
+releases: the source repo is private, and an `install.sh` build has no
+`.git` to read a commit from, whereas every install knows its own version.
+
 **So: bump `version` in `Cargo.toml` whenever you ship a client change users
 should get**, and update `Cargo.lock` in the same commit. Running
 `cargo build` once does that, or edit the `backup-buddies-client` entry by

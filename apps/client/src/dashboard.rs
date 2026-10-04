@@ -175,6 +175,9 @@ struct AppState {
     // main.rs's mdns_peers for where it's maintained. A live count, not a
     // one-time "ever seen" log — Syncthing-style discovery visibility.
     mdns_peers: Arc<Mutex<HashSet<EndpointId>>>,
+    // Newest client version the server advertises (see update_check.rs);
+    // None until a check has succeeded, or if checking is off.
+    latest_version: crate::update_check::LatestVersion,
     // How often the outbound loop polls/backs up — see main.rs's
     // BACKUP_CYCLE_INTERVAL_SECS. Not configurable yet, just surfaced so
     // the dashboard shows the real value instead of a hardcoded guess.
@@ -265,6 +268,12 @@ struct StatusResponse {
     // dashboard can tell at a glance whether this device has restarted
     // recently and which build it's running.
     version: &'static str,
+    // Newest version the server advertises, and whether this build is older
+    // than it. latest_version is None when the check hasn't succeeded (yet,
+    // or ever — offline, or turned off), which the UI must show as "unknown",
+    // not "up to date".
+    latest_version: Option<String>,
+    update_available: bool,
     uptime_secs: u64,
     // How many buddies are visible on the local network via mDNS right
     // now, and the fixed interval (seconds) the outbound loop polls/backs
@@ -353,6 +362,7 @@ pub async fn run(
     cycle_progress: crate::backup::CycleProgressBook,
     self_label: Arc<Mutex<Option<String>>>,
     mdns_peers: Arc<Mutex<HashSet<EndpointId>>>,
+    latest_version: crate::update_check::LatestVersion,
     cycle_interval_secs: u64,
     endpoint: Endpoint,
     relay_url: RelayUrl,
@@ -373,6 +383,7 @@ pub async fn run(
         cycle_progress,
         self_label,
         mdns_peers,
+        latest_version,
         cycle_interval_secs,
         endpoint,
         relay_url,
@@ -505,6 +516,10 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     };
 
     let label = state.self_label.lock().unwrap().clone();
+    let latest_version = state.latest_version.lock().unwrap().clone();
+    let update_available = latest_version
+        .as_deref()
+        .is_some_and(|latest| crate::update_check::is_older(env!("CARGO_PKG_VERSION"), latest));
 
     Json(StatusResponse {
         node_id: state.node_id.clone(),
@@ -514,6 +529,8 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         buddy_files_dir: state.buddy_files_dir.display().to_string(),
         restore_dir: state.restore_dir_display.clone(),
         version: env!("CARGO_PKG_VERSION"),
+        latest_version,
+        update_available,
         uptime_secs: state.started_at.elapsed().as_secs(),
         mdns_peers_visible: state.mdns_peers.lock().unwrap().len(),
         cycle_interval_secs: state.cycle_interval_secs,
@@ -832,6 +849,8 @@ const INDEX_HTML: &str = r#"<!doctype html>
   .pill-ok { background: rgba(76,175,125,0.15); color: var(--ok); }
   .pill-err { background: rgba(255,107,107,0.15); color: var(--danger); }
   .pill-pending { background: rgba(148,153,166,0.15); color: var(--text-muted); }
+  .pill-warn { background: rgba(240,180,60,0.18); color: #f0b43c; }
+  .update-cmd { display: block; margin-top: 0.35rem; font-size: 0.72rem; user-select: all; word-break: break-all; }
   .muted { color: var(--text-muted); font-size: 0.85rem; }
   .bar-track { background: #11141a; border-radius: 6px; height: 6px; overflow: hidden; margin-top: 0.4rem; }
   .bar-fill { background: var(--accent-grad); height: 100%; transition: width 0.3s var(--ease); }
@@ -932,6 +951,10 @@ const INDEX_HTML: &str = r#"<!doctype html>
       <div class="stat">
         <div class="label">Version</div>
         <div class="value" id="device-version">…</div>
+        <div id="device-update" style="display:none; margin-top:0.3rem;">
+          <span class="pill" id="device-update-pill"></span>
+          <code class="update-cmd muted" id="device-update-cmd" style="display:none;">curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code>
+        </div>
       </div>
       <div class="stat">
         <div class="label">Uptime</div>
@@ -1959,6 +1982,26 @@ async function refresh() {
   document.getElementById("backup-dir").textContent = data.backup_dir || "(nothing — receive-only)";
 
   document.getElementById("device-version").textContent = data.version;
+  // Update verdict — only shown once a check has actually succeeded. A
+  // missing latest_version means "couldn't check" (offline, or checking is
+  // off), which must not read as "up to date".
+  const updateBox = document.getElementById("device-update");
+  const updatePill = document.getElementById("device-update-pill");
+  const updateCmd = document.getElementById("device-update-cmd");
+  if (data.latest_version) {
+    updateBox.style.display = "";
+    if (data.update_available) {
+      updatePill.className = "pill pill-warn";
+      updatePill.textContent = "Update available: " + data.latest_version;
+      updateCmd.style.display = "";
+    } else {
+      updatePill.className = "pill pill-ok";
+      updatePill.textContent = "Up to date";
+      updateCmd.style.display = "none";
+    }
+  } else {
+    updateBox.style.display = "none";
+  }
   document.getElementById("device-uptime").textContent = fmtUptime(data.uptime_secs);
   document.getElementById("device-mdns-peers").textContent =
     data.mdns_peers_visible + (data.mdns_peers_visible === 1 ? " peer" : " peers");
