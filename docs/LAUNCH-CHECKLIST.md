@@ -9,34 +9,25 @@ Last reviewed: 2026-10-04.
 
 ## Must fix before launch
 
-- [ ] **Large folders.** Found 2026-10-04 by reading `apps/client/src/backup.rs`:
-  - Every ~30s cycle reads *every* file in `BACKUP_DIR` fully into memory to
-    hash it (`hash_file` → `tokio::fs::read`), even if nothing changed. With
-    a few TB the cycle can't finish in 30s and the disk is busy constantly.
-  - Sending reads and encrypts each changed file entirely in memory
-    (`put_one_file`: `tokio::fs::read` + `age::encrypt`), so a 20 GB file
-    needs 20+ GB of RAM to hash and more to send.
-  - The receiver rejects any single file over 5 GB (`MAX_FILE_BYTES` in
-    `receive.rs`) — ISOs, VM disks and videos are exactly what this
-    audience backs up.
+- [x] **Large folders — done in client 0.5.0 (2026-10-04).** Fixed:
+  every cycle re-read and hashed every file; sending held each whole file
+  in RAM (twice); 5 GB per-file cap; JSON manifest rewritten in full after
+  every file. Two more blockers found while doing it, also fixed:
+  - **~1.5 s of CPU per file just to encrypt** (age's passphrase mode runs
+    scrypt per file): 20,000 photos ≈ 8 hours, and the same again to
+    restore. Now scrypt runs once at startup to derive an X25519 key.
+  - **File list broke above ~10,000 files** (one message capped at 1 MB),
+    which broke reconciliation, restore and Browse files. Now chunked.
 
-  Also: the per-buddy JSON manifest is loaded whole into RAM and rewritten
-  in full after every file sent — with a million files that's a 100+ MB
-  file rewritten a million times.
-
-  Plan (agreed 2026-10-04), using libraries rather than new machinery:
-  1. SQLite index (`rusqlite`, bundled) in the config folder replacing the
-     JSON manifests — size, modified time, hash per file; existing installs
-     migrated automatically on first start.
-  2. Re-read a file only when its size or modified time changed; otherwise
-     a cycle is a metadata-only listing.
-  3. Stream hash → encrypt → send → receive in small chunks (age's
-     streaming encryptor/decryptor, already a dependency), so memory stays
-     flat at any file size; raise the 5 GB per-file cap (~100 GB) or remove
-     it.
-  4. Configurable scan interval (keep ~30s default for small folders).
-
-  Test: two 10 GB files on testa/testb, watching memory and cycle time.
+  Now: SQLite index (`rusqlite`), re-read only on size/mtime change,
+  streaming everywhere (hash, encrypt, upload, store, download, decrypt),
+  1 TB per-file cap, `SCAN_INTERVAL_SECS`, chunked file list, and old
+  (≤0.4) buddies keep working via a fallback. Tested end to end with two
+  real endpoints: a 6 GB file on a 7 GB-RAM box (peak ~263 MB; unchanged
+  cycle 0 ms; restore byte-identical), and 20,000 files (first backup
+  41 s, unchanged cycle 0.14 s, restore 23 s).
+  - [ ] Confirm live on testa/testb after `docker compose pull && up -d`
+        (steps in TESTING-CHECKLIST.md, "Client 0.5.0").
 
 ## Should do (quick, ~1 hour total)
 
@@ -81,6 +72,18 @@ Last reviewed: 2026-10-04.
       inotify/FSEvents) on top of the periodic scan, so new files go out in
       seconds without frequent full scans. Doesn't work reliably on NFS/SMB
       mounts, so the periodic scan stays as the fallback.
+- [ ] **Per-account salt for the encryption key.** 0.5.0 derives the file
+      key from the passphrase with a fixed salt, so "passphrase alone
+      restores everything" keeps working. Trade-off: an attacker holding
+      ciphertext can attack weak passphrases across all users at once.
+      Hardening: a random per-account salt (e.g. stored with the account
+      and on each buddy), keeping passphrase-only recovery.
+- [ ] **Files encrypted before 0.5.0 restore at the old speed** (~1.5 s
+      each — scrypt per file). Fine for now; optionally re-encrypt them in
+      the background later.
+- [ ] **File lists are built whole in memory** on both sides (chunked on
+      the wire). Fine to roughly a million files; past that, page through
+      the index instead.
 - [ ] **Exclude patterns.** No way to skip files/folders today (listed under
       "intentional limits" in TESTING-CHECKLIST.md). The `ignore` crate
       (ripgrep's walker) gives `.gitignore`-style excludes and a faster,

@@ -17,7 +17,6 @@ use iroh::{Endpoint, EndpointId, RelayUrl};
 use serde::{Deserialize, Serialize};
 
 use crate::bandwidth::{BandwidthBook, BandwidthTotals};
-use crate::manifest::Manifest;
 use crate::netinfo::ConnectionQuality;
 use crate::protocol::ListEntry;
 use crate::receive::{self, PledgeBook};
@@ -447,12 +446,9 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         let cycle = cycle_snapshot.get(&node_id).cloned();
         let last_reconcile = reconcile_snapshot.get(&node_id).cloned();
 
-        let manifest = Manifest::load(&state.data_dir, &node_id).await;
-        let sent_files = manifest.entries.len();
-        // ciphertext_size, not size (plaintext) — comparable to
-        // received_total_bytes below, which is also a ciphertext size (the
-        // buddy's own received/ files on disk are the encrypted bytes).
-        let sent_bytes: u64 = manifest.entries.values().map(|e| e.ciphertext_size).sum();
+        // Encrypted bytes (comparable to the buddy's own received totals,
+        // which are ciphertext too), straight from the index.
+        let (sent_files, sent_bytes) = crate::index::get().sent_summary(&node_id).unwrap_or((0, 0));
 
         let sender_dir = state.buddy_files_dir.join(&node_id);
         let received = receive::list_sender_files(&sender_dir).await;

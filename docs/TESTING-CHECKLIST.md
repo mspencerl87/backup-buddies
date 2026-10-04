@@ -52,10 +52,10 @@ are virtually always on two different networks.
       testc result above, but worth a clean confirmation once the direct
       case above is also confirmed, so both ends of the behavior are on
       record together
-- [ ] IPv6 bind is marked optional (`set_is_required(false)`) — confirm
-      a container with no IPv6 available still starts cleanly (this is
-      the whole reason that override exists; untested against a real
-      no-IPv6 host)
+- [x] IPv6 bind is marked optional (`set_is_required(false)`) — confirmed
+      2026-10-04 on a host with no IPv6 at all (the sandbox used for the
+      0.5.0 tests): logged "ignoring non required bind failure" for `[::]`
+      and started normally
 
 **Why relay, and is that fixable? (2026-10-03)** Spencer asked whether we
 could avoid the port-forwarding requirement entirely — e.g. some
@@ -1017,6 +1017,66 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.5.0: large folders and large files (2026-10-04)
+
+Launch blocker from docs/LAUNCH-CHECKLIST.md. What changed (details in the
+client README, "Large folders and large files"):
+
+- SQLite index (`DATA_DIR/index.sqlite`, `src/index.rs`) replaces the
+  per-buddy JSON manifests (imported on first start, renamed
+  `*.json.migrated`). Hash cache keyed by path + size + mtime, so unchanged
+  files are never re-read.
+- Streaming hash / encrypt / upload / store / download / decrypt
+  (`src/crypto.rs`), bounded memory; 1 TB per-file cap (was 5 GB).
+  Uploads stage in `<buddy>/.incoming/`, moved into place after the hash
+  checks out; restores write a temp file, renamed after authentication.
+- Encryption key derived once from the passphrase (scrypt → X25519)
+  instead of scrypt per file (~1.5 s each). Old files still decrypt.
+- New requests: `Hello` (protocol version), `PutStream` (hash after the
+  bytes), `ListStream` (file list in chunks of 5,000 — the single-frame
+  list broke above ~10,000 files). Same ALPN as before: a new ALPN made
+  connections to old clients hang ~30 s instead of failing (found in
+  testing). Old buddies: uploads fall back to the old Put for files
+  ≤512 MB; bigger ones wait with "your buddy's client is out of date".
+- `SCAN_INTERVAL_SECS` (default 30, min 5); stale threshold defaults to
+  max(600 s, 3× interval).
+
+Tested 2026-10-04:
+
+- [x] Unit tests: announced ciphertext size equals bytes sent at every
+      chunk boundary (repeated — age's header length varies between
+      encryptions, found in testing, so it's measured per file); round
+      trip; old scrypt-format files still decrypt; file shrinking
+      mid-send refused; corrupt data leaves no partial file; same
+      passphrase → same key; JSON manifest import (once) + index ops
+- [x] End to end (`src/e2e_tests.rs`, two real iroh endpoints on
+      localhost, real send/receive/reconcile/restore code): first sync of
+      awkward sizes (0 B, 64 KiB ±1, nested, spaces in names); unchanged
+      cycle sends nothing and doesn't connect; touched-but-identical file
+      not re-sent; edit + delete mirrored; reconciliation clean; full
+      restore byte-identical; previous version restorable; an old-format
+      Put from an old client still stored; sending to an old client falls
+      back in 0.1 s and the files decrypt
+- [x] 6 GB file on a 7 GB-RAM machine (`BB_E2E_BIG_MB=6144`): first cycle
+      101 s, peak RSS 263 MB (≈ the one-time 256 MB key derivation);
+      unchanged cycle 0 ms; restore 32 s, SHA-256 identical; to an old
+      buddy it's held back with the "out of date" reason
+- [x] 20,000 small files (`BB_E2E_MANY=20000`): first backup 41 s (was
+      ~8 h), unchanged cycle 0.14 s, restore 23 s; reconciliation works
+      (failed before the chunked list)
+- [x] Real release binary startup: key derivation + index ≈ 0.8 s; an
+      existing JSON manifest imported and renamed; leftover `.incoming`
+      upload cleared, real files kept; SCAN_INTERVAL_SECS=2 rejected
+- [ ] Live on testa/testb: `docker compose pull && docker compose up -d`
+      on both → logs show "imported old manifest into the index" (testa),
+      no files re-sent (card stays at its file count, no new "backup
+      cycle complete" with sends); `hello.txt`/`hello-b.txt` restore
+- [ ] Live big file: `head -c 3G /dev/urandom > ~/bbdata/testa/my-files/big.bin`
+      → arrives on testb's NFS share; watch `docker stats` memory stay
+      low; restore it and compare `sha256sum`
+- [ ] Live many files: a folder of a few thousand photos → first backup
+      in seconds/minutes, not hours; Browse files lists them all
+
 ## Housekeeping (not bugs)
 
 - [ ] Pledges aren't set via `.env` at all — they're created through the
@@ -1119,7 +1179,8 @@ other migration there).
 
 ## Documented, intentional limits (no action needed unless priorities change)
 
-- Backup cycle is a fixed ~30s, not configurable
+- ~~Backup cycle is a fixed ~30s, not configurable~~ — configurable since
+  0.5.0 (`SCAN_INTERVAL_SECS`)
 - No per-file/pattern exclude list for what gets backed up
 - Local status dashboard has no login of its own
 

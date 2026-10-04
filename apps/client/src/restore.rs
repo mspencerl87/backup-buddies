@@ -13,7 +13,6 @@ use crate::protocol::{
 };
 use crate::receive::safe_join;
 
-const MAX_FILE_BYTES: usize = 5 * 1024 * 1024 * 1024; // matches receive.rs's per-file cap
 
 /// Live progress for one in-flight multi-file restore, polled by the
 /// dashboard (GET /api/buddies/:id/restore-progress) while the restore's
@@ -111,7 +110,7 @@ pub async fn list_file_versions(
 pub async fn restore_version(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
-    passphrase: &SecretString,
+    _passphrase: &SecretString,
     buddy_id: EndpointId,
     restore_dir: &Path,
     path: &str,
@@ -119,7 +118,6 @@ pub async fn restore_version(
 ) -> Result<RestoreStats> {
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
-    let identity = age::scrypt::Identity::new(passphrase.clone());
 
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::GetVersion { path: path.to_string(), version }).await?;
@@ -129,19 +127,11 @@ pub async fn restore_version(
     if !ack.ok {
         anyhow::bail!("buddy could not serve that version: {}", ack.error.unwrap_or_default());
     }
-    let ciphertext = recv.read_to_end(MAX_FILE_BYTES).await.context("failed to read file bytes")?;
-    let ciphertext_len = ciphertext.len() as u64;
-    let plaintext =
-        age::decrypt(&identity, &ciphertext).context("failed to decrypt file — wrong passphrase?")?;
-
     let suffixed = format!("{path}.v{version}.bak");
     let Some(dest) = safe_join(restore_dir, &suffixed) else {
         anyhow::bail!("buddy sent an unsafe path: {path:?}");
     };
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.context("failed to create restore directory")?;
-    }
-    tokio::fs::write(&dest, &plaintext).await.context("failed to write restored file")?;
+    let ciphertext_len = receive_and_decrypt(&mut recv, dest, None).await?;
 
     Ok(RestoreStats {
         files_restored: 1,
@@ -157,10 +147,79 @@ async fn connect(
     buddy_id: EndpointId,
 ) -> Result<iroh::endpoint::Connection> {
     let addr = EndpointAddr::new(buddy_id).with_relay_url(relay_url.clone());
-    endpoint.connect(addr, protocol::ALPN).await.context("failed to connect to buddy")
+    endpoint.connect(addr, protocol::ALPN).await.map_err(protocol::explain_connect_error)
+}
+
+/// Streams a file's ciphertext from `recv` (after its ok ack) through
+/// decryption into `dest`, in bounded memory. `dest` only appears once the
+/// whole file decrypted and authenticated. Returns the encrypted bytes
+/// received. With `progress`, adds to `bytes_done` as bytes arrive, so a big
+/// file shows movement rather than sitting still until it's done.
+async fn receive_and_decrypt(
+    recv: &mut iroh::endpoint::RecvStream,
+    dest: std::path::PathBuf,
+    progress: Option<&ProgressHandle>,
+) -> Result<u64> {
+    let (tx, done) = crate::crypto::decrypt_to_file(dest);
+    let mut buf = vec![0u8; crate::crypto::PIPE_CHUNK];
+    let mut total = 0u64;
+    let mut read_err = None;
+    loop {
+        match recv.read(&mut buf).await {
+            Ok(Some(n)) => {
+                total += n as u64;
+                if let Some(p) = progress
+                    && let Ok(mut g) = p.lock()
+                {
+                    g.bytes_done += n as u64;
+                }
+                // Decryption stopped early (bad data / wrong passphrase):
+                // its own error, returned below, says why.
+                if tx.send(Ok(buf[..n].to_vec())).await.is_err() {
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(err) => {
+                let _ = tx.send(Err(std::io::Error::other("connection ended mid-file"))).await;
+                read_err = Some(err);
+                break;
+            }
+        }
+    }
+    drop(tx);
+    let decrypted = done.await.context("decryption task failed")?;
+    if let Some(err) = read_err {
+        return Err(err).context("failed to read file bytes");
+    }
+    decrypted?;
+    Ok(total)
 }
 
 async fn list_on(conn: &iroh::endpoint::Connection) -> Result<Vec<ListEntry>> {
+    // Chunked list first (any number of files); an older buddy drops that
+    // request, and then the single-frame List is all it supports.
+    if let Ok(files) = list_stream_on(conn).await {
+        return Ok(files);
+    }
+    list_single_on(conn).await
+}
+
+async fn list_stream_on(conn: &iroh::endpoint::Connection) -> Result<Vec<ListEntry>> {
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    protocol::write_frame(&mut send, &SyncRequest::ListStream).await?;
+    send.finish().context("failed to finish send stream")?;
+    let mut files = Vec::new();
+    loop {
+        let chunk: protocol::ListChunk = protocol::read_frame(&mut recv).await.context("failed to read file list")?;
+        files.extend(chunk.files);
+        if chunk.done {
+            return Ok(files);
+        }
+    }
+}
+
+async fn list_single_on(conn: &iroh::endpoint::Connection) -> Result<Vec<ListEntry>> {
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::List).await?;
     send.finish().context("failed to finish send stream")?;
@@ -177,7 +236,7 @@ async fn list_on(conn: &iroh::endpoint::Connection) -> Result<Vec<ListEntry>> {
 pub async fn run_restore(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
-    passphrase: &SecretString,
+    _passphrase: &SecretString,
     buddy_id: EndpointId,
     restore_dir: &Path,
 ) -> Result<RestoreStats> {
@@ -188,7 +247,7 @@ pub async fn run_restore(
 
     let paths: Vec<String> = files.into_iter().map(|f| f.path).collect();
     let (files_restored, bytes_restored) =
-        restore_paths_on(&conn, passphrase, restore_dir, &paths, None).await?;
+        restore_paths_on(&conn, _passphrase, restore_dir, &paths, None).await?;
     Ok(RestoreStats {
         files_restored,
         bytes_restored,
@@ -211,7 +270,7 @@ pub async fn run_restore(
 pub async fn restore_selected(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,
-    passphrase: &SecretString,
+    _passphrase: &SecretString,
     buddy_id: EndpointId,
     restore_dir: &Path,
     paths: &[String],
@@ -220,7 +279,7 @@ pub async fn restore_selected(
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
     let (files_restored, bytes_restored) =
-        restore_paths_on(&conn, passphrase, restore_dir, paths, progress.as_ref()).await?;
+        restore_paths_on(&conn, _passphrase, restore_dir, paths, progress.as_ref()).await?;
     Ok(RestoreStats {
         files_restored,
         bytes_restored,
@@ -235,13 +294,11 @@ pub async fn restore_selected(
 // plaintext size.
 async fn restore_paths_on(
     conn: &iroh::endpoint::Connection,
-    passphrase: &SecretString,
+    _passphrase: &SecretString,
     restore_dir: &Path,
     paths: &[String],
     progress: Option<&ProgressHandle>,
 ) -> Result<(usize, u64)> {
-    let identity = age::scrypt::Identity::new(passphrase.clone());
-
     let mut restored = 0;
     let mut attempted = 0;
     let mut bytes = 0u64;
@@ -250,7 +307,7 @@ async fn restore_paths_on(
             && let Ok(mut g) = p.lock() {
                 g.current_path = Some(rel_path.clone());
             }
-        match restore_one_file(conn, &identity, restore_dir, rel_path).await {
+        match restore_one_file(conn, restore_dir, rel_path, progress).await {
             Ok(ciphertext_len) => {
                 restored += 1;
                 bytes += ciphertext_len;
@@ -276,10 +333,13 @@ async fn restore_paths_on(
 // decrypted plaintext length.
 async fn restore_one_file(
     conn: &iroh::endpoint::Connection,
-    identity: &age::scrypt::Identity,
     restore_dir: &Path,
     rel_path: &str,
+    progress: Option<&ProgressHandle>,
 ) -> Result<u64> {
+    let Some(dest) = safe_join(restore_dir, rel_path) else {
+        anyhow::bail!("buddy sent an unsafe path in its file list: {rel_path:?}");
+    };
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::Get { path: rel_path.to_string() }).await?;
     send.finish().context("failed to finish send stream")?;
@@ -288,24 +348,5 @@ async fn restore_one_file(
     if !ack.ok {
         anyhow::bail!("buddy could not serve file: {}", ack.error.unwrap_or_default());
     }
-
-    let ciphertext =
-        recv.read_to_end(MAX_FILE_BYTES).await.context("failed to read file bytes")?;
-    let ciphertext_len = ciphertext.len() as u64;
-    let plaintext =
-        age::decrypt(identity, &ciphertext).context("failed to decrypt file — wrong passphrase?")?;
-
-    // rel_path came from the buddy's List response (or was echoed back
-    // from the dashboard's own browser, which only ever got it from that
-    // same List response) — same guard as the receive side either way,
-    // since there's no reason to trust it more just because it
-    // round-tripped through a buddy instead of arriving directly.
-    let Some(dest) = safe_join(restore_dir, rel_path) else {
-        anyhow::bail!("buddy sent an unsafe path in its file list: {rel_path:?}");
-    };
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.context("failed to create restore directory")?;
-    }
-    tokio::fs::write(&dest, &plaintext).await.context("failed to write restored file")?;
-    Ok(ciphertext_len)
+    receive_and_decrypt(&mut recv, dest, progress).await
 }

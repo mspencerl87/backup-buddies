@@ -3,7 +3,7 @@
   "available": [
     {
       "title": "Automatic encrypted backup",
-      "description": "Every ~30 seconds, new or changed files in your backup folder are encrypted on your device and sent to your buddy. Deleting a file locally removes it from your buddy's live copy too (older versions stay recoverable)."
+      "description": "Every ~30 seconds, new or changed files in your backup folder are encrypted on your device and sent to your buddy. Deleting a file locally removes it from your buddy's live copy too (older versions stay recoverable). Large files (up to 1 TB each) and large folders are handled in steady, low memory, and unchanged files are never re-read."
     },
     {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
@@ -62,9 +62,9 @@
       "description": "You can now filter “Find a buddy” by country. Upload speed, “usually online”, and “relay-only” are still shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
     },
     {
-      "title": "Fixed backup interval, no file filtering",
+      "title": "No file filtering yet",
       "status": "limitation",
-      "description": "Backups run on a fixed ~30 second cycle and back up everything in your configured folder — there's no way yet to change the interval or exclude specific files/patterns."
+      "description": "Everything in your configured backup folder is backed up — there's no way yet to exclude specific files or folders. (How often it checks is now adjustable with SCAN_INTERVAL_SECS, and unchanged files are never re-read, so large folders are fine.)"
     },
     {
       "title": "One buddy per pledge",

@@ -1,6 +1,6 @@
 [package]
 name = "backup-buddies-client"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 # Pinned to iroh 1.3.0 to match deploy/relay's iroh-relay:v1.3.0 image —
 # client and relay protocol versions should move together. Verified to
@@ -21,6 +21,13 @@ axum = "0.7"
 # from a blocking context (see dashboard.rs's disk_stats).
 fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
 hex = "0.4.3"
+# Same versions age itself uses — derive the long-term file key from the
+# passphrase once (see src/crypto.rs) instead of per file.
+bech32 = "0.11"
+scrypt = { version = "0.11", default-features = false }
+# The on-disk index (src/index.rs). "bundled" compiles SQLite in, so
+# there's nothing extra to install in the image.
+rusqlite = { version = "0.40", features = ["bundled"] }
 iroh = "1.3.0"
 iroh-mdns-address-lookup = "0.6.0"
 n0-future = "0.3.2"

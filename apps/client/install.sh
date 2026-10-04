@@ -51,7 +51,7 @@ TOP_FILES="docker-compose.yml .env.example Dockerfile docker-entrypoint.sh Cargo
 # has to be an explicit list rather than something discovered at runtime.
 # Keep this in sync with apps/client/src/*.rs — a new module there needs
 # adding here too, or customers' builds will fail on a missing `mod`.
-SRC_FILES="main.rs backup.rs bandwidth.rs dashboard.rs manifest.rs netinfo.rs protocol.rs receive.rs restore.rs"
+SRC_FILES="main.rs backup.rs bandwidth.rs crypto.rs dashboard.rs index.rs manifest.rs netinfo.rs protocol.rs receive.rs restore.rs"
 # dashboard.rs embeds these via include_str! at compile time — same
 # keep-in-sync caveat as SRC_FILES above, against apps/client/assets/*.
 ASSET_FILES="favicon.svg mark.svg"

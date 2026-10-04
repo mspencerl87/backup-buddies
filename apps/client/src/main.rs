@@ -5,6 +5,10 @@ mod manifest;
 mod netinfo;
 mod protocol;
 mod receive;
+mod crypto;
+#[cfg(test)]
+mod e2e_tests;
+mod index;
 mod restore;
 
 use std::{
@@ -27,8 +31,11 @@ use receive::{PledgeBook, PledgeState};
 // backup cycle. Not yet configurable (see docs/TESTING-CHECKLIST.md's
 // "Rescan interval/toggle display" item) — a single named constant so the
 // dashboard can at least show the real value instead of a hardcoded guess,
-// without this being a config knob yet.
-const BACKUP_CYCLE_INTERVAL_SECS: u64 = 30;
+// Default for SCAN_INTERVAL_SECS: how often each buddy's backup cycle runs.
+// A cycle on an unchanged folder is now a metadata-only listing (see
+// backup.rs), so this is cheap even for large folders; people with very
+// large folders, or on slow network mounts, can still set it higher.
+const DEFAULT_SCAN_INTERVAL_SECS: u64 = 30;
 
 struct Config {
     api_url: String,
@@ -79,6 +86,8 @@ struct Config {
     // means a handful of transient failures shouldn't trip this; it's
     // meant to catch a buddy that's actually stuck.
     stale_after_secs: u64,
+    // SCAN_INTERVAL_SECS (default 30): seconds between backup cycles.
+    scan_interval_secs: u64,
     // The UDP port iroh binds for the actual sync traffic (separate from
     // DASHBOARD_BIND's TCP port above). Fixed and configurable, rather
     // than the random free port iroh picks by default, specifically so
@@ -131,10 +140,24 @@ impl Config {
             .unwrap_or(8080);
         let dashboard_bind = std::env::var("DASHBOARD_BIND")
             .unwrap_or_else(|_| format!("0.0.0.0:{dashboard_port}"));
+        let scan_interval_secs = std::env::var("SCAN_INTERVAL_SECS")
+            .ok()
+            .map(|s| {
+                s.trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|&n| n >= 5)
+                    .context("SCAN_INTERVAL_SECS must be a whole number of seconds, at least 5")
+            })
+            .transpose()?
+            .unwrap_or(DEFAULT_SCAN_INTERVAL_SECS);
+        // A buddy only counts as stale after missing several cycles, so a
+        // long scan interval doesn't make every buddy look stale between
+        // cycles.
         let stale_after_secs = std::env::var("STALE_AFTER_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(600);
+            .unwrap_or(600u64.max(scan_interval_secs * 3));
         let sync_port = std::env::var("SYNC_PORT")
             .ok()
             .map(|s| s.parse().context("SYNC_PORT must be a valid port number (1-65535)"))
@@ -153,6 +176,7 @@ impl Config {
             backup_dir,
             dashboard_bind,
             stale_after_secs,
+            scan_interval_secs,
             sync_port,
         })
     }
@@ -488,6 +512,12 @@ async fn main() -> Result<()> {
     // DATA_DIR, BUDDY_FILES_DIR and RESTORE_DIR were all created (and
     // proven writable) by validate() above.
 
+    // Derive the file-encryption key from the passphrase (~1s, once) and
+    // open the on-disk index (importing old JSON manifests on first run).
+    crypto::init(&config.passphrase).context("failed to derive encryption key from BACKUP_PASSPHRASE")?;
+    index::open(&config.data_dir).context("failed to open the index in DATA_DIR")?;
+    receive::clear_incoming(&config.buddy_files_dir).await;
+
     let secret_key = load_or_generate_secret_key(&config.data_dir).await?;
     let endpoint_id = secret_key.public();
 
@@ -713,7 +743,7 @@ async fn main() -> Result<()> {
                 reconcile_stats,
                 self_label,
                 mdns_peers,
-                BACKUP_CYCLE_INTERVAL_SECS,
+                config.scan_interval_secs,
                 endpoint,
                 relay_url,
                 passphrase,
@@ -839,8 +869,6 @@ async fn main() -> Result<()> {
                                 let result = backup::run_backup_cycle(
                                     &endpoint,
                                     &config.relay_url,
-                                    &config.passphrase,
-                                    &config.data_dir,
                                     backup_dir,
                                     buddy_id,
                                 )
@@ -1041,7 +1069,6 @@ async fn main() -> Result<()> {
                                     let reconcile_result = backup::reconcile_with_buddy(
                                         &endpoint,
                                         &config.relay_url,
-                                        &config.data_dir,
                                         buddy_id,
                                     )
                                     .await;
@@ -1126,7 +1153,7 @@ async fn main() -> Result<()> {
                     Err(err) => tracing::warn!(?err, "could not fetch buddy devices from API"),
                 }
 
-                tokio::time::sleep(Duration::from_secs(BACKUP_CYCLE_INTERVAL_SECS)).await;
+                tokio::time::sleep(Duration::from_secs(config.scan_interval_secs)).await;
             }
         }
     };
@@ -1214,7 +1241,7 @@ async fn fetch_buddy_devices(
 // the real sync protocol instead of a second one running alongside it.
 async fn ping(endpoint: &Endpoint, relay_url: &RelayUrl, buddy_id: EndpointId) -> Result<()> {
     let addr = EndpointAddr::new(buddy_id).with_relay_url(relay_url.clone());
-    let conn = endpoint.connect(addr, protocol::ALPN).await.context("failed to connect to buddy over Iroh")?;
+    let conn = endpoint.connect(addr, protocol::ALPN).await.map_err(protocol::explain_connect_error)?;
 
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &protocol::SyncRequest::Ping).await?;

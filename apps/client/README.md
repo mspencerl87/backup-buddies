@@ -6,7 +6,8 @@ possible) and exchanges backup data. Everything up to this point — the
 website, your account, billing, pairing with a buddy — is just
 bookkeeping; this is the piece that does the real work.
 
-**Current status:** real backup and restore. Every 30 seconds it asks the
+**Current status:** real backup and restore. Every 30 seconds (or
+`SCAN_INTERVAL_SECS`) it asks the
 API who your paired buddies' devices are, then — if this device has
 `BACKUP_DIR` set (which `docker-compose.yml` always does; it just points
 at an empty, read-only folder when you haven't set `BACKUP_DIR_HOST`) —
@@ -26,10 +27,11 @@ this still working" never depends on actually having something to send.
   it (directly if possible, through the relay otherwise), and encrypt
   everything with `BACKUP_PASSPHRASE` *before* it ever leaves this
   machine.
-- **Does:** keep sending only the delta each cycle — unchanged files are
-  skipped by comparing their hash against what this client last told a
-  given buddy it sent them (see "Data directory" below), not re-sent in
-  full every 30 seconds.
+- **Does:** keep sending only the delta each cycle. A cycle lists the
+  folder (metadata only) and only re-reads a file whose size or modified
+  time changed since last time; unchanged files are never read, so an
+  unchanged folder costs a listing, not a re-read. Files whose content
+  changed are re-sent whole (see "Large folders and large files" below).
 - **Does:** keep a short backstop when a file is overwritten or deleted —
   the live copy plus its last 2 replaced versions are kept on your
   buddy's disk, browsable and individually restorable from the local
@@ -197,11 +199,14 @@ Config (`DATA_DIR`):
 - `iroh_secret_key` — this device's identity. Deleting it means the
   device re-registers under a new identity next startup (update it on
   your dashboard, or just remove and re-add the device there).
-- `manifest-<buddy node id>.json` — what *this* device last told
-  that buddy it had sent them (path, size, hash per file). Compared
-  against `BACKUP_DIR` every cycle to figure out what's changed. Deleting
-  it just means the next cycle re-sends everything — wasteful, but
+- `index.sqlite` (+ `-wal`/`-shm`) — this device's index (SQLite): the
+  size, modified time and hash of each file in `BACKUP_DIR`, and per
+  buddy, what was last sent them (path, size, hash, encrypted size).
+  Updated one row at a time as files land. Deleting it means the next
+  cycle re-reads every file and re-sends everything — wasteful, but
   harmless; it doesn't affect what's actually stored on either side.
+  Replaces the old `manifest-<buddy>.json` files, which are imported on
+  first start of 0.5.0 and renamed `*.json.migrated` (safe to delete).
 - `usage.json` — `{ "<buddy node id>": <bytes received from them> }`,
   tracked per buddy and checked against their pledge
   (`buddy_pairings.pledged_bytes`, fetched from the API every 30s) before
@@ -255,6 +260,43 @@ stat every stored file. Unset, the client runs as root as before.
   failed file and the rest of the cycle carries on (it used to abort the
   whole cycle). An unreadable folder is reported and pauses *all*
   deletions that cycle — its contents would otherwise look deleted.
+
+## Large folders and large files (0.5.0)
+
+- **Change detection:** see `index.sqlite` above — an unchanged file is
+  never read again. `SCAN_INTERVAL_SECS` (default 30, minimum 5) sets how
+  often a cycle runs; staleness on the dashboard scales with it.
+- **Streaming:** hashing, encryption, upload, storage on the buddy's side,
+  download and decryption all stream in ~256 KiB pieces, so memory doesn't
+  depend on file size (tested: a 6 GB file on a 7 GB-RAM machine, peak
+  ~263 MB, almost all of it the one-time key derivation below). The
+  per-file limit is 1 TB (was 5 GB). Uploads land in a hidden `.incoming/`
+  folder on the buddy's side and are moved into place only once complete
+  and verified; leftovers from an interrupted upload are cleared on start.
+  Restores are written to a temporary file and moved into place only once
+  the whole file decrypted and authenticated.
+- **Encryption key:** files used to be encrypted straight to the
+  passphrase, which runs scrypt (~1.5 s of CPU) for *every* file — 20,000
+  photos took ~8 hours. Now the passphrase goes through scrypt once at
+  startup (`log_n=18, r=8`, ~1 s and 256 MB, fixed salt) to derive an
+  X25519 key, and files are encrypted to that key. The passphrase alone
+  still recovers everything; files encrypted the old way still restore
+  (decryption tries both). Trade-off of the fixed salt: weak passphrases
+  are easier to attack in bulk, so passphrase length matters (the client
+  warns under 12 characters); a per-account salt is on the launch
+  checklist as later hardening.
+- **Large file lists:** a buddy's file list is sent in chunks of 5,000
+  (`ListStream`) — the old single-message list broke above ~10,000 files,
+  which broke reconciliation, restore and the file browser.
+- **Mixed versions:** an updated client asks a buddy its protocol version
+  (`Hello`) before uploading. A buddy still on ≤0.4 gets the old upload
+  format, limited to files up to 512 MB (the old format needs the whole
+  encrypted file in memory to hash it first); bigger files wait, reported
+  as "your buddy's client is out of date". Updated clients still accept
+  every old request, so an old client keeps working against a new one.
+- Tested end to end (`src/e2e_tests.rs`): two real endpoints over
+  localhost, real send/receive/reconcile/restore code. 20,000 small files:
+  first backup 41 s (was ~8 h), unchanged cycle 0.14 s, restore 23 s.
 
 ## Disk safety: pledges vs. the real disk
 

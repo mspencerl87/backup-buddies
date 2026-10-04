@@ -219,6 +219,15 @@ async fn handle_stream(
         SyncRequest::Ping => {
             protocol::write_frame(&mut send, &SyncAck::ok()).await?;
         }
+        SyncRequest::Hello => {
+            protocol::write_frame(
+                &mut send,
+                &protocol::HelloResponse { protocol_version: protocol::PROTOCOL_VERSION },
+            )
+            .await?;
+        }
+        // v1 senders state the hash up front; v2 senders (PutStream) send
+        // it after the bytes. Both are handled by the same streaming code.
         SyncRequest::Put { path, ciphertext_len, ciphertext_sha256 } => {
             handle_put(
                 &mut send,
@@ -232,7 +241,24 @@ async fn handle_stream(
                 &quality,
                 path,
                 ciphertext_len,
-                ciphertext_sha256,
+                Some(ciphertext_sha256),
+            )
+            .await?;
+        }
+        SyncRequest::PutStream { path, ciphertext_len } => {
+            handle_put(
+                &mut send,
+                &mut recv,
+                &sender_dir,
+                &remote_id,
+                &pledge_book,
+                &data_dir,
+                &buddy_files_dir,
+                &bandwidth_book,
+                &quality,
+                path,
+                ciphertext_len,
+                None,
             )
             .await?;
         }
@@ -241,6 +267,22 @@ async fn handle_stream(
         }
         SyncRequest::List => {
             handle_list(&mut send, &sender_dir).await?;
+        }
+        SyncRequest::ListStream => {
+            let files = list_sender_files(&sender_dir).await;
+            let mut chunks = files.chunks(protocol::LIST_CHUNK_ENTRIES).peekable();
+            if chunks.peek().is_none() {
+                protocol::write_frame(&mut send, &protocol::ListChunk { files: Vec::new(), done: true }).await?;
+            }
+            while let Some(chunk) = chunks.next() {
+                let done = chunks.peek().is_none();
+                // ListEntry isn't Clone; rebuild the slice's entries.
+                let files = chunk
+                    .iter()
+                    .map(|e| ListEntry { path: e.path.clone(), size: e.size, deleted: e.deleted })
+                    .collect();
+                protocol::write_frame(&mut send, &protocol::ListChunk { files, done }).await?;
+            }
         }
         SyncRequest::Get { path } => {
             handle_get(&mut send, &sender_dir, path, &data_dir, &bandwidth_book, &quality).await?;
@@ -290,10 +332,9 @@ async fn handle_put(
     quality: &ConnectionQuality,
     path: String,
     ciphertext_len: u64,
-    ciphertext_sha256: String,
+    expected_sha256: Option<String>,
 ) -> Result<()> {
-    const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5GB per file, sanity cap
-    if ciphertext_len > MAX_FILE_BYTES {
+    if ciphertext_len > protocol::MAX_FILE_BYTES {
         reject_without_reading_body(recv, send, PutRejectReason::TooLarge).await?;
         return Ok(());
     }
@@ -349,25 +390,51 @@ async fn handle_put(
     };
 
     let Err((pledged_bytes, received_bytes)) = decision else {
-        let mut buf = vec![0u8; ciphertext_len as usize];
-        if let Err(err) = recv.read_exact(&mut buf).await {
-            // Roll back the reservation — we never actually got the bytes.
+        let rollback = || {
             let mut book = pledge_book.lock().unwrap();
             if let Some(state) = book.get_mut(remote_id) {
                 state.received_bytes =
                     state.received_bytes.saturating_sub(ciphertext_len).saturating_add(previous_size);
             }
-            return Err(err).context("failed to read file bytes");
-        }
+        };
 
-        let actual_hash = hex::encode(Sha256::digest(&buf));
-        if actual_hash != ciphertext_sha256 {
-            protocol::write_frame(send, &SyncAck::err("hash mismatch")).await?;
-            let mut book = pledge_book.lock().unwrap();
-            if let Some(state) = book.get_mut(remote_id) {
-                state.received_bytes =
-                    state.received_bytes.saturating_sub(ciphertext_len).saturating_add(previous_size);
+        // Stream the body into a temp file in this buddy's own folder (same
+        // filesystem, so the final move is an atomic rename), hashing as it
+        // arrives. Memory use is one buffer, whatever the file size — this
+        // used to read the whole file into RAM.
+        let tmp = match incoming_tmp_path(sender_dir).await {
+            Ok(tmp) => tmp,
+            Err(err) => {
+                rollback();
+                return Err(err);
             }
+        };
+        let received = receive_body(recv, &tmp, ciphertext_len).await;
+        let actual_hash = match received {
+            Ok(hash) => hash,
+            Err(err) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                rollback();
+                return Err(err).context("failed to read file bytes");
+            }
+        };
+
+        // v2 (PutStream): the hash follows the bytes.
+        let expected = match expected_sha256 {
+            Some(hash) => hash,
+            None => match protocol::read_frame::<protocol::PutTrailer>(recv).await {
+                Ok(t) => t.ciphertext_sha256,
+                Err(err) => {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    rollback();
+                    return Err(err).context("failed to read upload trailer");
+                }
+            },
+        };
+        if actual_hash != expected {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            rollback();
+            protocol::write_frame(send, &SyncAck::err("hash mismatch")).await?;
             return Ok(());
         }
 
@@ -377,12 +444,18 @@ async fn handle_put(
         // not just re-sent unchanged.
         rotate_versions(sender_dir, &path).await;
 
-        if let Some(parent) = dest.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .context("failed to create directory for incoming file")?;
+        if let Some(parent) = dest.parent()
+            && let Err(err) = tokio::fs::create_dir_all(parent).await
+        {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            rollback();
+            return Err(err).context("failed to create directory for incoming file");
         }
-        tokio::fs::write(&dest, &buf).await.context("failed to write incoming file")?;
+        if let Err(err) = tokio::fs::rename(&tmp, &dest).await {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            rollback();
+            return Err(err).context("failed to store incoming file");
+        }
 
         if let Err(err) = save_usage_ledger(data_dir, pledge_book).await {
             // Don't fail the exchange over a ledger write hiccup — worst
@@ -433,6 +506,74 @@ async fn reject_without_reading_body(
 ) -> Result<()> {
     recv.stop(iroh::endpoint::VarInt::from_u32(reason.code())).ok();
     protocol::write_frame(send, &SyncAck::err(reason.message())).await
+}
+
+// Uploads in progress live here, inside the sender's own folder: same
+// filesystem as the final location (so moving into place is an atomic
+// rename), and never listed as files (see collect_files). Leftovers from an
+// interrupted upload are cleared at startup (clear_incoming).
+const INCOMING_DIR: &str = ".incoming";
+const IO_CHUNK: usize = 256 * 1024;
+
+async fn incoming_tmp_path(sender_dir: &Path) -> Result<PathBuf> {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let dir = sender_dir.join(INCOMING_DIR);
+    tokio::fs::create_dir_all(&dir).await.context("failed to create upload staging folder")?;
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Ok(dir.join(format!("{}-{n}.part", std::process::id())))
+}
+
+/// Reads exactly `len` bytes from `recv` into a new file at `path`,
+/// returning their SHA-256. Flushed to disk before returning, so a file
+/// isn't acknowledged until it's actually stored.
+async fn receive_body(recv: &mut iroh::endpoint::RecvStream, path: &Path, len: u64) -> Result<String> {
+    use tokio::io::AsyncWriteExt;
+    let mut file = tokio::fs::File::create(path).await.context("failed to create upload file")?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; IO_CHUNK];
+    let mut remaining = len;
+    while remaining > 0 {
+        let n = remaining.min(IO_CHUNK as u64) as usize;
+        recv.read_exact(&mut buf[..n]).await.context("connection ended mid-file")?;
+        hasher.update(&buf[..n]);
+        file.write_all(&buf[..n]).await.context("failed to write incoming file")?;
+        remaining -= n as u64;
+    }
+    file.sync_all().await.context("failed to flush incoming file")?;
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Removes leftovers of uploads interrupted by a restart or crash.
+pub async fn clear_incoming(buddy_files_dir: &Path) {
+    let Ok(mut entries) = tokio::fs::read_dir(buddy_files_dir).await else { return };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let staging = entry.path().join(INCOMING_DIR);
+        if tokio::fs::metadata(&staging).await.is_ok() {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+        }
+    }
+}
+
+/// Streams a stored file to `send` after an ok ack, in bounded memory.
+/// Returns the number of bytes sent.
+async fn send_file(send: &mut iroh::endpoint::SendStream, src: &Path) -> Result<Option<u64>> {
+    use tokio::io::AsyncReadExt;
+    let Ok(mut file) = tokio::fs::File::open(src).await else { return Ok(None) };
+    protocol::write_frame(send, &SyncAck::ok()).await?;
+    let mut buf = vec![0u8; IO_CHUNK];
+    let mut total = 0u64;
+    loop {
+        let n = file.read(&mut buf).await.context("failed to read stored file")?;
+        if n == 0 {
+            break;
+        }
+        send.write_all(&buf[..n]).await.context("failed to send file bytes")?;
+        total += n as u64;
+    }
+    // Without finish(), the stream's FIN never goes out and the requester
+    // (restore.rs) waits forever for the end of the file.
+    send.finish().context("failed to finish send stream")?;
+    Ok(Some(total))
 }
 
 async fn handle_delete(
@@ -612,7 +753,8 @@ fn collect_files<'a>(
                 // Backup-version slots live under .versions/ — they're not
                 // restorable the normal way (ListVersions/GetVersion only),
                 // so they shouldn't show up as if they were live files.
-                if path.file_name().and_then(|n| n.to_str()) == Some(".versions") {
+                let name = path.file_name().and_then(|n| n.to_str());
+                if name == Some(".versions") || name == Some(INCOMING_DIR) {
                     continue;
                 }
                 collect_files(base, &path, out).await;
@@ -639,23 +781,9 @@ async fn handle_get(
         return Ok(());
     };
 
-    match tokio::fs::read(&src).await {
-        Ok(bytes) => {
-            protocol::write_frame(send, &SyncAck::ok()).await?;
-            send.write_all(&bytes).await.context("failed to send file bytes")?;
-            // Without this, the stream's FIN never goes out, so the
-            // requesting side's recv.read_to_end() (restore_one_file in
-            // restore.rs) blocks forever waiting for a close that never
-            // arrives — every restore hangs indefinitely instead of
-            // failing loudly or completing. backup.rs's Put path already
-            // does this after its own write_all; this is the same thing
-            // on the Get side, which never had it.
-            send.finish().context("failed to finish send stream")?;
-            crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
-        }
-        Err(_) => {
-            protocol::write_frame(send, &SyncAck::err("not found")).await?;
-        }
+    match send_file(send, &src).await? {
+        Some(sent) => crate::bandwidth::record(data_dir, bandwidth_book, quality, sent).await,
+        None => protocol::write_frame(send, &SyncAck::err("not found")).await?,
     }
     Ok(())
 }
@@ -695,20 +823,9 @@ async fn handle_get_version(
         return Ok(());
     };
 
-    match tokio::fs::read(&src).await {
-        Ok(bytes) => {
-            protocol::write_frame(send, &SyncAck::ok()).await?;
-            send.write_all(&bytes).await.context("failed to send file bytes")?;
-            // See the matching comment in handle_get above — same missing
-            // finish() causing the same indefinite hang, this time on
-            // restore_version's recv.read_to_end() instead of
-            // restore_one_file's.
-            send.finish().context("failed to finish send stream")?;
-            crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes.len() as u64).await;
-        }
-        Err(_) => {
-            protocol::write_frame(send, &SyncAck::err("not found")).await?;
-        }
+    match send_file(send, &src).await? {
+        Some(sent) => crate::bandwidth::record(data_dir, bandwidth_book, quality, sent).await,
+        None => protocol::write_frame(send, &SyncAck::err("not found")).await?,
     }
     Ok(())
 }

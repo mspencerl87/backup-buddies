@@ -1,10 +1,29 @@
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-// Replaces the old connectivity-test-only ALPN (backup-buddies/test/0).
-// Real backup subsumes what that proved — a successful Ping or Put *is*
-// the connectivity proof now, so there's no reason to run two protocols.
+// One protocol name for every client version. Newer features are found by
+// asking (SyncRequest::Hello), not by a new ALPN: an ALPN a peer doesn't
+// support makes iroh connections hang until timeout rather than fail fast,
+// which would break every pairing where one buddy updated first.
 pub const ALPN: &[u8] = b"backup-buddies/sync/1";
+
+/// This client's protocol version, reported in HelloResponse.
+/// 2 (client 0.5.0): PutStream.
+pub const PROTOCOL_VERSION: u32 = 2;
+
+/// Largest file sent to a buddy whose client predates PutStream: the old
+/// Put needs the whole file's hash before sending, so the encrypted file is
+/// held in memory first. Bigger files wait until the buddy updates.
+pub const LEGACY_PUT_MAX_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Largest single file accepted. Files stream in bounded memory now, so
+/// this is only a sanity bound; pledges and the real-disk floor are what
+/// actually limit how much a buddy can store.
+pub const MAX_FILE_BYTES: u64 = 1024 * 1024 * 1024 * 1024; // 1 TiB
+
+pub fn explain_connect_error(err: impl std::fmt::Display) -> anyhow::Error {
+    anyhow::anyhow!("failed to connect to buddy: {err}")
+}
 
 // Every exchange on a stream starts with one framed SyncRequest, answered
 // with one framed SyncAck (Ping/Put/Delete), a ListResponse (List), or a
@@ -28,6 +47,20 @@ pub enum SyncRequest {
         ciphertext_len: u64,
         ciphertext_sha256: String,
     },
+    /// Protocol v2's upload: like Put, but the SHA-256 isn't known until
+    /// the file has been encrypted and sent, so it follows the
+    /// `ciphertext_len` raw bytes as a framed `PutTrailer`.
+    PutStream { path: String, ciphertext_len: u64 },
+    /// Protocol v2's List: the same file list, sent as a series of
+    /// ListChunk frames (LIST_CHUNK_ENTRIES each, last one `done: true`)
+    /// instead of one frame — a single frame caps out around 10,000 files
+    /// (MAX_FRAME_BYTES). Older clients don't know it and drop the stream;
+    /// the caller then falls back to List.
+    ListStream,
+    /// "Which protocol version do you speak?" Answered with HelloResponse.
+    /// A client older than 0.5.0 can't parse this and drops the stream —
+    /// which is itself the answer: version 1.
+    Hello,
     /// "Forget this file" — frees up the sender's pledge usage with us.
     /// Idempotent: deleting something already gone is not an error.
     Delete { path: String },
@@ -103,11 +136,30 @@ impl PutRejectReason {
     pub fn message(self) -> &'static str {
         match self {
             Self::PledgeExceeded => "your buddy's pledge to you is full",
-            Self::TooLarge => "file is larger than the 5GB per-file limit",
+            Self::TooLarge => "file is larger than the 1 TB per-file limit",
             Self::InvalidPath => "file path was rejected as invalid",
             Self::DiskFull => "your buddy doesn't have enough real disk space left",
         }
     }
+}
+
+pub const LIST_CHUNK_ENTRIES: usize = 5000;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListChunk {
+    pub files: Vec<ListEntry>,
+    pub done: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HelloResponse {
+    pub protocol_version: u32,
+}
+
+/// Sent after a PutStream's bytes.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PutTrailer {
+    pub ciphertext_sha256: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
