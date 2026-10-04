@@ -20,11 +20,23 @@ Last reviewed: 2026-10-04.
     `receive.rs`) — ISOs, VM disks and videos are exactly what this
     audience backs up.
 
-  Fix: re-hash only when size or modified time changed (store mtime in the
-  manifest); hash, encrypt (age's streaming encryptor) and send in chunks;
-  raise or remove the 5 GB cap, streaming on the receive side too. Then
-  test with a folder of a few large files (e.g. 2 × 10 GB) and watch
-  memory and cycle time.
+  Also: the per-buddy JSON manifest is loaded whole into RAM and rewritten
+  in full after every file sent — with a million files that's a 100+ MB
+  file rewritten a million times.
+
+  Plan (agreed 2026-10-04), using libraries rather than new machinery:
+  1. SQLite index (`rusqlite`, bundled) in the config folder replacing the
+     JSON manifests — size, modified time, hash per file; existing installs
+     migrated automatically on first start.
+  2. Re-read a file only when its size or modified time changed; otherwise
+     a cycle is a metadata-only listing.
+  3. Stream hash → encrypt → send → receive in small chunks (age's
+     streaming encryptor/decryptor, already a dependency), so memory stays
+     flat at any file size; raise the 5 GB per-file cap (~100 GB) or remove
+     it.
+  4. Configurable scan interval (keep ~30s default for small folders).
+
+  Test: two 10 GB files on testa/testb, watching memory and cycle time.
 
 ## Should do (quick, ~1 hour total)
 
@@ -46,6 +58,33 @@ Last reviewed: 2026-10-04.
       invoice.payment_failed`) — steps in `TESTING-CHECKLIST.md`, "Needs
       testing — payment-failed relay pause". Can wait if launch is a free
       beta.
+
+## Needed after launch (real gaps, not polish)
+
+- [ ] **Chunked, rsync-like transfers.** Today any change to a file re-sends
+      the whole file — a 20 GB VM image with one changed block costs 20 GB
+      (billed when it goes over the relay). Classic rsync can't work here:
+      the buddy only holds ciphertext and can't read it, and re-encrypting
+      changes every byte. The encrypted equivalent (restic/borg/duplicacy):
+      split files into content-defined chunks (`fastcdc` crate), encrypt
+      each chunk separately, send only chunks the buddy doesn't have.
+      Also gives dedup across files and no per-file size limit. Big change:
+      new storage format on the buddy side (chunk store instead of one
+      file per file), so restore, Browse files, versions, reconciliation
+      and pledge accounting all change. Alternative to evaluate first:
+      `rustic_core` (Rust library behind rustic, a restic reimplementation)
+      as the engine, with the buddy as its storage backend.
+- [ ] **Resume interrupted transfers.** A dropped connection mid-file
+      restarts that file from zero — painful for 100 GB files over a relay.
+      Falls out of chunking above (already-sent chunks don't re-send).
+- [ ] **Instant change pickup.** Live change notifications (`notify` crate:
+      inotify/FSEvents) on top of the periodic scan, so new files go out in
+      seconds without frequent full scans. Doesn't work reliably on NFS/SMB
+      mounts, so the periodic scan stays as the fallback.
+- [ ] **Exclude patterns.** No way to skip files/folders today (listed under
+      "intentional limits" in TESTING-CHECKLIST.md). The `ignore` crate
+      (ripgrep's walker) gives `.gitignore`-style excludes and a faster,
+      parallel folder walk in one go.
 
 ## Fine after launch
 
