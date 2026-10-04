@@ -89,8 +89,8 @@ their pledge to you and how much of it is used, how many files you've
 sent each other and how much that totals to, and the result of the last
 backup cycle (or ping, for a buddy you're not backing anything up to).
 There's also a "Restore from this buddy" button, which does the same
-thing as the `restore` command below but writes to
-`data/restored/<their node id>/` and shows you the result right there
+thing as the `restore` command below and writes to the same place
+(`RESTORE_DIR_HOST/<their node id>/`), showing you the result right there
 instead of needing a terminal.
 
 **It has no login of its own**, and that restore button is a real action
@@ -109,11 +109,12 @@ it.
 To pull everything a buddy is holding for you back down and decrypt it:
 
 ```bash
-docker compose run --rm client restore <buddy's node id> /data/restored
+docker compose run --rm client restore <buddy's node id>
 ```
 
 Find the buddy's node id on your dashboard's Buddies card. Files land
-under `restored/` inside your `DATA_DIR_HOST` folder on the host,
+under `<their node id>/` inside your `RESTORE_DIR_HOST` folder on the host
+(pass a container path as a third argument to send them elsewhere),
 decrypted with the `BACKUP_PASSPHRASE` in your `.env` — so this only
 works from a machine configured with the *same* passphrase that encrypted
 the data in the first place. This is a one-shot operation: the client
@@ -156,46 +157,72 @@ hand. The Dockerfile builds with `--locked`, so a stale lock fails the build.
 Without a bump, nobody is told to update. Remember that app-1 only serves
 new client code after a `git pull` there (see docs/DEPLOY.md).
 
-## Data directory
+## Folders
 
-Everything persistent lives under `/data` inside the container, bind-mounted
-from `DATA_DIR_HOST` on the host (see `.env.example` — defaults to `./data`):
+The client uses four separate folders, each bind-mounted from the host
+(see `.env.example`), so its own files never end up mixed into your data:
 
-- `/data/iroh_secret_key` — this device's identity. Deleting it means the
+| Host setting | In the container | What's in it |
+| --- | --- | --- |
+| `DATA_DIR_HOST` (default `./config`) | `/data` (`DATA_DIR`) | The client's own config and state. Small. |
+| `BACKUP_DIR_HOST` | `/backup` (read-only) | Your files. Only ever read. |
+| `BUDDY_FILES_DIR_HOST` (default `./buddy-files`) | `/buddy-files` (`BUDDY_FILES_DIR`) | What buddies store with you. Uses the space you pledged. |
+| `RESTORE_DIR_HOST` (default `./restored`) | `/restored` (`RESTORE_DIR`) | Files you restore from a buddy. |
+
+`BUDDY_FILES_DIR` and `RESTORE_DIR` default to `DATA_DIR/received` and
+`DATA_DIR/restored` when unset — the layout before they were split out — so
+an older install that hasn't added them keeps working. If `BUDDY_FILES_DIR`
+points at an empty folder while buddy files are still in `DATA_DIR/received`
+(what an existing install gets after `install.sh --update` brings in the new
+`docker-compose.yml` but keeps its `.env`), the client keeps using the old
+location and logs a warning with how to move them — starting on the empty
+folder would make its buddies' backups look missing while `usage.json` still
+counted them. If *both* folders hold buddy files, it refuses to start until
+they're merged. Pointing `BUDDY_FILES_DIR_HOST` at the old
+`DATA_DIR_HOST/received` folder is fine — it's detected as the same folder.
+
+Config (`DATA_DIR`):
+
+- `iroh_secret_key` — this device's identity. Deleting it means the
   device re-registers under a new identity next startup (update it on
   your dashboard, or just remove and re-add the device there).
-- `/data/received/<buddy node id>/` — the actual files a buddy has backed
-  up with you, stored encrypted and under the same relative paths they
-  back them up with on their end. This device never attempts to decrypt
-  them — it has no reason to ever hold the sender's passphrase.
-- `/data/manifest-<buddy node id>.json` — what *this* device last told
+- `manifest-<buddy node id>.json` — what *this* device last told
   that buddy it had sent them (path, size, hash per file). Compared
   against `BACKUP_DIR` every cycle to figure out what's changed. Deleting
   it just means the next cycle re-sends everything — wasteful, but
   harmless; it doesn't affect what's actually stored on either side.
-- `/data/usage.json` — `{ "<buddy node id>": <bytes received from them> }`,
+- `usage.json` — `{ "<buddy node id>": <bytes received from them> }`,
   tracked per buddy and checked against their pledge
   (`buddy_pairings.pledged_bytes`, fetched from the API every 30s) before
   accepting any incoming file. Deleting it resets what's counted toward
-  each buddy's pledge back to zero — the underlying data in `received/` is
+  each buddy's pledge back to zero — the underlying buddy files are
   untouched, so this can desync the two if used carelessly.
-- `/data/restored/` — default destination for `restore` (see above); only
-  appears after you run it.
-- `/data/received/<buddy node id>/.versions/` — backup slots for that
-  buddy's files, kept when a file is overwritten or deleted (see "File
-  versions" below). Deleting this folder just gives up that recovery
-  history; it doesn't touch the live files in `received/`.
-- `/data/bandwidth.json` — lifetime bytes moved via relay vs. direct (see
+- `bandwidth.json` — lifetime bytes moved via relay vs. direct (see
   "Relay bandwidth" below). Deleting it just resets the dashboard's
   counter back to zero.
+
+Buddy files (`BUDDY_FILES_DIR`):
+
+- `<buddy node id>/` — the actual files a buddy has backed up with you,
+  stored encrypted and under the same relative paths they back them up
+  with on their end. This device never attempts to decrypt them — it has
+  no reason to ever hold the sender's passphrase.
+- `<buddy node id>/.versions/` — backup slots for that buddy's files,
+  kept when a file is overwritten or deleted (see "File versions" below).
+  Deleting this folder just gives up that recovery history; it doesn't
+  touch the live files.
+
+Restores (`RESTORE_DIR`): `<buddy node id>/...` — only appears after a
+restore.
 
 ## Disk safety: pledges vs. the real disk
 
 A pledge is just a number two accounts agreed on over the API — it's not a
 reservation the filesystem enforces. On top of the per-buddy pledge check
 above, every incoming file is also checked against the *real* free space on
-the filesystem under `DATA_DIR` (`statvfs`, same mechanism the dashboard's
-Disk card reads). A write that would eat into a floor of whichever is
+the filesystem under `BUDDY_FILES_DIR` — where incoming files actually land,
+which may be a different disk from `DATA_DIR` (`statvfs`, same mechanism the
+dashboard's Disk card and the buddy disk-stats probe read). A write that would eat into a floor of whichever is
 bigger — 2GB flat, or 5% of the filesystem's total size — is rejected with
 "not enough disk space on this host", independent of whether the sender is
 still within their pledge. This is what keeps an over-pledge (or anything
@@ -277,8 +304,8 @@ actually is wired up to billing.
 A buddy's copy used to just mirror yours exactly: whatever you last sent
 them is all they have. Now, whenever a file you'd already backed up gets
 overwritten or deleted, the previous content isn't discarded — it's kept
-as a numbered backup slot (`.versions/` inside that buddy's `received/`
-folder on the receiving end), up to the 2 most recent replacements. So at
+as a numbered backup slot (`.versions/` inside that buddy's folder in `BUDDY_FILES_DIR`
+on the receiving end), up to the 2 most recent replacements. So at
 any time, up to 3 copies of a file exist on your buddy's disk: the current
 one (if it still exists) plus its last 2 predecessors. A delete isn't
 destructive either — the deleted content becomes the newest backup slot
@@ -287,7 +314,7 @@ same way a bad overwrite is.
 
 To get one back: open **Browse files** on a buddy's card, click
 **History** next to a file, and pick a version to restore. It's written
-to `data/restored/<buddy>/<path>.v<N>.bak` — alongside, never over, a
+to `RESTORE_DIR/<buddy>/<path>.v<N>.bak` — alongside, never over, a
 normal restore of that file — so you can compare before deciding what to
 keep.
 

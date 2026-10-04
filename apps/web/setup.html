@@ -80,9 +80,13 @@
     env_file: .env
     environment:
       - BACKUP_DIR=/backup
+      - BUDDY_FILES_DIR=/buddy-files
+      - RESTORE_DIR=/restored
     volumes:
-      - ${DATA_DIR_HOST}:/data
-      - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro</code></pre>
+      - ${DATA_DIR_HOST:-./config}:/data
+      - ${BACKUP_DIR_HOST:-./empty-backup-dir}:/backup:ro
+      - ${BUDDY_FILES_DIR_HOST:-./buddy-files}:/buddy-files
+      - ${RESTORE_DIR_HOST:-./restored}:/restored</code></pre>
           <p class="muted" style="margin-top:0.5rem">
             <code>network_mode: host</code> runs the container directly on this machine's network instead of Docker's usual isolated one — it's what lets this device find a buddy on the same local network and connect directly, skipping the relay entirely. Linux only; if you're on Docker Desktop (Mac/Windows), see the troubleshooting section below.
           </p>
@@ -95,12 +99,20 @@ RELAY_URL=https://relay.filegarden.net
 <strong style="color:#4f8cff">DEVICE_TOKEN=paste_the_token_from_step_1_here</strong>
 <strong style="color:#4f8cff">BACKUP_PASSPHRASE=a few random words only you know</strong>
 
-# Only set this if this machine should SEND backups, not just receive them —
-# point it at the real folder you want backed up. Leave it out otherwise.
-#BACKUP_DIR_HOST=./my-files
+# --- Folders (see "Where your files go" below) ---
+# Your files to back up. Read-only to the client; it never writes here.
+# Leave it out if this machine should only receive.
+#BACKUP_DIR_HOST=/mnt/storage/my-files
 
-# Where this device's data lands — defaults to ./data next to this file.
-DATA_DIR_HOST=./data
+# What your buddies store with you. Needs the space you pledged — give it
+# its own folder on a drive that has room.
+BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files
+
+# Where restored files land. Defaults to ./restored next to this file.
+#RESTORE_DIR_HOST=/mnt/storage/restored
+
+# The client's own config (identity key, bookkeeping). Small; keep it here.
+DATA_DIR_HOST=./config
 
 # The port the local status dashboard (see below) binds directly on this
 # host. Defaults to 8080 — only set this if 8080 is already taken, or
@@ -119,6 +131,27 @@ DATA_DIR_HOST=./data
 # differently, or (same as DASHBOARD_PORT) you're running more than one
 # device's client on this same host.
 #SYNC_PORT=11235</code></pre>
+          <p class="muted" style="margin:1rem 0 0.25rem"><strong>Where your files go.</strong>
+            The client keeps four folders apart, so nothing of its own ever lands in your data:
+          </p>
+          <ul class="muted" style="margin-top:0.25rem">
+            <li><code>BACKUP_DIR_HOST</code> — <strong>your files</strong>. Mounted read-only; the client only reads them.</li>
+            <li><code>BUDDY_FILES_DIR_HOST</code> — <strong>buddy files</strong>: what your buddies store with you, encrypted (you can't read them). This is what uses the space you pledged. The client makes one subfolder per buddy inside it, so give it a folder of its own.</li>
+            <li><code>RESTORE_DIR_HOST</code> — files you <strong>restore</strong> from a buddy. Separate from your files, so a restore never overwrites anything.</li>
+            <li><code>DATA_DIR_HOST</code> — the client's own <strong>config</strong>: identity key and small bookkeeping files. Keep it next to <code>docker-compose.yml</code>.</li>
+          </ul>
+          <p class="muted" style="margin:0.5rem 0 0.25rem">Two common setups:</p>
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code># A. One data drive, separate folders on it
+BACKUP_DIR_HOST=/mnt/storage/my-files
+BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files
+RESTORE_DIR_HOST=/mnt/storage/restored
+
+# B. Two separate mounts (two disks or NAS shares)
+BACKUP_DIR_HOST=/mnt/my-data
+BUDDY_FILES_DIR_HOST=/mnt/buddy-data</code></pre>
+          <p class="muted" style="margin-top:0.5rem">
+            Don't put the buddy-files or restore folder <em>inside</em> your own files' folder — you'd end up backing your buddy's files (or your restores) back up to your buddy.
+          </p>
           <p class="muted" style="margin-top:0.75rem">
             Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
             <code>BACKUP_PASSPHRASE=correct horse battery staple woodland</code> — yours will look
@@ -174,7 +207,7 @@ cd backup-buddies-client</code></pre>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
             <li>Connects directly to your buddy's device when possible — including finding them automatically on the same local network and connecting over it, never touching the relay — falling back to the relay automatically when a direct connection isn't possible</li>
             <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
-            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land under <code>data/restored/&lt;buddy&gt;/</code> next to this device's other data, and the dashboard shows the exact path once a restore finishes</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land under <code>RESTORE_DIR_HOST/&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
           </ul>
         </div>
@@ -198,7 +231,7 @@ cd backup-buddies-client</code></pre>
         <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
         <li><code>docker compose ps</code> — check whether it's currently running.</li>
         <li><code>docker compose restart</code> — restart it without rebuilding.</li>
-        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in <code>DATA_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
+        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and everything your buddy stores with you are kept (they live in <code>DATA_DIR_HOST</code> and <code>BUDDY_FILES_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
       </ul>
     </section>
 
@@ -206,6 +239,13 @@ cd backup-buddies-client</code></pre>
       <h2>Troubleshooting</h2>
       <ul class="tech-list">
         <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>. A 401 here means that exact token doesn't match any device on your dashboard — it's either stale (its device was removed and re-added since, which issues a new one) or the paste picked up extra whitespace; easiest fix is to remove the device, add it again, and paste the fresh token.</li>
+        <li><strong>After updating, the logs warn that buddy files "are still in the old location inside DATA_DIR":</strong> older versions kept your buddies' files inside the config folder (<code>./data/received</code>). The client keeps using them there, so nothing breaks — but to give them their own folder (on a bigger drive, say), stop the client, move them, and start it again:
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto; margin-top:0.5rem"><code>docker compose down
+mkdir -p /mnt/storage/buddy-files          # pick your folder
+mv ./data/received/* /mnt/storage/buddy-files/
+echo "BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files" &gt;&gt; .env
+docker compose up -d</code></pre>
+          Your existing <code>DATA_DIR_HOST=./data</code> keeps working as the config folder. If the client instead refuses to start saying buddy files exist in <em>both</em> places, a folder was half-moved — finish moving everything from <code>./data/received/</code> into your buddy-files folder. Old restores in <code>./data/restored</code> stay where they are; new ones go to <code>RESTORE_DIR_HOST</code>.</li>
         <li><strong>Fails to start with an "address already in use" error, or logs show it exiting immediately:</strong> something else on this host — often another device's client — already has that <code>DASHBOARD_PORT</code> or <code>SYNC_PORT</code>. Give this device its own, different values for both in its <code>.env</code> (see above) and restart. With <code>network_mode: host</code>, these bind directly on the host, so they must be unique across every client running on the same machine.</li>
         <li><strong>On Docker Desktop (Mac/Windows), the dashboard or buddy connections stop working after adding <code>network_mode: host</code>:</strong> host networking isn't fully supported there the way it is on Linux. Remove that line, add back a <code>ports:</code> section instead (<code>"${DASHBOARD_PORT:-8080}:8080"</code> and <code>"${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"</code>), and everything still works — you just won't get local-network (mDNS) direct connections to a buddy on the same LAN; relay and direct-over-internet connections are unaffected.</li>
         <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>

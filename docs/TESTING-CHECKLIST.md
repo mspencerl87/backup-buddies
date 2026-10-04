@@ -889,6 +889,65 @@ can change that.
          helpdesk inbox (e.g. self-hosted FreeScout/Zammad) — no code change
          needed, the email format already carries everything
 
+## Needs testing — separate config / buddy files / restores (client 0.3.0, 2026-10-04)
+
+Spencer wanted the client's own files kept out of users' data: the common
+setups are (A) one drive with "my files" and "buddy files" folders, or (B)
+two mounts, one per side — and either way the client shouldn't drop config
+into a data drive. Before this, everything lived in one `DATA_DIR`: config
+(identity key, manifests, ledgers) *and* `received/` (buddy files) *and*
+`restored/`.
+
+Now four folders (`docker-compose.yml`, `.env.example`, `setup.html`,
+client README "Folders"):
+
+- `DATA_DIR_HOST` → `/data` — config only (default `./config` for new installs)
+- `BACKUP_DIR_HOST` → `/backup:ro` — your files, never written to
+- `BUDDY_FILES_DIR_HOST` → `/buddy-files` (`BUDDY_FILES_DIR`) — what buddies store with you
+- `RESTORE_DIR_HOST` → `/restored` (`RESTORE_DIR`) — dashboard + CLI restores, `<buddy id>/` subfolders
+
+Client changes: `BUDDY_FILES_DIR`/`RESTORE_DIR` default to
+`DATA_DIR/received`/`DATA_DIR/restored` (old layout keeps working);
+incoming files, `.versions/`, the 2GB/5% real-disk floor, the buddy
+disk-stats probe and the dashboard Disk card all use `BUDDY_FILES_DIR`'s
+filesystem (previously `DATA_DIR`'s — wrong once they're different
+drives); all three dirs get a writability probe at startup; `restore` CLI
+defaults to `RESTORE_DIR/<buddy id>`. Version bumped 0.2.0 → 0.3.0 so the
+dashboard flags devices to update.
+
+Upgrade safety (matters because `install.sh --update` replaces
+`docker-compose.yml` but keeps `.env`, so every existing install gets
+`BUDDY_FILES_DIR` pointed at a new empty `./buddy-files` while its files
+are still in `./data/received`): new folder empty + old has files → keeps
+using the old location and logs a warning with `mv` steps; both have files
+→ refuses to start; old one empty → removed. Same folder reached two ways
+(e.g. `BUDDY_FILES_DIR_HOST=./data/received`) is recognised by
+device+inode, not path. Nothing is ever moved automatically.
+
+- [x] `cargo build`/`test`/`clippy --all-targets` clean
+- [x] Startup behaviour exercised with the real binary against real
+      folders (2026-10-04): new layout → config holds only
+      `iroh_secret_key`, buddy-files/restored empty (probe file cleaned
+      up), read-only backup folder untouched; in-place-update case → warns
+      and uses the old location, files untouched; files in both → refuses
+      with instructions; same folder via a second path → starts normally;
+      old install with no new vars → unchanged; empty leftover
+      `received/` removed and old restores just warned about
+- [x] `docker compose config` renders all four mounts correctly from
+      `.env.example`
+- [ ] Live on testa/testb (same host, real transfer): `install.sh --update`
+      to 0.3.0 → each logs the "still in the old location" warning and
+      keeps syncing; dashboard Disk card shows the buddy-files path
+- [ ] Then migrate one of them for real (`docker compose down`,
+      `mv data/received/* <new folder>/`, set `BUDDY_FILES_DIR_HOST`,
+      `up -d`): no warning, reconciliation stays clean (no files reported
+      missing), pledge usage unchanged, new incoming files land in the new
+      folder
+- [ ] Layout B for real: buddy files on a different mount/disk than
+      config — Disk card and the buddy's "Their actual disk" probe report
+      that disk's numbers, not the config disk's
+- [ ] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
+
 ## Housekeeping (not bugs)
 
 - [ ] Pledges aren't set via `.env` at all — they're created through the

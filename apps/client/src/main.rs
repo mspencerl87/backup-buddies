@@ -35,7 +35,21 @@ struct Config {
     device_token: String,
     passphrase: SecretString,
     relay_url: RelayUrl,
+    // Config/state only: this device's identity key, per-buddy manifests,
+    // and the usage/bandwidth ledgers — all small. Kept separate from the
+    // two dirs below so a user's data drive never gets the client's own
+    // files mixed into it, and config can live next to docker-compose.yml.
     data_dir: PathBuf,
+    // What buddies store with us: BUDDY_FILES_DIR/<their node id>/...
+    // (encrypted, unreadable to us). Usually the big one — meant to point
+    // at a dedicated folder on whatever drive has the space. Defaults to
+    // DATA_DIR/received, the pre-split layout, so an existing install that
+    // doesn't set it keeps working unchanged.
+    buddy_files_dir: PathBuf,
+    // Where restores from the dashboard (and the `restore` CLI's default)
+    // land: RESTORE_DIR/<their node id>/... Never inside BACKUP_DIR, which
+    // is mounted read-only. Defaults to DATA_DIR/restored (pre-split).
+    restore_dir: PathBuf,
     // Where the real files to back up live. Optional — a client that's
     // only ever meant to receive (e.g. this machine has lots of disk and
     // is mainly someone else's buddy) doesn't need one. None here means
@@ -92,7 +106,17 @@ impl Config {
             .unwrap_or_else(|_| "https://relay.filegarden.net".to_string())
             .parse()
             .context("RELAY_URL is not a valid URL")?;
-        let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "/data".to_string()).into();
+        let data_dir: PathBuf = std::env::var("DATA_DIR").unwrap_or_else(|_| "/data".to_string()).into();
+        let buddy_files_dir = std::env::var("BUDDY_FILES_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.join("received"));
+        let restore_dir = std::env::var("RESTORE_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.join("restored"));
         let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
         let dashboard_port = std::env::var("DASHBOARD_PORT")
             .ok()
@@ -117,6 +141,8 @@ impl Config {
             passphrase: SecretString::from(passphrase),
             relay_url,
             data_dir,
+            buddy_files_dir,
+            restore_dir,
             backup_dir,
             dashboard_bind,
             stale_after_secs,
@@ -129,7 +155,7 @@ impl Config {
     // runtime symptom — an empty-looking backup cycle because BACKUP_DIR
     // doesn't actually exist, or a cryptic connection error because
     // API_URL has a typo in it.
-    async fn validate(&self) -> Result<()> {
+    async fn validate(&mut self) -> Result<()> {
         if let Some(backup_dir) = &self.backup_dir {
             let meta = tokio::fs::metadata(backup_dir).await.with_context(|| {
                 format!(
@@ -152,16 +178,122 @@ impl Config {
         // just creatable, by round-tripping a small probe file. A
         // read-only bind mount would otherwise only surface much later, as
         // a failed iroh_secret_key write.
-        tokio::fs::create_dir_all(&self.data_dir)
-            .await
-            .with_context(|| format!("can't create DATA_DIR ({})", self.data_dir.display()))?;
-        let probe = self.data_dir.join(".write-test");
-        tokio::fs::write(&probe, b"ok")
-            .await
-            .with_context(|| format!("DATA_DIR ({}) isn't writable", self.data_dir.display()))?;
-        let _ = tokio::fs::remove_file(&probe).await;
+        // Same check for BUDDY_FILES_DIR and RESTORE_DIR, which can each be
+        // their own bind mount (a different drive, a read-only mount by
+        // mistake) and would otherwise only fail on the first incoming file
+        // or the first restore.
+        for (name, dir) in [
+            ("DATA_DIR", &self.data_dir),
+            ("BUDDY_FILES_DIR", &self.buddy_files_dir),
+            ("RESTORE_DIR", &self.restore_dir),
+        ] {
+            ensure_writable_dir(name, dir).await?;
+        }
 
+        self.check_pre_split_layout().await?;
         Ok(())
+    }
+
+    // Before BUDDY_FILES_DIR / RESTORE_DIR existed, both lived inside
+    // DATA_DIR (as received/ and restored/). An existing install that picks
+    // up the new docker-compose.yml (e.g. via `install.sh --update`, which
+    // keeps .env) gets BUDDY_FILES_DIR pointed at a fresh, empty folder
+    // while its buddies' files are still in DATA_DIR/received. Starting on
+    // the empty folder would make those backups look missing (and
+    // usage.json would still count them against each pledge), so:
+    //   - new folder empty, old one has files -> keep using the old
+    //     location, and warn with how to move them;
+    //   - both have files -> refuse to start: we can't tell which is real;
+    //   - old one empty -> tidy it away so DATA_DIR holds config only.
+    // Files are never moved automatically: rename doesn't work across bind
+    // mounts (even on the same disk), and silently copying what could be
+    // terabytes at startup isn't something to do behind someone's back.
+    async fn check_pre_split_layout(&mut self) -> Result<()> {
+        let legacy_received = self.data_dir.join("received");
+        let received_moved = !same_dir(&legacy_received, &self.buddy_files_dir).await;
+        if received_moved && dir_has_entries(&legacy_received).await {
+            if dir_has_entries(&self.buddy_files_dir).await {
+                anyhow::bail!(
+                    "buddy files exist in both {} (the old location) and {} (BUDDY_FILES_DIR) — the client \
+                     won't start until there's only one. Stop the client and, on the host, move everything \
+                     from <DATA_DIR_HOST>/received/ into <BUDDY_FILES_DIR_HOST>/, merging any per-buddy folders.",
+                    legacy_received.display(),
+                    self.buddy_files_dir.display()
+                );
+            }
+            tracing::warn!(
+                using = %legacy_received.display(),
+                configured = %self.buddy_files_dir.display(),
+                "buddy files are still in the old location inside DATA_DIR, so the client is using them there for now. \
+                 To move them to their own folder: stop the client, then on the host move everything from \
+                 <DATA_DIR_HOST>/received/ into <BUDDY_FILES_DIR_HOST>/ (e.g. `mv data/received/* buddy-files/`), \
+                 and start it again"
+            );
+            let _ = tokio::fs::remove_dir(&self.buddy_files_dir).await; // only if empty; tidy the unused mount point
+            self.buddy_files_dir = legacy_received;
+            return self.check_legacy_restored().await;
+        }
+        // Empty leftover from the old layout — tidy it away so DATA_DIR
+        // holds config only. remove_dir only succeeds on an empty dir.
+        if received_moved {
+            let _ = tokio::fs::remove_dir(&legacy_received).await;
+        }
+
+        self.check_legacy_restored().await
+    }
+
+    // Old restores are the user's own output, not something the client
+    // depends on — just point at them rather than blocking startup.
+    async fn check_legacy_restored(&self) -> Result<()> {
+        let legacy_restored = self.data_dir.join("restored");
+        if !same_dir(&legacy_restored, &self.restore_dir).await {
+            if dir_has_entries(&legacy_restored).await {
+                tracing::warn!(
+                    old = %legacy_restored.display(),
+                    new = %self.restore_dir.display(),
+                    "files restored before RESTORE_DIR was set are still in the old location — new restores go to the new one; move or delete the old ones whenever convenient"
+                );
+            } else {
+                let _ = tokio::fs::remove_dir(&legacy_restored).await;
+            }
+        }
+        Ok(())
+    }
+}
+
+async fn ensure_writable_dir(name: &str, dir: &Path) -> Result<()> {
+    tokio::fs::create_dir_all(dir)
+        .await
+        .with_context(|| format!("can't create {name} ({})", dir.display()))?;
+    let probe = dir.join(".write-test");
+    tokio::fs::write(&probe, b"ok")
+        .await
+        .with_context(|| format!("{name} ({}) isn't writable — check its bind mount in docker-compose.yml", dir.display()))?;
+    let _ = tokio::fs::remove_file(&probe).await;
+    Ok(())
+}
+
+// True if both paths are the same directory — compared by device + inode,
+// not by path, because the same host folder can show up at two different
+// paths inside the container (e.g. BUDDY_FILES_DIR_HOST pointed at the old
+// DATA_DIR_HOST/received, which is then visible both as /buddy-files and
+// as /data/received). Equal paths count as the same even if neither
+// exists yet.
+async fn same_dir(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    if a == b {
+        return true;
+    }
+    match (tokio::fs::metadata(a).await, tokio::fs::metadata(b).await) {
+        (Ok(ma), Ok(mb)) => ma.dev() == mb.dev() && ma.ino() == mb.ino(),
+        _ => false,
+    }
+}
+
+async fn dir_has_entries(dir: &Path) -> bool {
+    match tokio::fs::read_dir(dir).await {
+        Ok(mut entries) => matches!(entries.next_entry().await, Ok(Some(_))),
+        Err(_) => false,
     }
 }
 
@@ -206,11 +338,11 @@ async fn main() -> Result<()> {
             |_| tracing_subscriber::EnvFilter::new("info,swarm_discovery=warn"),
         ))
         .init();
-    let config = Config::from_env()?;
+    let mut config = Config::from_env()?;
     config.validate().await?;
 
-    tokio::fs::create_dir_all(&config.data_dir).await?;
-    tokio::fs::create_dir_all(config.data_dir.join("received")).await?;
+    // DATA_DIR, BUDDY_FILES_DIR and RESTORE_DIR were all created (and
+    // proven writable) by validate() above.
 
     let secret_key = load_or_generate_secret_key(&config.data_dir).await?;
     let endpoint_id = secret_key.public();
@@ -321,7 +453,8 @@ async fn main() -> Result<()> {
     // `restore <buddy node id> [restore_dir]` pulls everything that buddy
     // is holding for us and exits — a one-shot operation, not part of the
     // normal daemon loop below. e.g.:
-    //   docker compose run --rm client restore <node-id> /data/restored
+    //   docker compose run --rm client restore <node-id>
+    // (defaults to RESTORE_DIR/<node id>; pass a path to override)
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("restore") {
         let buddy_id: EndpointId = args
@@ -329,8 +462,10 @@ async fn main() -> Result<()> {
             .context("usage: restore <buddy node id> [restore_dir]")?
             .parse()
             .context("not a valid Iroh node id")?;
-        let restore_dir: PathBuf =
-            args.get(3).cloned().unwrap_or_else(|| "/data/restored".to_string()).into();
+        let restore_dir: PathBuf = args
+            .get(3)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| config.restore_dir.join(buddy_id.to_string()));
         tokio::fs::create_dir_all(&restore_dir).await?;
 
         tracing::info!(buddy = %buddy_id, dir = %restore_dir.display(), "starting restore");
@@ -406,6 +541,8 @@ async fn main() -> Result<()> {
         let node_id_str = endpoint_id.to_string();
         let config_dashboard_bind = config.dashboard_bind.clone();
         let data_dir = config.data_dir.clone();
+        let buddy_files_dir = config.buddy_files_dir.clone();
+        let restore_dir = config.restore_dir.clone();
         let backup_dir = config.backup_dir.clone();
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
@@ -421,6 +558,8 @@ async fn main() -> Result<()> {
                 &config_dashboard_bind,
                 node_id_str,
                 data_dir,
+                buddy_files_dir,
+                restore_dir,
                 backup_dir,
                 pledge_book,
                 bandwidth_book,
@@ -446,16 +585,24 @@ async fn main() -> Result<()> {
     let accept_task = {
         let endpoint = endpoint.clone();
         let data_dir = config.data_dir.clone();
+        let buddy_files_dir = config.buddy_files_dir.clone();
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
         tokio::spawn(async move {
             while let Some(incoming) = endpoint.accept().await {
                 let data_dir = data_dir.clone();
+                let buddy_files_dir = buddy_files_dir.clone();
                 let pledge_book = pledge_book.clone();
                 let bandwidth_book = bandwidth_book.clone();
                 tokio::spawn(async move {
-                    if let Err(err) =
-                        receive::handle_incoming(incoming, data_dir, pledge_book, bandwidth_book).await
+                    if let Err(err) = receive::handle_incoming(
+                        incoming,
+                        data_dir,
+                        buddy_files_dir,
+                        pledge_book,
+                        bandwidth_book,
+                    )
+                    .await
                     {
                         tracing::warn!(?err, "incoming connection failed");
                     }

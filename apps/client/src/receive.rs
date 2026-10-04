@@ -29,9 +29,12 @@ const MIN_FREE_RESERVE_PERCENT: u64 = 5;
 // the write) if disk stats can't be read at all, since a transient statvfs
 // error shouldn't block every incoming backup; the pledge check is still
 // the primary guard in that case.
-async fn disk_has_room_for(data_dir: &Path, additional_bytes: u64) -> bool {
-    let data_dir = data_dir.to_path_buf();
-    match tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir)).await {
+//
+// Measured on the filesystem holding BUDDY_FILES_DIR — where incoming data
+// actually lands — not DATA_DIR, since the two can be different disks.
+async fn disk_has_room_for(buddy_files_dir: &Path, additional_bytes: u64) -> bool {
+    let buddy_files_dir = buddy_files_dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || fs4::statvfs(&buddy_files_dir)).await {
         Ok(Ok(stats)) => {
             let reserve = MIN_FREE_RESERVE_BYTES.max(stats.total_space() / 100 * MIN_FREE_RESERVE_PERCENT);
             let usable = stats.available_space().saturating_sub(reserve);
@@ -144,12 +147,13 @@ pub async fn save_usage_ledger(data_dir: &Path, book: &PledgeBook) -> Result<()>
 /// than handling just one and returning.
 ///
 /// Storage is scoped by sender: everything a given buddy sends us lives
-/// under received/<their node id>/<path they gave us>, and List/Get only
+/// under BUDDY_FILES_DIR/<their node id>/<path they gave us>, and List/Get only
 /// ever look inside that one sender's own directory — a buddy can never
 /// see or fetch what another buddy stored with us.
 pub async fn handle_incoming(
     incoming: iroh::endpoint::Incoming,
     data_dir: PathBuf,
+    buddy_files_dir: PathBuf,
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
 ) -> Result<()> {
@@ -157,7 +161,7 @@ pub async fn handle_incoming(
     let conn = connecting.await?;
     let remote = conn.remote_id();
     let remote_id = remote.to_string();
-    let sender_dir = data_dir.join("received").join(&remote_id);
+    let sender_dir = buddy_files_dir.join(&remote_id);
     // Read once per connection rather than per stream — the path a
     // connection settles on doesn't change mid-connection, and every
     // stream on it (one per file in a backup cycle) shares the same one.
@@ -169,6 +173,7 @@ pub async fn handle_incoming(
             Err(_) => break, // peer closed the connection — normal end of a sync cycle
         };
         let data_dir = data_dir.clone();
+        let buddy_files_dir = buddy_files_dir.clone();
         let sender_dir = sender_dir.clone();
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
@@ -178,6 +183,7 @@ pub async fn handle_incoming(
                 send,
                 recv,
                 data_dir,
+                buddy_files_dir,
                 sender_dir,
                 remote_id.clone(),
                 pledge_book,
@@ -199,6 +205,7 @@ async fn handle_stream(
     mut send: iroh::endpoint::SendStream,
     mut recv: iroh::endpoint::RecvStream,
     data_dir: PathBuf,
+    buddy_files_dir: PathBuf,
     sender_dir: PathBuf,
     remote_id: String,
     pledge_book: PledgeBook,
@@ -220,6 +227,7 @@ async fn handle_stream(
                 &remote_id,
                 &pledge_book,
                 &data_dir,
+                &buddy_files_dir,
                 &bandwidth_book,
                 &quality,
                 path,
@@ -238,7 +246,7 @@ async fn handle_stream(
             handle_get(&mut send, &sender_dir, path, &data_dir, &bandwidth_book, &quality).await?;
         }
         SyncRequest::DiskStats => {
-            handle_disk_stats(&mut send, &data_dir, &pledge_book).await?;
+            handle_disk_stats(&mut send, &buddy_files_dir, &pledge_book).await?;
         }
         SyncRequest::ListVersions { path } => {
             handle_list_versions(&mut send, &sender_dir, path).await?;
@@ -256,7 +264,7 @@ async fn handle_stream(
 // Reject anything that would escape the sender's own directory — an
 // absolute path or any ".." component. A malicious or buggy buddy client
 // sending path: "../../etc/passwd" should get "invalid path", not a write
-// outside received/<their id>/. Also reused by restore.rs, which joins
+// outside BUDDY_FILES_DIR/<their id>/. Also reused by restore.rs, which joins
 // paths from a buddy's own List response the same way.
 pub(crate) fn safe_join(base: &Path, rel: &str) -> Option<PathBuf> {
     let rel_path = Path::new(rel);
@@ -277,6 +285,7 @@ async fn handle_put(
     remote_id: &str,
     pledge_book: &PledgeBook,
     data_dir: &Path,
+    buddy_files_dir: &Path,
     bandwidth_book: &BandwidthBook,
     quality: &ConnectionQuality,
     path: String,
@@ -315,7 +324,7 @@ async fn handle_put(
     // for some other reason (an over-generous pledge, something else on
     // the same volume). Checked first so a failure here reads as "no
     // room" rather than the more specific "pledge exceeded".
-    if incoming_delta > 0 && !disk_has_room_for(data_dir, incoming_delta).await {
+    if incoming_delta > 0 && !disk_has_room_for(buddy_files_dir, incoming_delta).await {
         tracing::warn!(
             from = %remote_id,
             path = %path,
@@ -486,14 +495,16 @@ async fn handle_list(send: &mut iroh::endpoint::SendStream, sender_dir: &Path) -
 // they pledge" instead of just trusting the pledge).
 async fn handle_disk_stats(
     send: &mut iroh::endpoint::SendStream,
-    data_dir: &Path,
+    buddy_files_dir: &Path,
     pledge_book: &PledgeBook,
 ) -> Result<()> {
     let pledged_out_total_bytes: u64 =
         { pledge_book.lock().unwrap().values().map(|s| s.pledged_bytes).sum() };
 
-    let data_dir_owned = data_dir.to_path_buf();
-    let stats = tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir_owned)).await;
+    // The disk a buddy's files actually land on (BUDDY_FILES_DIR), which may
+    // be a different drive from DATA_DIR's config/state.
+    let dir_owned = buddy_files_dir.to_path_buf();
+    let stats = tokio::task::spawn_blocking(move || fs4::statvfs(&dir_owned)).await;
 
     let response = match stats {
         Ok(Ok(stats)) => {

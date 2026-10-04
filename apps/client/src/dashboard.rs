@@ -151,7 +151,12 @@ pub type ReconcileBook = Arc<Mutex<HashMap<String, ReconcileRecord>>>;
 #[derive(Clone)]
 struct AppState {
     node_id: String,
+    // Config/state only (identity key, manifests, ledgers).
     data_dir: PathBuf,
+    // What buddies store with us — BUDDY_FILES_DIR/<their node id>/.
+    buddy_files_dir: PathBuf,
+    // Where dashboard restores land — RESTORE_DIR/<their node id>/.
+    restore_dir: PathBuf,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
@@ -213,8 +218,9 @@ struct BuddyStatus {
     last_reconcile: Option<ReconcileRecord>,
 }
 
-/// Physical space on the filesystem backing `data_dir` — where every
-/// buddy's `received/<their id>/` lives. This is the actual disk, not the
+/// Physical space on the filesystem backing `buddy_files_dir` — where every
+/// buddy's `<their id>/` folder lives (which may be a different disk from
+/// `data_dir`'s config). This is the actual disk, not the
 /// sum of pledges: pledges are promises about how much we'll *accept*,
 /// this is what the OS says is really there. The two can and do diverge
 /// (pledges made before the disk filled up, other things sharing the same
@@ -244,6 +250,8 @@ struct StatusResponse {
     label: Option<String>,
     backup_dir: Option<String>,
     data_dir: String,
+    buddy_files_dir: String,
+    restore_dir: String,
     // Build version and process uptime — the same two numbers a
     // Syncthing-style "This Device" panel shows, so a person checking the
     // dashboard can tell at a glance whether this device has restarted
@@ -326,6 +334,8 @@ pub async fn run(
     bind_addr: &str,
     node_id: String,
     data_dir: PathBuf,
+    buddy_files_dir: PathBuf,
+    restore_dir: PathBuf,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
@@ -342,6 +352,8 @@ pub async fn run(
     let state = AppState {
         node_id,
         data_dir,
+        buddy_files_dir,
+        restore_dir,
         backup_dir,
         pledge_book,
         bandwidth_book,
@@ -408,8 +420,8 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     // support it, so a disk-stats quirk on some host never takes down the
     // rest of the dashboard.
     let disk = {
-        let data_dir = state.data_dir.clone();
-        tokio::task::spawn_blocking(move || fs4::statvfs(&data_dir))
+        let buddy_files_dir = state.buddy_files_dir.clone();
+        tokio::task::spawn_blocking(move || fs4::statvfs(&buddy_files_dir))
             .await
             .ok()
             .and_then(|r| r.ok())
@@ -437,7 +449,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         // buddy's own received/ files on disk are the encrypted bytes).
         let sent_bytes: u64 = manifest.entries.values().map(|e| e.ciphertext_size).sum();
 
-        let sender_dir = state.data_dir.join("received").join(&node_id);
+        let sender_dir = state.buddy_files_dir.join(&node_id);
         let received = receive::list_sender_files(&sender_dir).await;
         let received_files = received.len();
         let received_total_bytes: u64 = received.iter().map(|f| f.size).sum();
@@ -486,6 +498,8 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         label,
         backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
         data_dir: state.data_dir.display().to_string(),
+        buddy_files_dir: state.buddy_files_dir.display().to_string(),
+        restore_dir: state.restore_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
         uptime_secs: state.started_at.elapsed().as_secs(),
         mdns_peers_visible: state.mdns_peers.lock().unwrap().len(),
@@ -585,7 +599,7 @@ async fn restore_version_handler(
         Err(_) => return (StatusCode::BAD_REQUEST, "not a valid Iroh node id".to_string()).into_response(),
     };
 
-    let restore_dir = state.data_dir.join("restored").join(&node_id_str);
+    let restore_dir = state.restore_dir.join(&node_id_str);
     if let Err(err) = tokio::fs::create_dir_all(&restore_dir).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't create restore directory: {err}"))
             .into_response();
@@ -621,7 +635,7 @@ async fn restore_version_handler(
 }
 
 // Pulls files that buddy currently has stored for us and writes them
-// under data_dir/restored/<their node id>/ — a fixed, predictable
+// under RESTORE_DIR/<their node id>/ — a fixed, predictable
 // location (separate per buddy, so restoring from two buddies in a row
 // can't clobber each other), unlike the `restore` CLI subcommand which
 // takes an explicit destination. An empty/absent `paths` in the request
@@ -645,7 +659,7 @@ async fn restore_handler(
     };
     let requested = body.map(|Json(b)| b.paths).unwrap_or_default();
 
-    let restore_dir = state.data_dir.join("restored").join(&node_id_str);
+    let restore_dir = state.restore_dir.join(&node_id_str);
     if let Err(err) = tokio::fs::create_dir_all(&restore_dir).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("couldn't create restore directory: {err}"))
             .into_response();
@@ -930,7 +944,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
   </div>
   <div class="card" id="disk-card" style="display:none;">
     <h2>Disk</h2>
-    <div class="muted"><code id="data-dir">…</code></div>
+    <div class="muted">Buddy files: <code id="buddy-files-dir">…</code></div>
     <div class="disk-stats">
       <div class="stat">
         <div class="label">Used</div>
@@ -1775,7 +1789,7 @@ function renderDisk(data) {
   }
   card.style.display = "block";
 
-  document.getElementById("data-dir").textContent = data.data_dir;
+  document.getElementById("buddy-files-dir").textContent = data.buddy_files_dir;
   document.getElementById("disk-used").textContent = fmtBytes(data.disk.used_bytes);
   document.getElementById("disk-free").textContent = fmtBytes(data.disk.available_bytes);
   document.getElementById("disk-total").textContent = fmtBytes(data.disk.total_bytes);

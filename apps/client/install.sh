@@ -15,8 +15,9 @@
 #   curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
 #
 # Replaces only the code (source, Dockerfile, compose file) and rebuilds.
-# Never touches .env (device token, backup passphrase) or ./data (this
-# device's identity and the backups it holds for its buddies) — deleting
+# Never touches .env (device token, backup passphrase) or the data folders
+# (./config or ./data: this device's identity; ./buddy-files: the backups it
+# holds for its buddies, unless .env points them elsewhere) — deleting
 # the folder and reinstalling would lose both, so never update that way.
 
 set -euo pipefail
@@ -99,7 +100,7 @@ if [ "$MODE" = "update" ]; then
   for f in $SRC_FILES; do cp "$STAGING/src/$f" "src/$f"; done
   for f in $ASSET_FILES; do cp "$STAGING/assets/$f" "assets/$f"; done
 
-  echo "Updated client code: ${OLD_VERSION:-unknown} -> ${NEW_VERSION:-unknown}. Your .env and ./data were not touched."
+  echo "Updated client code: ${OLD_VERSION:-unknown} -> ${NEW_VERSION:-unknown}. Your .env and data folders were not touched."
   echo "Rebuilding and restarting (a few minutes)..."
   docker compose up -d --build
   echo
@@ -110,7 +111,7 @@ fi
 if [ -d "$DEST" ]; then
   echo "Error: ./$DEST already exists. To update it, run:" >&2
   echo "  curl -fsSL $BASE_URL/install.sh | bash -s -- --update" >&2
-  echo "(Don't delete it to reinstall — its .env and data/ hold your device token, passphrase, and backups.)" >&2
+  echo "(Don't delete it to reinstall — its .env and data folders hold your device token, passphrase, and backups.)" >&2
   exit 1
 fi
 
@@ -128,6 +129,9 @@ Next steps:
   1. Edit backup-buddies-client/.env — set DEVICE_TOKEN (from your
      dashboard's Devices card) and BACKUP_PASSPHRASE (something only you
      know; it never leaves this machine and can't be recovered if lost).
+     Then set the folders: BACKUP_DIR_HOST (your files) and
+     BUDDY_FILES_DIR_HOST (a folder with room for what your buddy stores
+     with you). See the FOLDERS section in .env for examples.
   2. cd backup-buddies-client && docker compose up -d
      (builds the image locally the first time — a few minutes)
   3. docker compose logs -f

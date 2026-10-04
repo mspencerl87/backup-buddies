@@ -21,10 +21,11 @@
 #      show "nothing new to back up" every cycle rather than a separate
 #      "connectivity check" message — that's expected.
 #
-# To restore what a buddy is holding for you:
-#   docker compose run --rm client restore <buddy's node id> /data/restored
+# To restore what a buddy is holding for you, use the local dashboard's
+# Restore button, or:
+#   docker compose run --rm client restore <buddy's node id>
 # (find their node id on your dashboard's Buddies card). Files land under
-# DATA_DIR_HOST/restored on this machine.
+# RESTORE_DIR_HOST/<buddy's node id>/ on this machine.
 #
 # A local status page — per-buddy pledge usage, what's been sent/received,
 # last backup cycle, and a one-click restore — is served at
@@ -62,19 +63,31 @@ services:
     network_mode: host
     env_file: .env
     environment:
-      # Fixed mount point inside the container — BACKUP_DIR_HOST in .env
-      # controls what's mounted there on the host side, below.
+      # Fixed mount points inside the container. The *_HOST values in .env
+      # control which folders on this machine get mounted there, below.
       - BACKUP_DIR=/backup
+      - BUDDY_FILES_DIR=/buddy-files
+      - RESTORE_DIR=/restored
     volumes:
-      # A real, visible folder on this machine — not an opaque
-      # Docker-managed volume — so it's easy to find, move, or point your
-      # own backup tooling at. Defaults to ./data, next to this file; set
-      # DATA_DIR_HOST in .env to use somewhere else instead. Created
-      # automatically if it doesn't exist.
-      - ${DATA_DIR_HOST}:/data
-      # The folder you're backing up. Mounted read-only — this client only
-      # ever needs to read these files, never write them. Falls back to an
-      # empty local folder when BACKUP_DIR_HOST isn't set in .env, which
-      # just means there's nothing to back up (fine for a receive-only
-      # device).
-      - ${BACKUP_DIR_HOST:-./data/empty-backup-dir}:/backup:ro
+      # Four separate folders, so the client's own files never end up mixed
+      # into your data. All are real, visible folders on this machine (not
+      # opaque Docker volumes); any that don't exist yet are created.
+      #
+      # 1. Config: this device's identity key and small bookkeeping files.
+      #    Tiny. Keep it next to this file (the default, ./config) — not on
+      #    your data drive.
+      - ${DATA_DIR_HOST:-./config}:/data
+      # 2. Your files — what gets backed up. Mounted READ-ONLY: the client
+      #    never writes anything into this folder. Falls back to an empty
+      #    folder when BACKUP_DIR_HOST isn't set (a receive-only device).
+      - ${BACKUP_DIR_HOST:-./empty-backup-dir}:/backup:ro
+      # 3. Buddy files — what your buddies store with you (encrypted; you
+      #    can't read them). This is the one that needs the space you
+      #    pledged, so point it at a dedicated folder on a drive that has
+      #    it. Use its own folder, never your own files' folder: the client
+      #    creates one subfolder per buddy in here.
+      - ${BUDDY_FILES_DIR_HOST:-./buddy-files}:/buddy-files
+      # 4. Restores — where files you restore from a buddy are written.
+      #    Kept apart from your files so a restore never overwrites
+      #    anything; copy back what you need yourself.
+      - ${RESTORE_DIR_HOST:-./restored}:/restored
