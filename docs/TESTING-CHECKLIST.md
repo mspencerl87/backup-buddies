@@ -1071,9 +1071,17 @@ Tested 2026-10-04:
       on both → logs show "imported old manifest into the index" (testa),
       no files re-sent (card stays at its file count, no new "backup
       cycle complete" with sends); `hello.txt`/`hello-b.txt` restore
-- [ ] Live big file: `head -c 3G /dev/urandom > ~/bbdata/testa/my-files/big.bin`
-      → arrives on testb's NFS share; watch `docker stats` memory stay
-      low; restore it and compare `sha256sum`
+- [x] **Live big files confirmed (2026-10-04)** with real ISOs, both
+      clients on 0.5.0: testa's backup folder pointed at
+      `\\192.168.10.15\nfssmbtest\ISOs` over SMB (Windows 7 ISO 2.7 GB +
+      Server 2025 ISO 7.2 GB). `docker stats` during the first cycle:
+      testa ~10 MB memory at ~50% CPU while fingerprinting over SMB. Windows
+      7 ISO sent direct to testb's NFS folder in ~2 min; Server 2025
+      refused up front with "your buddy's pledge to you is full" (7.2 GB >
+      5 GB pledge) and not re-read on later cycles; old `hello.txt`
+      deletion mirrored; reconciliation "1 file(s) match". Dashboard
+      restore → `sha256sum` of original and restored ISO identical
+      (`6c2add92…`): SMB → encrypt → NFS → decrypt → local disk, bit for bit
 - [ ] Live many files: a folder of a few thousand photos → first backup
       in seconds/minutes, not hours; Browse files lists them all
 

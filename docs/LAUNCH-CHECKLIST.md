@@ -26,8 +26,8 @@ Last reviewed: 2026-10-04.
   real endpoints: a 6 GB file on a 7 GB-RAM box (peak ~263 MB; unchanged
   cycle 0 ms; restore byte-identical), and 20,000 files (first backup
   41 s, unchanged cycle 0.14 s, restore 23 s).
-  - [ ] Confirm live on testa/testb after `docker compose pull && up -d`
-        (steps in TESTING-CHECKLIST.md, "Client 0.5.0").
+  - [x] Confirmed live 2026-10-04: real ISOs over SMB → NFS, restored
+        byte-identical (sha256 match), ~10 MB memory during transfer.
 
 ## Should do (quick, ~1 hour total)
 
@@ -52,6 +52,13 @@ Last reviewed: 2026-10-04.
 
 ## Needed after launch (real gaps, not polish)
 
+- [ ] **Progress during long backups.** The buddy card only updates when a
+      whole cycle finishes, so a first backup of a big folder shows "no cycle
+      yet" for minutes or hours with no sign of life (seen with 10 GB of
+      ISOs). Show files/bytes done and current file while a cycle runs —
+      same shape as the restore progress that already exists. Probably worth
+      doing before or right after launch: r/homelab first backups will be
+      long.
 - [ ] **Chunked, rsync-like transfers.** Today any change to a file re-sends
       the whole file — a 20 GB VM image with one changed block costs 20 GB
       (billed when it goes over the relay). Classic rsync can't work here:
@@ -98,6 +105,11 @@ Last reviewed: 2026-10-04.
   from the dashboard link).
 - Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted).
 - Error messages show container paths (`/backup`) instead of host paths.
+- A buddy card with one permanently-stuck file (e.g. over the pledge) shows
+  a red "backup failed" pill even though everything else synced — a softer
+  "1 file can't sync" warning style would read better.
+- Dashboard restores log nothing on success (only failures), which made a
+  "did it run?" question harder to answer — add an info line.
 - Long-term: Syncthing-style dashboard tiers, auto-derived marketplace
   fields, helpdesk inbox.
 
