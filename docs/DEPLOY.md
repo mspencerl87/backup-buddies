@@ -738,3 +738,26 @@ generic message and the error is logged), and nothing else is affected.
 Uses the existing `SMTP_*`/`MAIL_FROM`/`APP_URL` env vars. Optional:
 `SUPPORT_EMAIL` overrides the support address shown in reset emails
 (defaults to `support@filegarden.net`).
+
+## 21. Cache-busted CSS/JS URLs
+
+Every `href="/style.css"` / `src="/…js"` in `apps/web/*.html` now carries
+`?v=<first 8 hex of the file's SHA-256>`. A changed stylesheet gets a new
+URL, so browsers and Cloudflare can't keep serving a stale copy. Before
+this, a style change could need Ctrl+Shift+R to show up. Unchanged files
+keep their URL and stay cached.
+
+The new `stamp-asset-versions` job in `.github/workflows/deploy.yml`
+re-stamps on every deploy and commits the result back to `main` as
+"Stamp asset versions" (from `github-actions[bot]`) before app-1 pulls.
+Nobody has to remember to run it. **Pull before pushing after any CSS/JS
+change**, since that bot commit will be on `main`. A push made with
+`GITHUB_TOKEN` doesn't trigger workflows, so it can't loop.
+
+To check or stamp by hand:
+```bash
+node scripts/stamp-asset-versions.mjs --check   # exit 1 if stale
+node scripts/stamp-asset-versions.mjs           # rewrite in place
+```
+If `main` ever gets branch protection that blocks the bot's push, the job
+warns instead of failing the deploy. Stamp by hand in that case.

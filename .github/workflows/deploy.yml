@@ -11,7 +11,41 @@ on:
       - ".github/workflows/deploy.yml"
 
 jobs:
+  # Re-stamps ?v=<hash> on the site's CSS/JS links (scripts/
+  # stamp-asset-versions.mjs) and commits it back to main if anything
+  # changed, so a stylesheet edit never gets masked by a cached copy and
+  # nobody has to remember to run the script by hand. Runs before the
+  # deploy job's `git pull` on app-1, so the server picks up the stamped
+  # commit. A push made with GITHUB_TOKEN doesn't trigger workflows, so
+  # this can't loop.
+  stamp-asset-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Stamp and commit if changed
+        run: |
+          node scripts/stamp-asset-versions.mjs
+          if git diff --quiet -- apps/web; then
+            echo "Asset versions already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Stamp asset versions"
+          # Someone may have pushed since checkout — rebase once and retry.
+          # If the push still fails (e.g. branch protection), warn rather
+          # than block the deploy — an unstamped version only risks a
+          # stale cached stylesheet, not a broken site.
+          git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main) \
+            || echo "::warning::Couldn't push stamped asset versions — run scripts/stamp-asset-versions.mjs and commit by hand.
+
   build-and-push:
+    needs: stamp-asset-versions
     runs-on: ubuntu-latest
     permissions:
       contents: read
