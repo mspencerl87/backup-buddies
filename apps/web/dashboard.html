@@ -32,9 +32,9 @@
       <h2>Your account</h2>
       <p id="account-summary" class="muted">Loading…</p>
       <p id="paused-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid #e5a443; border-radius:8px; background:#2a1d10;">
-        Buddy syncing is paused because of a billing issue — no new files are being sent or
-        received with your buddy until this is fixed. Your existing backups aren't affected.
-        <a href="#billing" style="margin-left:0.25rem">Fix billing</a> ·
+        <span id="paused-banner-text">Buddy syncing is paused because of a billing issue — no new files are being sent or
+        received with your buddy until this is fixed. Your existing backups aren't affected.</span>
+        <a href="#billing" style="margin-left:0.25rem" id="paused-banner-action">Fix billing</a> ·
         <a href="#support">Contact support</a>
       </p>
       <p id="verify-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid var(--border); border-radius:8px; background:#2a2310;">
@@ -47,6 +47,7 @@
     <div class="card" id="billing">
       <h2>Billing</h2>
       <p id="billing-summary" class="muted">Loading…</p>
+      <p id="billing-relay-allowance" class="muted" style="display:none"></p>
       <p id="billing-note" class="muted" style="display:none"></p>
       <button class="btn" id="billing-btn" type="button" style="margin-top:1rem; display:none"></button>
       <p class="error" id="billing-error"></p>
@@ -213,6 +214,14 @@
       // up the same way.
       document.getElementById('paused-banner').style.display =
         account.relay_status === 'active' ? 'none' : 'block';
+      // The free relay allowance (lib/relay-billing.js) pauses through the
+      // same flag — but it isn't a billing problem, so say what it is.
+      if (account.relay_paused_reason === 'free_relay_cap') {
+        document.getElementById('paused-banner-text').textContent =
+          "You've used this month's free relay bandwidth, so buddy syncing is paused until the 1st. " +
+          "Your existing backups aren't affected. Subscribe to keep syncing now — relay is billed per GB on a paid plan.";
+        document.getElementById('paused-banner-action').textContent = 'Subscribe';
+      }
     }
 
     document.getElementById('resend-verification-btn').addEventListener('click', async () => {
@@ -333,6 +342,21 @@
         : '';
       summaryEl.textContent =
         `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.${relayNote}`;
+
+      // Free accounts get a monthly relay allowance instead of relay billing.
+      // Direct connections never count toward it, so most people only ever
+      // see a small number here.
+      const noteEl = document.getElementById('billing-relay-allowance');
+      if (!data.has_subscription && data.free_relay_gb_per_month) {
+        const usedGb = data.relay_bytes_this_month / (1024 ** 3);
+        noteEl.textContent =
+          `Relay bandwidth this month: ${usedGb < 0.1 && usedGb > 0 ? '<0.1' : usedGb.toFixed(1)} of ` +
+          `${data.free_relay_gb_per_month} GB free. Only traffic that can't go directly between your device and ` +
+          `your buddy's counts; past the allowance, syncing pauses until the 1st unless you subscribe.`;
+        noteEl.style.display = 'block';
+      } else {
+        noteEl.style.display = 'none';
+      }
 
       btnEl.style.display = 'inline-block';
       btnEl.textContent = data.has_subscription ? 'Manage billing' : 'Subscribe';

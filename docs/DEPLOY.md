@@ -782,3 +782,86 @@ Note for future routers: `supportRouter` is mounted *before* `adminRouter`
 in `index.js` on purpose. `adminRouter` applies `requireAuth` +
 `requireAdmin` to every request that reaches it, so anything mounted after
 it is admin-only by accident.
+
+## 23. Lock the relay to customers + free relay allowance
+
+Until now relay-1 ran with `access = "everyone"`. Anyone running an Iroh
+client could push traffic through it on your Linode bill, and free
+accounts' relay use was unlimited. This section closes both:
+
+- **Only registered devices can use the relay.** On every connection,
+  iroh-relay POSTs the device's id to `POST /relay/access`
+  (`routes/relay.js`). The API answers `true` only for a device registered
+  to an account that isn't paused. A shared secret (`RELAY_ACCESS_TOKEN`)
+  keeps anyone but relay-1 from calling it.
+- **A hard per-device speed ceiling on the relay**: 4 MiB/s sustained,
+  16 MiB bursts (`[limits.client.rx]` in `deploy/relay/config.toml`), plus
+  a cap on new connections per second. This holds even against a modified
+  client that lies about its usage.
+- **Free accounts get 10 GB of relay a month** (`FREE_RELAY_GB_PER_MONTH`).
+  Their usage is now recorded but never sent to Stripe. Past the allowance,
+  the account pauses through the existing `relay_status` flag with reason
+  `free_relay_cap`. The client stops syncing within ~30s, the user gets an
+  email, and the dashboard says why. It resumes automatically on the 1st
+  (UTC, `jobs/reset-free-relay-cap.js`), or immediately if they subscribe.
+  Direct and LAN traffic never counts. Note that a paused free account also
+  stops receiving its buddy's backups until it resumes.
+
+**Do these in order.** Switching relay-1 over before the API knows the
+token would deny every device.
+
+1. Generate one token and keep it handy:
+   ```bash
+   openssl rand -hex 32
+   ```
+2. **app-1**: add it to `deploy/app/.env`, apply the index migration, and
+   let the code deploy. Merging to `main` deploys the API; it changes
+   nothing for the relay yet.
+   ```bash
+   cd /opt/backup-buddies/deploy/app
+   echo 'RELAY_ACCESS_TOKEN=<token>' >> .env
+   docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+     < ../../db/migrations/014_relay_usage_by_month.sql
+   # after the merge's CI deploy finishes (it restarts api with the new .env):
+   docker compose up -d api
+   ```
+3. **Check it from relay-1** before touching the relay. Use a real node id
+   from the admin page (a device's "Node id" → copy):
+   ```bash
+   curl -s -X POST https://api.filegarden.net/relay/access \
+     -H "Authorization: Bearer <token>" -H "X-Iroh-NodeId: <node id>"; echo
+   # → true
+   curl -s -X POST https://api.filegarden.net/relay/access \
+     -H "Authorization: Bearer <token>" \
+     -H "X-Iroh-NodeId: 0000000000000000000000000000000000000000000000000000000000000000"; echo
+   # → false
+   ```
+   Don't continue until the first one says `true`.
+4. **relay-1**: pull, add the same token, restart:
+   ```bash
+   cd /opt/backup-buddies && git pull
+   cd deploy/relay
+   echo 'RELAY_ACCESS_TOKEN=<token>' > .env && chmod 600 .env
+   docker compose up -d
+   docker compose logs --tail 50 relay
+   ```
+   Devices reconnect on their own within ~16 seconds. In the client
+   dashboards, buddies that were relaying should come back on their next
+   cycle.
+
+**Rolling back** is the same file with `access = "everyone"` (or
+`git checkout` the old `config.toml`) and `docker compose up -d` on
+relay-1. Nothing else depends on it.
+
+**Good to know:**
+- The relay only checks on connect. A device that's already connected
+  stays connected until it reconnects. The client-side pause and the speed
+  ceiling cover that gap.
+- If the API is down, the relay refuses new connections. Devices that
+  can connect directly keep syncing; relayed ones wait for the API.
+- Denied devices retry about every 16 seconds, so a stranger's or deleted
+  device's attempts show up as repeated 403s on `/relay/access` in the API
+  logs. That's expected.
+- A brand-new device is denied for its first few seconds, because the
+  client opens its relay connection just before it registers its node id.
+  iroh retries and gets in automatically.

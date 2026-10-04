@@ -9,10 +9,12 @@ import { invitesRouter } from './routes/invites.js';
 import { billingRouter } from './routes/billing.js';
 import { devicesRouter } from './routes/devices.js';
 import { adminRouter } from './routes/admin.js';
+import { relayRouter } from './routes/relay.js';
 import { supportRouter } from './routes/support.js';
 import { syncRelayUsageToStripe } from './jobs/sync-relay-usage.js';
 import { runStaleAccountCleanup } from './jobs/stale-account-cleanup.js';
 import { sendStaleAccountDigest } from './jobs/stale-account-digest.js';
+import { resetFreeRelayCaps } from './jobs/reset-free-relay-cap.js';
 
 const app = express();
 
@@ -32,6 +34,9 @@ app.use(meRouter);
 app.use(invitesRouter);
 app.use(billingRouter);
 app.use(devicesRouter);
+// Before adminRouter, which (mounted with no path) runs requireAuth on
+// every request that reaches it — relay-1's access check has no session.
+app.use(relayRouter);
 app.use(supportRouter);
 // Keep adminRouter last: it applies requireAuth + requireAdmin to *every*
 // request that reaches it (adminRouter.use(...) with no path), so any
@@ -72,6 +77,20 @@ if (process.env.STRIPE_RELAY_PRICE_ID) {
     });
   }, 60_000);
 }
+
+// Resumes free accounts paused for using up their monthly relay allowance
+// once the 1st (UTC) comes around — see jobs/reset-free-relay-cap.js.
+// Hourly, so nobody waits long past midnight; idempotent, so restarts are
+// harmless.
+function runFreeRelayCapReset() {
+  resetFreeRelayCaps()
+    .then((emails) => {
+      if (emails.length) console.log(`Free relay allowance reset: resumed ${emails.join(', ')}`);
+    })
+    .catch((err) => console.error('Free relay allowance reset failed', err));
+}
+setInterval(runFreeRelayCapReset, 60 * 60 * 1000);
+setTimeout(runFreeRelayCapReset, 2 * 60 * 1000);
 
 // Stale-account lifecycle (jobs/stale-account-cleanup.js,
 // jobs/stale-account-digest.js): an inactivity warning email daily, and a

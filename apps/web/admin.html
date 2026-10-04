@@ -595,6 +595,16 @@
         ['Relay usage', `${formatBytes(relay.last_30d_bytes)} last 30 days · ${formatBytes(relay.total_bytes)} total` +
           (relay.last_event_at ? ` <span class="muted">(last ${escapeHtml(formatDate(relay.last_event_at))})</span>` : '') +
           unsynced],
+        // Free accounts only: the monthly relay allowance that pauses them
+        // when used up (lib/relay-billing.js). Paid accounts aren't capped.
+        !account.stripe_subscription_id
+          ? ['Free relay this month', (() => {
+              const usedGb = relay.this_month_bytes / (1024 ** 3);
+              const over = usedGb >= relay.free_allowance_gb;
+              return `<span class="${over ? 'warn-text' : ''}">${usedGb.toFixed(1)} of ${relay.free_allowance_gb} GB</span>` +
+                (over ? ' <span class="muted">(allowance used — resets on the 1st)</span>' : '');
+            })()]
+          : null,
         account.stale_warning_sent_at
           ? ['Stale warning sent', escapeHtml(formatDate(account.stale_warning_sent_at))]
           : null,
@@ -741,7 +751,10 @@
           const paymentWarning = account.relay_paused_reason === 'payment_failed'
             ? '\n\nThis was paused for a failed payment — resuming lets relay fees accrue again before they\'ve paid. ' +
               'Check the Stripe section first. (If a later payment fails, it will pause again automatically.)'
-            : '';
+            : account.relay_paused_reason === 'free_relay_cap'
+              ? '\n\nThis free account used up its monthly relay allowance. It\'s already over the limit, so the next ' +
+                'relay usage its client reports will pause it again. It resumes on its own on the 1st, or when it subscribes.'
+              : '';
           if (!confirm(`Resume buddy syncing for ${account.email}?${paymentWarning}`)) return;
           const data = await runAdminAction(btn, '/relay', { action: 'resume' }, 'detail-action-result');
           if (data) {

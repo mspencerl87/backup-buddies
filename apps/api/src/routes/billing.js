@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { stripe } from '../lib/stripe.js';
-import { RELAY_USD_PER_GB } from '../lib/relay-billing.js';
+import { RELAY_USD_PER_GB, FREE_RELAY_GB_PER_MONTH, relayBytesThisMonth } from '../lib/relay-billing.js';
 
 export const billingRouter = Router();
 
@@ -89,6 +89,10 @@ billingRouter.get('/billing/summary', requireAuth, async (req, res) => {
     // show the rate and whether it's actually live on this deployment.
     relay_usd_per_gb: RELAY_USD_PER_GB,
     relay_billing_enabled: Boolean(process.env.STRIPE_RELAY_PRICE_ID),
+    // Free accounts' monthly relay allowance (lib/relay-billing.js) and how
+    // much of it is used so far this month. Shown to free accounts only.
+    free_relay_gb_per_month: FREE_RELAY_GB_PER_MONTH,
+    relay_bytes_this_month: await relayBytesThisMonth(req.account.id),
   });
 });
 

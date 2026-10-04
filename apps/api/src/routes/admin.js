@@ -5,6 +5,7 @@ import { requireAdmin } from '../middleware/require-admin.js';
 import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
 import { isAdminEmail } from '../lib/admin.js';
 import { stripe } from '../lib/stripe.js';
+import { FREE_RELAY_GB_PER_MONTH } from '../lib/relay-billing.js';
 import { sendVerificationEmail } from '../lib/email-verification.js';
 import { createPasswordResetLink } from '../lib/password-reset.js';
 import { isMailConfigured } from '../lib/mailer.js';
@@ -148,6 +149,9 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
       `SELECT COALESCE(sum(bytes_relayed), 0) AS total_bytes,
               COALESCE(sum(bytes_relayed) FILTER (WHERE occurred_at > now() - interval '30 days'), 0)
                 AS last_30d_bytes,
+              COALESCE(sum(bytes_relayed) FILTER (
+                WHERE occurred_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+              ), 0) AS this_month_bytes,
               COALESCE(sum(bytes_relayed) FILTER (WHERE NOT synced_to_stripe), 0) AS unsynced_bytes,
               count(*) FILTER (WHERE NOT synced_to_stripe) AS unsynced_events,
               max(occurred_at) AS last_event_at
@@ -183,6 +187,9 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
     relay_usage: {
       total_bytes: Number(relay.total_bytes),
       last_30d_bytes: Number(relay.last_30d_bytes),
+      this_month_bytes: Number(relay.this_month_bytes),
+      // Only enforced for free accounts (lib/relay-billing.js).
+      free_allowance_gb: FREE_RELAY_GB_PER_MONTH,
       unsynced_bytes: Number(relay.unsynced_bytes),
       unsynced_events: Number(relay.unsynced_events),
       last_event_at: relay.last_event_at,

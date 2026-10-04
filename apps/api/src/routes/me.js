@@ -46,6 +46,9 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       tier: req.account.tier,
       has_subscription: Boolean(req.account.stripe_subscription_id),
       relay_status: req.account.relay_status,
+      // Why it's paused ('payment_failed', 'free_relay_cap', or an admin's
+      // note) — lets the dashboard banner say the right thing.
+      relay_paused_reason: req.account.relay_paused_reason,
       created_at: req.account.created_at,
       has_password: Boolean(req.account.password_hash),
       has_google: Boolean(req.account.google_sub),

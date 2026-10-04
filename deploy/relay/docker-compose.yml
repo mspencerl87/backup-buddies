@@ -21,3 +21,10 @@ services:
       - ./config.toml:/config.toml:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     command: ["--config-path", "/config.toml"]
+    environment:
+      # Shared secret for the relay -> API access check (config.toml's
+      # access.http). Read from deploy/relay/.env on relay-1; must equal
+      # RELAY_ACCESS_TOKEN in deploy/app/.env on app-1. `:?` makes
+      # `docker compose up` refuse to start without it, rather than run a
+      # relay whose every access check fails.
+      IROH_RELAY_HTTP_BEARER_TOKEN: ${RELAY_ACCESS_TOKEN:?Set RELAY_ACCESS_TOKEN in deploy/relay/.env (same value as on app-1)}
