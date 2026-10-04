@@ -935,18 +935,28 @@ device+inode, not path. Nothing is ever moved automatically.
       `received/` removed and old restores just warned about
 - [x] `docker compose config` renders all four mounts correctly from
       `.env.example`
-- [ ] Live on testa/testb (same host, real transfer): `install.sh --update`
-      to 0.3.0 → each logs the "still in the old location" warning and
-      keeps syncing; dashboard Disk card shows the buddy-files path
-- [ ] Then migrate one of them for real (`docker compose down`,
-      `mv data/received/* <new folder>/`, set `BUDDY_FILES_DIR_HOST`,
-      `up -d`): no warning, reconciliation stays clean (no files reported
-      missing), pledge usage unchanged, new incoming files land in the new
-      folder
+- [x] **Fresh deployment on 0.3.0 confirmed live (2026-10-04).** testa and
+      testb were wiped and redeployed from scratch as new devices (new
+      tokens, `ghcr.io/.../client:latest` image, layout A: config in
+      `~/docker/<dev>/config`, data in `~/bbdata/<dev>/{my-files,
+      buddy-files,restored}`). testb's config folder holds only
+      `iroh_secret_key`, `usage.json`, `bandwidth.json` — no `received/`
+      or `restored/`. testa's `hello.txt` landed encrypted (199 B) in
+      `~/bbdata/testb/buddy-files/<testa node id>/hello.txt`
+- [ ] Upgrade path on a real old install (no longer testable on testa/
+      testb since they were wiped — testc is still on the old layout):
+      pull 0.3.0 with the old compose → unchanged behaviour; new compose +
+      old `.env` → "still in the old location" warning and keeps syncing;
+      then `mv data/received/* <new folder>/`, set
+      `BUDDY_FILES_DIR_HOST` → no warning, reconciliation clean, pledge
+      usage unchanged
 - [ ] Layout B for real: buddy files on a different mount/disk than
       config — Disk card and the buddy's "Their actual disk" probe report
       that disk's numbers, not the config disk's
 - [ ] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
+- [ ] Note for a follow-up: everything the client creates is owned by root
+      (container runs as root), so users need `sudo` to move/inspect their
+      folders. Consider `PUID`/`PGID` support like linuxserver.io images
 
 ## Housekeeping (not bugs)
 
