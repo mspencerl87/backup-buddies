@@ -805,13 +805,18 @@ can change that.
          password-changed notice sent
    - [x] Re-tested after merging with the admin feature (same scenarios
          as above, against the merged code)
-   - [ ] Apply migration `013` on production (`docs/DEPLOY.md` §19 — one
-         command, shared with the admin reset button; until then reset
-         emails don't go out, nothing else is affected)
-   - [ ] Confirm live on production with a throwaway account: the email
-         actually lands from Purelymail (and not in spam), the link points
-         at `app.filegarden.net`, the reset works, and the password-changed
-         notice arrives
+   - [x] Migration `013` applied on production (confirmed by the live test
+         below working)
+   - [x] **Confirmed live on production (2026-10-04)** with the testb
+         account (`mspencerl87+testb@gmail.com`): forgot-password page
+         showed the generic 24-hour message; the email arrived in the Gmail
+         inbox (not spam) from `backupbuddies@filegarden.net` via
+         Purelymail, with the support address and backups note; the link
+         pointed at `app.filegarden.net/reset-password.html`; setting a new
+         password showed "Password updated / signed out everywhere"
+   - [ ] Still to glance at from that same test: the "Your Backup Buddies
+         password was changed" notice arrived, and the old password is
+         rejected at login while the new one works
    - [ ] Per-IP rate limiting not done: the API has no `trust proxy`
          setting and sits behind Caddy + Cloudflare, so `req.ip` isn't the
          real client. Would need Caddy/Cloudflare's client-IP header
