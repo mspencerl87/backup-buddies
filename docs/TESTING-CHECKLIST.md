@@ -1009,9 +1009,14 @@ device+inode, not path. Nothing is ever moved automatically.
       `/mnt/testa-smb/testa-buddy-files/<testb id>/` at 20:34 — before the
       unmount test — and was intact after the share was remounted. Layout B
       fully closed out on both SMB and NFS
-- [ ] Empty-backup-folder guard live: move testa's `my-files` contents
-      aside → card shows "backup failed: your backup folder looks
-      empty…", nothing deleted on testb; move them back → normal
+- [x] **Empty-backup-folder guard confirmed live (2026-10-04).** Moved
+      testa's `my-files` contents aside → every cycle logged and the card
+      showed "backup failed: your backup folder (/backup) looks empty, but
+      1 file(s) from it are backed up with this buddy — not deleting them
+      all…" ("2 cycles in a row now"); testb still held `hello.txt` on the
+      NFS share untouched. Files moved back afterwards. Polish idea: the
+      message shows the container path `/backup` rather than the host path
+      (could use `BACKUP_DIR_HOST`, like restore results do)
 ## Housekeeping (not bugs)
 
 - [ ] Pledges aren't set via `.env` at all — they're created through the
