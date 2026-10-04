@@ -274,6 +274,10 @@ struct StatusResponse {
     // not "up to date".
     latest_version: Option<String>,
     update_available: bool,
+    // The command that updates *this kind* of install — see the Dockerfile's
+    // BB_INSTALL_KIND. Image installs just pull; source installs rebuild,
+    // which install.sh --update does.
+    update_command: &'static str,
     uptime_secs: u64,
     // How many buddies are visible on the local network via mDNS right
     // now, and the fixed interval (seconds) the outbound loop polls/backs
@@ -531,6 +535,11 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         version: env!("CARGO_PKG_VERSION"),
         latest_version,
         update_available,
+        update_command: if std::env::var("BB_INSTALL_KIND").is_ok_and(|k| k == "image") {
+            "docker compose pull && docker compose up -d"
+        } else {
+            "curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update"
+        },
         uptime_secs: state.started_at.elapsed().as_secs(),
         mdns_peers_visible: state.mdns_peers.lock().unwrap().len(),
         cycle_interval_secs: state.cycle_interval_secs,
@@ -953,7 +962,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
         <div class="value" id="device-version">…</div>
         <div id="device-update" style="display:none; margin-top:0.3rem;">
           <span class="pill" id="device-update-pill"></span>
-          <code class="update-cmd muted" id="device-update-cmd" style="display:none;">curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code>
+          <code class="update-cmd muted" id="device-update-cmd" style="display:none;"></code>
         </div>
       </div>
       <div class="stat">
@@ -1993,6 +2002,7 @@ async function refresh() {
     if (data.update_available) {
       updatePill.className = "pill pill-warn";
       updatePill.textContent = "Update available: " + data.latest_version;
+      updateCmd.textContent = data.update_command;
       updateCmd.style.display = "";
     } else {
       updatePill.className = "pill pill-ok";

@@ -30,5 +30,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: apps/client
+          build-args: BB_INSTALL_KIND=image
           push: true
           tags: ghcr.io/${{ github.repository }}/client:latest,ghcr.io/${{ github.repository }}/client:${{ github.sha }}

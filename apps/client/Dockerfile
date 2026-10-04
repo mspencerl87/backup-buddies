@@ -44,6 +44,14 @@ RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/data"]
 ENV DATA_DIR=/data
 
+# How this image came to be, so the local dashboard can show the right
+# update command (see dashboard.rs's update_command): "source" for a build
+# made on the customer's own machine (install.sh), "image" for the prebuilt
+# one CI publishes to ghcr.io (.github/workflows/build-client.yml passes
+# BB_INSTALL_KIND=image). Those two update differently.
+ARG BB_INSTALL_KIND=source
+ENV BB_INSTALL_KIND=$BB_INSTALL_KIND
+
 # Local status/restore dashboard (see dashboard.rs). Documentation only —
 # docker-compose.yml's `ports:` is what actually publishes it, bound to
 # 127.0.0.1 on the host.
