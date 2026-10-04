@@ -8,13 +8,6 @@ Last reviewed: 2026-10-04.
 
 ## Real gaps (do first)
 
-- [ ] **Progress during long backups.** The buddy card only updates when a
-      whole cycle finishes, so a first backup of a big folder shows "no cycle
-      yet" for minutes or hours with no sign of life (seen with 10 GB of
-      ISOs). Show files/bytes done and current file while a cycle runs —
-      same shape as the restore progress that already exists. Probably worth
-      doing before or right after launch: r/homelab first backups will be
-      long.
 - [ ] **Chunked, rsync-like transfers.** Today any change to a file re-sends
       the whole file — a 20 GB VM image with one changed block costs 20 GB
       (billed when it goes over the relay). Classic rsync can't work here:

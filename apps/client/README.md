@@ -261,6 +261,15 @@ stat every stored file. Unset, the client runs as root as before.
   whole cycle). An unreadable folder is reported and pauses *all*
   deletions that cycle — its contents would otherwise look deleted.
 
+## Backup progress on the dashboard (0.5.1)
+
+While a backup cycle runs, each buddy card on the local dashboard shows a
+progress bar: "checking files" (how many checked, and how far through a
+changed file it's reading), then "backing up" (files and bytes done, speed,
+time left, current file). It disappears when the cycle ends and the normal
+last-cycle line takes over. Served as `in_progress` on each buddy in
+`/api/status`.
+
 ## Large folders and large files (0.5.0)
 
 - **Change detection:** see `index.sqlite` above — an unchanged file is

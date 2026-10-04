@@ -235,7 +235,17 @@ fn tmp_sibling(dest: &std::path::Path) -> std::path::PathBuf {
 
 /// Streaming SHA-256 of a local file on a blocking thread — constant memory
 /// regardless of size.
+#[cfg(test)]
 pub async fn sha256_file(path: std::path::PathBuf) -> Result<String> {
+    sha256_file_counted(path, None).await
+}
+
+/// Same as `sha256_file`, adding each chunk's length to `bytes_read` as it
+/// goes, so the dashboard can show progress through a big file.
+pub async fn sha256_file_counted(
+    path: std::path::PathBuf,
+    bytes_read: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+) -> Result<String> {
     tokio::task::spawn_blocking(move || -> Result<String> {
         use sha2::{Digest, Sha256};
         let file = std::fs::File::open(&path).context("failed to read file for hashing")?;
@@ -248,6 +258,9 @@ pub async fn sha256_file(path: std::path::PathBuf) -> Result<String> {
                 break;
             }
             hasher.update(&buf[..n]);
+            if let Some(counter) = &bytes_read {
+                counter.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         Ok(hex::encode(hasher.finalize()))
     })

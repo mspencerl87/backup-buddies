@@ -703,6 +703,11 @@ async fn main() -> Result<()> {
     let reconcile_stats: dashboard::ReconcileBook =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
+    // Live progress of any backup cycle running right now, per buddy — so a
+    // long first backup shows files/bytes done on the dashboard instead of
+    // "no cycle yet" until the whole thing finishes.
+    let cycle_progress: backup::CycleProgressBook = Arc::new(Mutex::new(std::collections::HashMap::new()));
+
     // This device's own label, as set in the web dashboard's Devices card
     // — None until the outbound loop's first successful poll of
     // /devices/me/buddies fills it in (see fetch_buddy_devices). The local
@@ -723,6 +728,7 @@ async fn main() -> Result<()> {
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         let reconcile_stats = reconcile_stats.clone();
+        let cycle_progress = cycle_progress.clone();
         let self_label = self_label.clone();
         let mdns_peers = mdns_peers.clone();
         let relay_url = config.relay_url.clone();
@@ -741,6 +747,7 @@ async fn main() -> Result<()> {
                 bandwidth_book,
                 cycle_stats,
                 reconcile_stats,
+                cycle_progress,
                 self_label,
                 mdns_peers,
                 config.scan_interval_secs,
@@ -799,6 +806,7 @@ async fn main() -> Result<()> {
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         let reconcile_stats = reconcile_stats.clone();
+        let cycle_progress = cycle_progress.clone();
         let self_label = self_label.clone();
         async move {
             // When each buddy's manifest was last reconciled against what
@@ -871,6 +879,7 @@ async fn main() -> Result<()> {
                                     &config.relay_url,
                                     backup_dir,
                                     buddy_id,
+                                    Some(&cycle_progress),
                                 )
                                 .await;
                                 if let Ok(stats) = &result

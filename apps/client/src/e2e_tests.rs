@@ -131,7 +131,11 @@ async fn e2e_backup_restore_versions_and_compat() {
 
     // 1. First cycle sends everything.
     let t = std::time::Instant::now();
-    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id).await.unwrap();
+    // With a progress book: the entry exists while the cycle runs and is
+    // gone afterwards, so the dashboard never shows a stuck progress bar.
+    let progress_book: crate::backup::CycleProgressBook = Default::default();
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, Some(&progress_book)).await.unwrap();
+    assert!(progress_book.lock().unwrap().is_empty(), "progress entry left behind after the cycle");
     let expected_files = expected.len() + usize::from(big_mb > 0);
     assert_eq!(stats.files_sent, expected_files, "first cycle: {stats:?}");
     assert_eq!(stats.files_failed, 0, "{stats:?}");
@@ -151,7 +155,7 @@ async fn e2e_backup_restore_versions_and_compat() {
 
     // 2. Nothing changed: nothing sent, no connection needed.
     let t = std::time::Instant::now();
-    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id).await.unwrap();
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
     assert_eq!((stats.files_sent, stats.files_deleted, stats.files_failed), (0, 0, 0));
     assert!(stats.connection.is_none(), "idle cycle shouldn't connect");
     let idle = t.elapsed();
@@ -165,7 +169,7 @@ async fn e2e_backup_restore_versions_and_compat() {
     let f = std::fs::File::options().write(true).open(&p).unwrap();
     f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5)).unwrap();
     drop(f);
-    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id).await.unwrap();
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
     assert_eq!(stats.files_sent, 0, "same content, new mtime: {stats:?}");
 
     // 4. A real edit and a delete.
@@ -174,7 +178,7 @@ async fn e2e_backup_restore_versions_and_compat() {
     let old_hello = expected.insert("hello.txt".into(), v2).unwrap();
     std::fs::remove_file(mine.join("photos/2024/img 001.jpg")).unwrap();
     expected.remove("photos/2024/img 001.jpg");
-    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id).await.unwrap();
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
     assert_eq!((stats.files_sent, stats.files_deleted), (1, 1), "{stats:?}");
 
     // 5. Reconciliation agrees with the buddy.
@@ -283,7 +287,7 @@ async fn e2e_backup_restore_versions_and_compat() {
     lookup_d.add_endpoint_info(old_buddy.addr());
     let ep_d = endpoint(vec![protocol::ALPN.to_vec()], lookup_d).await;
     let t = std::time::Instant::now();
-    let stats = crate::backup::run_backup_cycle(&ep_d, &relay, &mine, old_buddy.id()).await.unwrap();
+    let stats = crate::backup::run_backup_cycle(&ep_d, &relay, &mine, old_buddy.id(), None).await.unwrap();
     eprintln!("sending to an old buddy: {stats:?} in {:.1}s", t.elapsed().as_secs_f64());
     assert!(t.elapsed().as_secs() < 20, "fallback must not wait for a timeout");
     assert_eq!(stats.files_sent, expected.len(), "small files go via the old format: {stats:?}");

@@ -164,6 +164,9 @@ struct AppState {
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     reconcile_stats: ReconcileBook,
+    // Live progress of any backup cycle running right now — see
+    // backup::CycleProgress.
+    cycle_progress: crate::backup::CycleProgressBook,
     // This device's own label, as set in the web dashboard's Devices card —
     // see main.rs's self_label for where it's filled in. None until the
     // first successful poll of /devices/me/buddies, or if never labeled.
@@ -209,6 +212,9 @@ struct BuddyStatus {
     sent_files: usize,
     sent_bytes: u64,
     last_cycle: Option<CycleRecord>,
+    // Live progress of a backup cycle running right now, if one is — see
+    // backup::CycleProgress. Absent between cycles.
+    in_progress: Option<crate::backup::CycleProgress>,
     // True when this buddy hasn't had a successful cycle in over
     // stale_after_secs (or has never had one at all despite trying) —
     // computed here rather than left to the frontend so the threshold
@@ -344,6 +350,7 @@ pub async fn run(
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     reconcile_stats: ReconcileBook,
+    cycle_progress: crate::backup::CycleProgressBook,
     self_label: Arc<Mutex<Option<String>>>,
     mdns_peers: Arc<Mutex<HashSet<EndpointId>>>,
     cycle_interval_secs: u64,
@@ -363,6 +370,7 @@ pub async fn run(
         bandwidth_book,
         cycle_stats,
         reconcile_stats,
+        cycle_progress,
         self_label,
         mdns_peers,
         cycle_interval_secs,
@@ -409,6 +417,8 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     let pledge_snapshot = { state.pledge_book.lock().unwrap().clone() };
     let cycle_snapshot = { state.cycle_stats.lock().unwrap().clone() };
     let reconcile_snapshot = { state.reconcile_stats.lock().unwrap().clone() };
+    let progress_snapshot: HashMap<String, crate::backup::CycleProgress> =
+        { state.cycle_progress.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.snapshot())).collect() };
 
     // Union of "anyone we've received a pledge from" and "anyone we've
     // run a cycle against" — a buddy can appear in only one of the two
@@ -464,6 +474,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
                 .unwrap_or(true)
         });
 
+        let in_progress = progress_snapshot.get(&node_id).cloned();
         buddies.push(BuddyStatus {
             label: cycle.as_ref().map(|c| c.label.clone()),
             node_id,
@@ -473,6 +484,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
             received_total_bytes,
             sent_files,
             sent_bytes,
+            in_progress,
             last_cycle: cycle,
             stale,
             last_reconcile,
@@ -1089,6 +1101,48 @@ function describeRestoreProgress(p) {
   return line;
 }
 
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// One line + bar fraction for a backup cycle that's running right now
+// (status.buddies[].in_progress — see backup.rs's CycleProgress), so a
+// long first backup shows how far along it is instead of "no cycle yet".
+function describeCycleProgress(p) {
+  const n = (x) => Number(x).toLocaleString();
+  const curFrac = p.current_size > 0 ? Math.min(1, p.current_done / p.current_size) : 0;
+  const curSize = p.current_size > 0 ? " (" + fmtBytes(p.current_done) + " of " + fmtBytes(p.current_size) + ")" : "";
+  if (p.phase === "checking") {
+    const frac = p.files_total > 0 ? (p.files_checked + curFrac) / p.files_total : 0;
+    return {
+      frac,
+      line: "Checking for new or changed files — " + n(p.files_checked) + " of " + n(p.files_total) +
+        (p.current_path ? " — reading " + p.current_path + curSize : ""),
+    };
+  }
+  if (p.phase === "deleting") {
+    const frac = p.files_to_delete > 0 ? p.files_deleted / p.files_to_delete : 1;
+    return {
+      frac,
+      line: "Telling your buddy about deleted files — " + n(p.files_deleted) + " of " + n(p.files_to_delete),
+    };
+  }
+  const done = Math.min(p.bytes_to_send, p.bytes_sent + p.current_done);
+  const frac = p.bytes_to_send > 0 ? done / p.bytes_to_send : (p.files_to_send > 0 ? p.files_sent / p.files_to_send : 0);
+  let line = "Backing up " + n(Math.min(p.files_sent + 1, p.files_to_send)) + " of " + n(p.files_to_send) + " file(s)";
+  if (p.bytes_to_send > 0) {
+    line += " — " + fmtBytes(done) + " of " + fmtBytes(p.bytes_to_send) + " (" + Math.floor(frac * 100) + "%)";
+    const elapsed = p.sending_started_unix ? p.now_unix - p.sending_started_unix : 0;
+    const remaining = p.bytes_to_send - done;
+    if (elapsed >= 5 && done > 0 && remaining > 0) {
+      const rate = done / elapsed;
+      line += " — ~" + fmtEta(remaining / rate) + " left at " + fmtBytes(rate) + "/s";
+    }
+  }
+  if (p.current_path) line += " — " + p.current_path + curSize;
+  return { frac, line };
+}
+
 // "direct, 14ms" / "via relay, 80ms" / "connecting…" — iroh tries a
 // direct peer-to-peer path first and falls back to relaying through
 // relay.filegarden.net when NAT traversal doesn't work out; this is the
@@ -1699,6 +1753,21 @@ function renderBuddy(b) {
     }
   }
 
+  // A cycle running right now replaces "no cycle yet" with "backing up…"
+  // and shows live progress above the last cycle's line, so a long first
+  // backup visibly moves instead of looking stuck.
+  let progressBlock = "";
+  if (b.in_progress) {
+    const prog = describeCycleProgress(b.in_progress);
+    const pctW = Math.max(0, Math.min(100, prog.frac * 100)).toFixed(1);
+    progressBlock =
+      '<div style="margin-top: 0.4rem;"><div class="muted">' + escapeHtml(prog.line) + "</div>" +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pctW + '%"></div></div></div>';
+    const running = b.in_progress.phase === "checking" ? "checking files" : "backing up";
+    cyclePill = '<span class="pill pill-pending">' + running + "…</span>";
+    if (cycle) cycleDetail = "last cycle: " + cycleDetail;
+  }
+
   // A buddy can look "ok" on the very latest cycle (kind pill) while still
   // having gone a long time without a *successful* one, or have files that
   // keep failing cycle after cycle — both worth a loud, separate warning
@@ -1762,6 +1831,7 @@ function renderBuddy(b) {
       <h2>${b.label ? b.label : b.node_id.slice(0, 12) + "…"}</h2>
       <div>${cyclePill}${stalePill}</div>
     </div>
+    ${progressBlock}
     <div class="muted">${cycleDetail}</div>
     ${failedLine}
     ${reconcileLine}

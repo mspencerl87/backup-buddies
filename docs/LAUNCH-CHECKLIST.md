@@ -44,16 +44,16 @@ Last reviewed: 2026-10-04.
 
 ## Still to do before launch (all quick, you on the live site)
 
-- [ ] Password reset last checks: the "password was changed" notice email
-      arrives, and the old password is rejected at login.
+- [x] Password reset last checks — confirmed working by Spencer
+      (2026-10-04).
 - [ ] Client 0.5.0 live checks (`TESTING-CHECKLIST.md`, "Client 0.5.0"):
       a folder with many small files backs up and restores; testa's log
       shows the old JSON manifest imported once (`*.json.migrated`).
-- [ ] Decide: ship with no progress display during long first backups, or
-      build it first (top item in `POST-LAUNCH.md`). The card says "no cycle
-      yet" until a whole first backup finishes — could look broken to
-      r/homelab users with big folders. Mention it in the launch post if
-      shipping without.
+- [x] Progress during long backups — built in client 0.5.1 (2026-10-04):
+      the buddy card shows a live bar while a cycle runs (checking files,
+      then sending: files and bytes done, speed, time left, current file).
+  - [ ] Confirm live: update testa/testb to 0.5.1, drop a big file into
+        testa's backup folder, watch the bar move on testa's dashboard.
 
 ## Only if people can pay at launch
 

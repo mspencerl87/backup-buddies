@@ -1,10 +1,15 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::{Context, Result};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayUrl};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::index::{self, SentEntry};
@@ -51,6 +56,112 @@ pub struct BackupCycleStats {
 
 const MAX_FAILED_PATHS_SHOWN: usize = 10;
 
+/// Live progress of one buddy's backup cycle while it runs, so a long first
+/// backup shows signs of life on the dashboard instead of "no cycle yet"
+/// for hours. Only present while a cycle is running; removed when it ends
+/// (success or not), at which point the normal last-cycle record takes over.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CycleProgress {
+    /// "checking" (looking for new/changed files, reading any that changed),
+    /// "sending", or "deleting" (telling the buddy about deleted files).
+    pub phase: &'static str,
+    pub files_total: usize,
+    pub files_checked: usize,
+    pub files_to_send: usize,
+    pub files_sent: usize,
+    pub bytes_to_send: u64,
+    /// Bytes of fully finished files; the current file's share is added
+    /// from `current_done` when the dashboard reads it.
+    pub bytes_sent: u64,
+    pub files_to_delete: usize,
+    pub files_deleted: usize,
+    pub current_path: Option<String>,
+    pub current_size: u64,
+    /// Bytes read/sent of the current file so far (filled in by `snapshot`).
+    pub current_done: u64,
+    pub started_unix: u64,
+    /// When the sending phase started — the transfer rate and time left are
+    /// measured from here, not from the start of checking.
+    pub sending_started_unix: Option<u64>,
+    /// This device's clock when the snapshot was taken, so the browser
+    /// measures elapsed time against the same clock (no skew).
+    pub now_unix: u64,
+    #[serde(skip)]
+    current_counter: Arc<AtomicU64>,
+}
+
+impl CycleProgress {
+    /// A copy with `current_done`/`now_unix` filled in from the live counter.
+    pub fn snapshot(&self) -> CycleProgress {
+        let mut copy = self.clone();
+        copy.current_done = self.current_counter.load(Ordering::Relaxed).min(self.current_size);
+        copy.now_unix = crate::dashboard::unix_now();
+        copy
+    }
+}
+
+/// In-flight cycle progress per buddy node id — shared with the dashboard.
+pub type CycleProgressBook = Arc<Mutex<HashMap<String, CycleProgress>>>;
+
+/// Updates one buddy's entry in a `CycleProgressBook`, and removes it when
+/// dropped, so an early return or error never leaves a stuck progress bar.
+struct ProgressTracker {
+    book: Option<CycleProgressBook>,
+    node_id: String,
+    counter: Arc<AtomicU64>,
+}
+
+impl ProgressTracker {
+    fn new(book: Option<&CycleProgressBook>, node_id: &str) -> Self {
+        let counter = Arc::new(AtomicU64::new(0));
+        if let Some(book) = book {
+            book.lock().unwrap().insert(
+                node_id.to_string(),
+                CycleProgress {
+                    phase: "checking",
+                    started_unix: crate::dashboard::unix_now(),
+                    current_counter: counter.clone(),
+                    ..Default::default()
+                },
+            );
+        }
+        Self { book: book.cloned(), node_id: node_id.to_string(), counter }
+    }
+
+    fn update(&self, f: impl FnOnce(&mut CycleProgress)) {
+        if let Some(book) = &self.book
+            && let Some(p) = book.lock().unwrap().get_mut(&self.node_id)
+        {
+            f(p);
+        }
+    }
+
+    /// Starts tracking a new current file (resets the byte counter).
+    fn start_file(&self, path: &str, size: u64) {
+        self.counter.store(0, Ordering::Relaxed);
+        self.update(|p| {
+            p.current_path = Some(path.to_string());
+            p.current_size = size;
+        });
+    }
+
+    fn clear_file(&self) {
+        self.counter.store(0, Ordering::Relaxed);
+        self.update(|p| {
+            p.current_path = None;
+            p.current_size = 0;
+        });
+    }
+}
+
+impl Drop for ProgressTracker {
+    fn drop(&mut self) {
+        if let Some(book) = &self.book {
+            book.lock().unwrap().remove(&self.node_id);
+        }
+    }
+}
+
 /// Pulls a `PutRejectReason` out of a `put_one_file` error, when the
 /// failure was the buddy's own STOP_SENDING telling us why — walks the
 /// anyhow error's source chain since `write_all`'s `WriteError::Stopped`
@@ -77,13 +188,16 @@ pub async fn run_backup_cycle(
     relay_url: &RelayUrl,
     backup_dir: &Path,
     buddy_id: EndpointId,
+    progress: Option<&CycleProgressBook>,
 ) -> Result<BackupCycleStats> {
     let buddy_node_id = buddy_id.to_string();
+    let tracker = ProgressTracker::new(progress, &buddy_node_id);
     let idx = index::get();
     let sent = idx.sent_entries(&buddy_node_id)?;
 
     let scan = scan_local_files(backup_dir).await?;
     let local_files = scan.files;
+    tracker.update(|p| p.files_total = local_files.len());
 
     // A folder that suddenly looks completely empty while the buddy holds
     // files from it is far more likely to be a drive that isn't mounted (or
@@ -121,35 +235,46 @@ pub async fn run_backup_cycle(
     // unchanged folder a cycle is a metadata-only listing, however big the
     // files are.
     let mut to_put: Vec<(String, PathBuf, u64, String)> = Vec::new();
-    for f in &local_files {
+    for (checked, f) in local_files.iter().enumerate() {
+        // Cheap per-file update (one lock, one field) — drives the
+        // dashboard's "checked N of M" while a big folder is first read.
+        tracker.update(|p| p.files_checked = checked);
         let sha256 = match idx.cached_hash(&f.rel_path, f.size, f.mtime_ns)? {
             Some(hash) => hash,
-            None => match crate::crypto::sha256_file(f.abs_path.clone()).await {
-                Ok(hash) => {
-                    idx.remember_hash(&f.rel_path, f.size, f.mtime_ns, &hash)?;
-                    hash
-                }
-                Err(err) => {
-                    // One unreadable file used to abort the whole cycle (so
-                    // nothing else got backed up either). It stays in
-                    // local_paths below, so it's never mistaken for deleted.
-                    tracing::warn!(path = %f.rel_path, ?err, "can't read file — skipping it this cycle");
-                    files_failed += 1;
-                    if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
-                        failed_paths.push(FailedFile {
-                            path: f.rel_path.clone(),
-                            reason: Some("can't read this file on this device — check its permissions"),
-                        });
+            None => {
+                tracker.start_file(&f.rel_path, f.size);
+                let hashed =
+                    crate::crypto::sha256_file_counted(f.abs_path.clone(), Some(tracker.counter.clone())).await;
+                match hashed {
+                    Ok(hash) => {
+                        idx.remember_hash(&f.rel_path, f.size, f.mtime_ns, &hash)?;
+                        hash
                     }
-                    continue;
+                    Err(err) => {
+                        // One unreadable file used to abort the whole cycle (so
+                        // nothing else got backed up either). It stays in
+                        // local_paths below, so it's never mistaken for deleted.
+                        tracing::warn!(path = %f.rel_path, ?err, "can't read file — skipping it this cycle");
+                        files_failed += 1;
+                        if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
+                            failed_paths.push(FailedFile {
+                                path: f.rel_path.clone(),
+                                reason: Some("can't read this file on this device — check its permissions"),
+                            });
+                        }
+                        continue;
+                    }
                 }
-            },
+            }
         };
         let changed = sent.get(&f.rel_path).is_none_or(|e| e.sha256 != sha256 || e.size != f.size);
         if changed {
             to_put.push((f.rel_path.clone(), f.abs_path.clone(), f.size, sha256));
         }
     }
+
+    tracker.clear_file();
+    tracker.update(|p| p.files_checked = local_files.len());
 
     let local_paths: HashSet<&String> = local_files.iter().map(|f| &f.rel_path).collect();
     if scan.unreadable.is_empty() {
@@ -180,8 +305,17 @@ pub async fn run_backup_cycle(
         tracing::info!("buddy runs an older client — using the old upload format until they update");
     }
 
+    tracker.update(|p| {
+        p.phase = "sending";
+        p.files_to_send = to_put.len();
+        p.bytes_to_send = to_put.iter().map(|(_, _, size, _)| *size).sum();
+        p.files_to_delete = to_delete.len();
+        p.sending_started_unix = Some(crate::dashboard::unix_now());
+    });
+
     let mut put_count = 0;
     for (rel_path, abs_path, size, sha256) in &to_put {
+        tracker.start_file(rel_path, *size);
         if !streaming && *size > protocol::LEGACY_PUT_MAX_BYTES {
             files_failed += 1;
             if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
@@ -190,13 +324,23 @@ pub async fn run_backup_cycle(
                     reason: Some("your buddy's client is out of date — files over 512 MB will send once they update"),
                 });
             }
+            tracker.update(|p| {
+                p.files_sent += 1;
+                p.bytes_sent += *size;
+            });
             continue;
         }
         let result = if streaming {
-            put_one_file(&conn, rel_path, abs_path, *size).await
+            put_one_file(&conn, rel_path, abs_path, *size, Some(&tracker.counter)).await
         } else {
             put_one_file_legacy(&conn, rel_path, abs_path, *size).await
         };
+        // Failed files count as done too: the bar shows how far through the
+        // list this cycle is; failures are listed separately.
+        tracker.update(|p| {
+            p.files_sent += 1;
+            p.bytes_sent += *size;
+        });
         match result {
             Ok(ciphertext_size) => {
                 put_count += 1;
@@ -222,9 +366,13 @@ pub async fn run_backup_cycle(
         }
     }
 
+    tracker.clear_file();
+    tracker.update(|p| p.phase = "deleting");
     let mut delete_count = 0;
     for rel_path in &to_delete {
-        match delete_one_file(&conn, rel_path).await {
+        let result = delete_one_file(&conn, rel_path).await;
+        tracker.update(|p| p.files_deleted += 1);
+        match result {
             Ok(()) => {
                 delete_count += 1;
                 if let Err(err) = idx.forget_sent(&buddy_node_id, std::slice::from_ref(rel_path)) {
@@ -350,6 +498,7 @@ async fn put_one_file(
     rel_path: &str,
     abs_path: &Path,
     plaintext_len: u64,
+    bytes_sent: Option<&Arc<AtomicU64>>,
 ) -> Result<u64> {
     let mut enc = crate::crypto::encrypt_file(abs_path.to_path_buf(), plaintext_len);
     let ciphertext_len = match (&mut enc.ciphertext_len).await {
@@ -378,6 +527,9 @@ async fn put_one_file(
         // A rejection by the buddy (pledge full, disk full…) arrives as
         // STOP_SENDING and fails this write — see reject_reason_from_err.
         send.write_all(&chunk).await.context("failed to send file bytes")?;
+        if let Some(counter) = bytes_sent {
+            counter.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+        }
     }
     enc.done.await.context("encryption task failed")??;
     if sent != ciphertext_len {

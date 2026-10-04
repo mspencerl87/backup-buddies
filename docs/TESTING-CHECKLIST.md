@@ -1019,6 +1019,26 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.5.1: backup progress on the dashboard (2026-10-04)
+
+Each buddy card shows live progress while a backup cycle runs, instead of
+"no cycle yet" / the previous cycle's line until a long first backup ends.
+`backup::CycleProgress` (per buddy, removed when the cycle ends, success or
+error) → `in_progress` on `/api/status` → bar + one line on the card, via
+the existing 5 s refresh. Phases: "checking files" (N of M, plus bytes
+through the current file while hashing a changed one), "backing up"
+(file N of M, bytes done of total, speed and time left measured from the
+start of sending, current file), then deletions. Times use the device's
+clock, not the browser's.
+
+- [x] Unit/e2e: tests pass; a cycle leaves no progress entry behind.
+- [x] Rendered with mock data (sending / checking / idle) — screenshot
+      looked right.
+- [ ] Live: update testa/testb to 0.5.1, put a multi-GB file in testa's
+      backup folder, watch testa's dashboard: "checking files…" while it's
+      hashed, then "backing up…" with the bar, speed and time left; card
+      returns to the normal "backup ok" line when done.
+
 ## Needs testing — client 0.5.0: large folders and large files (2026-10-04)
 
 Launch blocker from docs/LAUNCH-CHECKLIST.md. What changed (details in the
