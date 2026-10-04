@@ -684,3 +684,30 @@ running them pulls and rebuilds the client image themselves. Until then,
 the server-side backstop in `relay-billing.js` is what actually stops
 new fees from accruing; the client-side skip is the "stop bothering the
 other buddy's device too" half of the fix.
+
+## 19. Admin account-detail tools (password reset, Stripe panel)
+
+The admin "View" card now shows the full account record, troubleshooting
+buttons (send password reset link, mark email verified / resend
+verification, sign out everywhere, pause / resume relay) and a live Stripe
+section (customer, payment method, subscriptions, invoices, consistency
+checks, relink / resync quantity / cancel). Also adds
+`apps/web/reset-password.html` and `POST /auth/reset-password`.
+
+**Apply the migration before this deploys:**
+```bash
+cd /opt/backup-buddies
+git pull
+cd deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/013_password_reset.sql
+```
+Additive and nullable, so the currently running API is unaffected. If the
+new code ships first, everything works except the "Send password reset
+link" button and the reset page, which 500 until the migration is in.
+
+No new env vars. The Stripe panel uses the existing `STRIPE_SECRET_KEY`.
+Password reset emails use the existing SMTP settings. Without SMTP, the
+admin UI shows the reset link to paste into a support reply instead.
+Admin actions are logged to the API container's stdout as
+`[admin] <admin email> <action> account=<id>`.

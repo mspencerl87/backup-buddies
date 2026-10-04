@@ -5,6 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { pool } from '../db/pool.js';
 import { SESSION_COOKIE, requireAuth } from '../middleware/require-auth.js';
 import { sendVerificationEmail, verifyEmailToken } from '../lib/email-verification.js';
+import { resetPasswordWithToken } from '../lib/password-reset.js';
 
 export const authRouter = Router();
 
@@ -292,6 +293,29 @@ authRouter.post('/auth/resend-verification', requireAuth, async (req, res) => {
       .json({ error: 'A verification email was just sent — check your inbox before requesting another.' });
   }
   res.json({ ok: true });
+});
+
+// --- Password reset ---
+
+// Called from reset-password.html with the token out of the emailed link
+// (issued by an admin — see routes/admin.js and lib/password-reset.js).
+// No auth required, same reasoning as /auth/verify-email: the single-use,
+// expiring token is the credential. Success logs out every existing session
+// for the account, so they sign in fresh with the new password.
+authRouter.post('/auth/reset-password', async (req, res) => {
+  const { token, password } = req.body ?? {};
+  const result = await resetPasswordWithToken(token, password);
+
+  if (result === 'reset') return res.json({ ok: true });
+  if (result === 'weak_password') {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+  if (result === 'expired') {
+    return res
+      .status(410)
+      .json({ error: 'That reset link has expired — contact support for a new one.' });
+  }
+  return res.status(400).json({ error: 'That reset link is invalid or has already been used.' });
 });
 
 authRouter.post('/logout', requireAuth, async (req, res) => {

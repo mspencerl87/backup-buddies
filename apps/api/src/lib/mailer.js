@@ -28,6 +28,13 @@ function getTransporter() {
   return transporter;
 }
 
+// For callers that want to tell a person "nothing was sent" up front
+// (e.g. the admin "resend verification" button) rather than relying on
+// sendMail()'s false return, which some helpers don't pass through.
+export function isMailConfigured() {
+  return getTransporter() !== null;
+}
+
 // Returns true if the mail was handed off to the SMTP server, false if SMTP
 // isn't configured on this deployment (logged instead of sent — lets
 // signup/etc. keep working in dev without a mailbox set up). Throws if SMTP

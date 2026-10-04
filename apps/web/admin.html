@@ -35,7 +35,7 @@
           <option value="paid">Paid</option>
           <option value="free">Free</option>
         </select>
-        <label class="muted" style="display:inline-flex; align-items:center; gap:0.35rem">
+        <label class="muted checkbox-inline">
           <input type="checkbox" id="accounts-paused-only">
           Paused only
         </label>
@@ -61,14 +61,24 @@
       </div>
 
       <div class="card" id="detail-card" style="display:none">
-        <h2>Account detail</h2>
+        <div class="detail-header">
+          <h2 id="detail-title">Account detail</h2>
+          <button type="button" class="btn btn-secondary btn-sm" id="detail-close">Close</button>
+        </div>
         <p id="detail-summary" class="muted"></p>
         <p id="detail-stripe-note" class="muted" style="display:none; color:#e5a443"></p>
+
+        <h3>Account record</h3>
+        <dl class="kv-grid" id="detail-record"></dl>
+
+        <h3>Troubleshooting</h3>
+        <div class="admin-actions" id="detail-actions"></div>
+        <div class="action-result" id="detail-action-result" style="display:none"></div>
 
         <h3>Devices</h3>
         <table id="detail-devices-table" style="display:none">
           <thead>
-            <tr><th>Label</th><th>Node id</th><th>Last seen</th><th>Token</th><th></th></tr>
+            <tr><th>Label</th><th>Node id</th><th>Registered</th><th>Last seen</th><th>Token</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -86,11 +96,57 @@
         <h3>Invites created</h3>
         <table id="detail-invites-table" style="display:none">
           <thead>
-            <tr><th>Code</th><th>Pledged</th><th>Status</th><th>Public</th><th>Created</th><th></th></tr>
+            <tr><th>Code</th><th>Pledged</th><th>Status</th><th>Public</th><th>Created</th><th>Redeemed</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>
         <p id="detail-invites-empty" class="muted">No invites.</p>
+
+        <h3>Invites redeemed</h3>
+        <table id="detail-redeemed-table" style="display:none">
+          <thead>
+            <tr><th>Code</th><th>From</th><th>Pledged</th><th>Redeemed</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="detail-redeemed-empty" class="muted">Hasn't redeemed any invites.</p>
+
+        <div class="stripe-section">
+          <div class="detail-header">
+            <h3>Stripe</h3>
+            <span class="muted" id="stripe-mode"></span>
+          </div>
+          <p class="muted" id="stripe-loading">Loading from Stripe…</p>
+          <div id="stripe-body" style="display:none">
+            <ul class="check-list" id="stripe-checks"></ul>
+            <dl class="kv-grid" id="stripe-customer"></dl>
+            <div class="admin-actions" id="stripe-actions"></div>
+            <div class="action-result" id="stripe-action-result" style="display:none"></div>
+
+            <h4>Subscriptions</h4>
+            <div class="table-scroll">
+              <table id="stripe-subs-table" style="display:none">
+                <thead>
+                  <tr><th>Subscription</th><th>Status</th><th>Items</th><th>Current period</th><th>Renews / ends</th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="muted" id="stripe-subs-empty" style="display:none">No subscriptions in Stripe.</p>
+
+            <h4>Recent invoices</h4>
+            <div class="table-scroll">
+              <table id="stripe-invoices-table" style="display:none">
+                <thead>
+                  <tr><th>Invoice</th><th>Date</th><th>Amount</th><th>Status</th><th>Attempts</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <p class="muted" id="stripe-invoices-empty" style="display:none">No invoices yet.</p>
+          </div>
+          <p class="error" id="stripe-error"></p>
+        </div>
 
         <p class="error" id="detail-error"></p>
       </div>
@@ -106,6 +162,18 @@
         throw new Error(`Unexpected response (${res.status}) — try refreshing the page.`);
       }
       return res.json();
+    }
+
+    // Every value from the API that lands in innerHTML goes through this —
+    // emails, nicknames, device labels and invite notes are all
+    // user-controlled, and this page runs with admin privileges.
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function formatBytes(bytes) {
@@ -162,14 +230,14 @@
 
       return `
         <tr${rowClass}>
-          <td>${a.nickname ? `${a.nickname} <span class="muted">(${a.email})</span>` : a.email}</td>
+          <td>${a.nickname ? `${escapeHtml(a.nickname)} <span class="muted">(${escapeHtml(a.email)})</span>` : escapeHtml(a.email)}</td>
           <td><span style="display:inline-flex; gap:0.35rem; flex-wrap:wrap">${adminBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span></td>
           <td>${a.device_count}</td>
           <td>${a.buddies.length}</td>
           <td>${formatDate(a.created_at)}</td>
           <td>
-            <a href="#" class="view-account-link" data-id="${a.id}">View</a>
-            <a href="#" class="delete-account-link" data-id="${a.id}" data-email="${a.email}">Delete</a>
+            <a href="#" class="view-account-link" data-id="${escapeHtml(a.id)}">View</a>
+            <a href="#" class="delete-account-link" data-id="${escapeHtml(a.id)}" data-email="${escapeHtml(a.email)}">Delete</a>
           </td>
         </tr>
       `;
@@ -303,8 +371,8 @@
           if (!confirm(
             `Permanently delete ${link.dataset.email}? This removes the account and everything tied to it ` +
             `(devices, buddy pairings, invites) from the database. This cannot be undone.${pairingWarning} ` +
-            `If they have an active Stripe subscription, cancel it separately in the Stripe dashboard — ` +
-            `deleting here does not touch billing.`
+            `If they have an active Stripe subscription, cancel it first from the Stripe section of their ` +
+            `account detail — deleting here does not touch billing.`
           )) return;
 
           try {
@@ -319,7 +387,7 @@
             }
             const notes = [];
             if (data.had_stripe_subscription) {
-              notes.push('It had an active Stripe subscription — remember to cancel it in the Stripe dashboard, it is not affected by this.');
+              notes.push('It had an active Stripe subscription — that is NOT cancelled by deleting the account. Cancel it in the Stripe dashboard.');
             }
             if (data.ended_active_pairings?.length) {
               const names = data.ended_active_pairings.map((p) => `${p.email} (${p.pledged_gb}GB)`).join(', ');
@@ -389,12 +457,22 @@
       });
     });
 
-    async function loadAccountDetail(accountId) {
+    // Currently-open account in the detail card, so action buttons and
+    // the Stripe panel always act on (and reload) the right one.
+    let detailAccountId = null;
+    let detailAccount = null;
+
+    async function loadAccountDetail(accountId, { scroll = true } = {}) {
       const card = document.getElementById('detail-card');
       const errorEl = document.getElementById('detail-error');
       errorEl.textContent = '';
       card.style.display = 'block';
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (scroll) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (detailAccountId !== accountId) {
+        hideActionResult('detail-action-result');
+        hideActionResult('stripe-action-result');
+      }
+      detailAccountId = accountId;
 
       let data;
       try {
@@ -410,6 +488,7 @@
       }
 
       const { account, devices, pairings, invites } = data;
+      detailAccount = account;
 
       const methods = [];
       if (account.has_password) methods.push('password');
@@ -421,22 +500,27 @@
         ? 'relay active'
         : `relay paused${account.relay_paused_at ? ` since ${formatDate(account.relay_paused_at)}` : ''}` +
           `${account.relay_paused_reason ? ` (${account.relay_paused_reason})` : ''}`;
+      document.getElementById('detail-title').textContent = account.nickname
+        ? `${account.nickname} (${account.email})`
+        : account.email;
       document.getElementById('detail-summary').textContent =
-        `${account.email} — ${planLabel}, ${relayLabel}` +
-        (methods.length ? ` — signs in via ${methods.join(' & ')}` : '') +
+        `${planLabel}, ${relayLabel}` +
+        (methods.length ? ` — signs in via ${methods.join(' & ')}` : ' — no sign-in method!') +
         ` — joined ${formatDate(account.created_at)}`;
 
       const stripeNote = document.getElementById('detail-stripe-note');
       const notes = [];
-      if (account.stripe_subscription_id) {
-        notes.push('Has an active Stripe subscription — deleting this account will not cancel it.');
-      }
       if (account.relay_status !== 'active') {
         notes.push(
-          'Relay syncing is paused for this account — its client has stopped all buddy activity ' +
-          'and no further relay fees can accrue. Reach out, wait for them to update their payment ' +
-          'method, or delete the account below if it looks abandoned.',
+          account.relay_paused_reason === 'payment_failed'
+            ? 'Relay syncing is paused for a failed payment — its client has stopped all buddy activity ' +
+              'and no further relay fees can accrue. Check the Stripe section below, reach out, or resume relay ' +
+              'once the payment is sorted.'
+            : 'Relay syncing is paused for this account — its client has stopped all buddy activity.',
         );
+      }
+      if (!account.email_verified) {
+        notes.push("Email isn't verified — this account can't pair with a buddy until it is.");
       }
       if (notes.length) {
         stripeNote.textContent = notes.join(' ');
@@ -445,9 +529,468 @@
         stripeNote.style.display = 'none';
       }
 
+      renderDetailRecord(data);
+      renderDetailActions(account);
       renderDetailDevices(account.id, devices);
       renderDetailPairings(account.id, pairings);
       renderDetailInvites(account.id, invites);
+      renderDetailRedeemed(data.redeemed_invites || []);
+      loadStripePanel(account.id);
+    }
+
+    // --- Account record (key/value grid) ---
+
+    function kvRows(pairs) {
+      return pairs
+        .filter(Boolean)
+        .map(([label, valueHtml]) => `<dt>${escapeHtml(label)}</dt><dd>${valueHtml}</dd>`)
+        .join('');
+    }
+
+    function copyableCode(value) {
+      if (!value) return '<span class="muted">—</span>';
+      return `<code>${escapeHtml(value)}</code> <a href="#" class="copy-link" data-copy="${escapeHtml(value)}">copy</a>`;
+    }
+
+    function yesNo(value, { yes = 'yes', no = 'no', warnOnNo = false } = {}) {
+      if (value) return `<span class="ok-text">${yes}</span>`;
+      return warnOnNo ? `<span class="warn-text">${no}</span>` : no;
+    }
+
+    function renderDetailRecord(data) {
+      const { account, activity, pledge, relay_usage: relay } = data;
+      const methods = [
+        account.has_password ? 'password' : null,
+        account.has_google ? 'Google' : null,
+      ].filter(Boolean);
+
+      const relayStatus = account.relay_status === 'active'
+        ? '<span class="ok-text">active</span>'
+        : `<span class="warn-text">paused</span>` +
+          (account.relay_paused_at ? ` since ${escapeHtml(formatDate(account.relay_paused_at))} (${pausedDays(account)}d)` : '') +
+          (account.relay_paused_reason ? ` — ${escapeHtml(account.relay_paused_reason)}` : '');
+
+      const unsynced = relay.unsynced_events
+        ? ` · <span class="warn-text">${formatBytes(relay.unsynced_bytes)} in ${relay.unsynced_events} event(s) not yet reported to Stripe</span>`
+        : '';
+
+      const el = document.getElementById('detail-record');
+      el.innerHTML = kvRows([
+        ['Account ID', copyableCode(account.id)],
+        ['Email', `${escapeHtml(account.email)}${account.is_admin ? ' <span class="tier-badge admin">admin</span>' : ''}`],
+        ['Display name', account.nickname ? escapeHtml(account.nickname) : '<span class="muted">not set</span>'],
+        ['Sign-in methods', methods.length ? methods.join(', ') : '<span class="warn-text">none — can\'t log in</span>'],
+        ['Email verified', yesNo(account.email_verified, { warnOnNo: true }) +
+          (!account.email_verified && account.email_verification_sent_at
+            ? ` <span class="muted">(last link sent ${escapeHtml(formatDate(account.email_verification_sent_at))})</span>`
+            : '')],
+        ['Last sign-in', escapeHtml(formatDate(activity.last_login_at))],
+        ['Active sessions', String(activity.active_sessions)],
+        ['Terms accepted', escapeHtml(formatDate(account.terms_accepted_at))],
+        ['Joined', escapeHtml(formatDate(account.created_at))],
+        ['Relay', relayStatus],
+        ['Pledged storage', `${pledge.pledged_gb} GB across active pairings` +
+          ` <span class="muted">(${pledge.free_allowance_gb} GB free, ${pledge.billable_gb} GB billable)</span>`],
+        ['Relay usage', `${formatBytes(relay.last_30d_bytes)} last 30 days · ${formatBytes(relay.total_bytes)} total` +
+          (relay.last_event_at ? ` <span class="muted">(last ${escapeHtml(formatDate(relay.last_event_at))})</span>` : '') +
+          unsynced],
+        account.stale_warning_sent_at
+          ? ['Stale warning sent', escapeHtml(formatDate(account.stale_warning_sent_at))]
+          : null,
+        ['Stripe customer', copyableCode(account.stripe_customer_id)],
+        ['Stripe subscription', copyableCode(account.stripe_subscription_id)],
+        ['Subscription item', copyableCode(account.stripe_subscription_item_id)],
+      ]);
+      wireCopyLinks(el);
+    }
+
+    function wireCopyLinks(root) {
+      root.querySelectorAll('.copy-link').forEach((link) => {
+        link.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            await navigator.clipboard.writeText(link.dataset.copy);
+            const old = link.textContent;
+            link.textContent = 'copied';
+            setTimeout(() => { link.textContent = old; }, 1200);
+          } catch {
+            window.prompt('Copy:', link.dataset.copy);
+          }
+        });
+      });
+    }
+
+    // --- Action buttons ---
+
+    function showActionResult(elId, html, kind = 'ok') {
+      const el = document.getElementById(elId);
+      el.className = `action-result ${kind}`;
+      el.innerHTML = html;
+      el.style.display = 'block';
+      wireCopyLinks(el);
+    }
+
+    function hideActionResult(elId) {
+      document.getElementById(elId).style.display = 'none';
+    }
+
+    // POSTs to an admin action endpoint, disables the button while it
+    // runs, and returns the parsed body (or null after showing the error).
+    async function runAdminAction(button, path, body, resultElId) {
+      button.disabled = true;
+      try {
+        const res = await fetch(`/api/admin/accounts/${detailAccountId}${path}`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body || {}),
+        });
+        const data = await parseJsonResponse(res);
+        if (!res.ok) {
+          showActionResult(resultElId, escapeHtml(data.error || 'Request failed.'), 'error');
+          return null;
+        }
+        return data;
+      } catch (err) {
+        showActionResult(resultElId, escapeHtml(err.message || 'Request failed.'), 'error');
+        return null;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function actionButton(label, handler, { danger = false, title = '' } = {}) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `btn btn-secondary btn-sm${danger ? ' btn-danger' : ''}`;
+      btn.textContent = label;
+      if (title) btn.title = title;
+      btn.addEventListener('click', () => handler(btn));
+      return btn;
+    }
+
+    function renderDetailActions(account) {
+      const wrap = document.getElementById('detail-actions');
+      wrap.innerHTML = '';
+      const isSelf = account.id === selfAccountId;
+
+      wrap.appendChild(actionButton(
+        account.has_password ? 'Send password reset link' : 'Send set-password link',
+        async (btn) => {
+          if (!confirm(
+            `Email ${account.email} a single-use link to ${account.has_password ? 'reset' : 'set'} their password? ` +
+            `It expires in 24 hours. Their current password keeps working until they use it.`
+          )) return;
+          const data = await runAdminAction(btn, '/password-reset', {}, 'detail-action-result');
+          if (!data) return;
+          showActionResult(
+            'detail-action-result',
+            (data.emailed
+              ? `Reset link emailed to ${escapeHtml(account.email)}.`
+              : '<strong>Email is not configured on this server — nothing was sent.</strong> Send them this link yourself:') +
+              ` <span class="muted">Valid ${data.expires_in_hours}h, single use.</span><br>` +
+              copyableCode(data.url),
+            data.emailed ? 'ok' : 'warn',
+          );
+        },
+        { title: 'Emails a single-use link to choose a new password' },
+      ));
+
+      if (!account.email_verified) {
+        wrap.appendChild(actionButton('Resend verification email', async (btn) => {
+          const data = await runAdminAction(btn, '/resend-verification', {}, 'detail-action-result');
+          if (data) showActionResult('detail-action-result', `Verification email re-sent to ${escapeHtml(account.email)}.`);
+        }));
+        wrap.appendChild(actionButton('Mark email verified', async (btn) => {
+          if (!confirm(`Mark ${account.email} as verified without them clicking the link? Only do this if you've confirmed they own the address.`)) return;
+          const data = await runAdminAction(btn, '/verify-email', {}, 'detail-action-result');
+          if (data) {
+            await loadAccountDetail(account.id, { scroll: false });
+            showActionResult('detail-action-result', 'Email marked as verified.');
+          }
+        }));
+      }
+
+      if (!isSelf) {
+        wrap.appendChild(actionButton('Sign out everywhere', async (btn) => {
+          if (!confirm(`Sign ${account.email} out of every browser session? Their devices keep syncing — device tokens aren't affected.`)) return;
+          const data = await runAdminAction(btn, '/revoke-sessions', {}, 'detail-action-result');
+          if (data) {
+            await loadAccountDetail(account.id, { scroll: false });
+            showActionResult('detail-action-result', `Signed out of ${data.revoked} session(s).`);
+          }
+        }));
+      }
+
+      if (account.relay_status === 'active') {
+        wrap.appendChild(actionButton('Pause relay', async (btn) => {
+          const reason = prompt(
+            `Pause buddy syncing for ${account.email}? Their client stops all buddy activity until resumed.\n\nReason (shown in the admin list):`,
+            'admin',
+          );
+          if (reason === null) return;
+          const data = await runAdminAction(btn, '/relay', { action: 'pause', reason }, 'detail-action-result');
+          if (data) {
+            await Promise.all([loadAccountDetail(account.id, { scroll: false }), loadAccounts()]);
+            showActionResult('detail-action-result', 'Relay paused.');
+          }
+        }, { danger: true }));
+      } else {
+        wrap.appendChild(actionButton('Resume relay', async (btn) => {
+          const paymentWarning = account.relay_paused_reason === 'payment_failed'
+            ? '\n\nThis was paused for a failed payment — resuming lets relay fees accrue again before they\'ve paid. ' +
+              'Check the Stripe section first. (If a later payment fails, it will pause again automatically.)'
+            : '';
+          if (!confirm(`Resume buddy syncing for ${account.email}?${paymentWarning}`)) return;
+          const data = await runAdminAction(btn, '/relay', { action: 'resume' }, 'detail-action-result');
+          if (data) {
+            await Promise.all([loadAccountDetail(account.id, { scroll: false }), loadAccounts()]);
+            showActionResult('detail-action-result', 'Relay resumed.');
+          }
+        }));
+      }
+    }
+
+    // --- Stripe panel ---
+
+    function formatMoney(cents, currency) {
+      if (cents === null || cents === undefined) return '—';
+      try {
+        return new Intl.NumberFormat(undefined, { style: 'currency', currency: (currency || 'usd').toUpperCase() })
+          .format(cents / 100);
+      } catch {
+        return `${(cents / 100).toFixed(2)} ${currency || ''}`;
+      }
+    }
+
+    function formatUnix(seconds) {
+      return seconds ? new Date(seconds * 1000).toLocaleDateString() : '—';
+    }
+
+    const STRIPE_STATUS_CLASS = {
+      active: 'paid', trialing: 'paid', paid: 'paid',
+      past_due: 'paused', unpaid: 'paused', open: 'paused', incomplete: 'paused',
+      canceled: '', void: '', draft: '', uncollectible: 'paused', incomplete_expired: '',
+    };
+
+    function statusBadge(status) {
+      return `<span class="tier-badge ${STRIPE_STATUS_CLASS[status] ?? ''}">${escapeHtml(status || '?')}</span>`;
+    }
+
+    async function loadStripePanel(accountId) {
+      const loading = document.getElementById('stripe-loading');
+      const body = document.getElementById('stripe-body');
+      const errorEl = document.getElementById('stripe-error');
+      const modeEl = document.getElementById('stripe-mode');
+      loading.style.display = 'block';
+      body.style.display = 'none';
+      errorEl.textContent = '';
+      modeEl.textContent = '';
+
+      let data;
+      try {
+        const res = await fetch(`/api/admin/accounts/${accountId}/stripe`, { credentials: 'same-origin' });
+        data = await parseJsonResponse(res);
+        if (accountId !== detailAccountId) return; // a different account was opened meanwhile
+        if (!res.ok) {
+          loading.style.display = 'none';
+          errorEl.textContent = data.error || 'Could not load Stripe data.';
+          return;
+        }
+      } catch (err) {
+        loading.style.display = 'none';
+        errorEl.textContent = err.message || 'Could not load Stripe data.';
+        return;
+      }
+
+      loading.style.display = 'none';
+      if (!data.configured) {
+        loading.style.display = 'block';
+        loading.textContent = 'Stripe is not configured on this server (no STRIPE_SECRET_KEY).';
+        return;
+      }
+      loading.textContent = 'Loading from Stripe…';
+      body.style.display = 'block';
+      if (data.livemode !== undefined) {
+        modeEl.innerHTML = data.livemode
+          ? '<span class="tier-badge paid">live mode</span>'
+          : '<span class="tier-badge paused">test mode</span>';
+      }
+
+      // Consistency checks first — they're the point of this panel.
+      const checks = [...(data.checks || [])];
+      for (const e of data.errors || []) checks.push({ level: 'error', message: `Couldn't load ${e}` });
+      if (!checks.length && data.customer) {
+        checks.push({ level: 'ok', message: 'Stripe and our database agree.' });
+      }
+      document.getElementById('stripe-checks').innerHTML = checks
+        .map((c) => `<li class="check-${c.level}">${escapeHtml(c.message)}</li>`)
+        .join('');
+
+      const customerEl = document.getElementById('stripe-customer');
+      if (data.customer && !data.customer.deleted) {
+        const c = data.customer;
+        const pm = data.payment_method;
+        customerEl.innerHTML = kvRows([
+          ['Customer', `${copyableCode(c.id)} · <a href="${escapeHtml(c.dashboard_url)}" target="_blank" rel="noopener">open in Stripe ↗</a>`],
+          ['Billing email', escapeHtml(c.email || '—') +
+            (c.email && detailAccount && c.email.toLowerCase() !== detailAccount.email.toLowerCase()
+              ? ' <span class="warn-text">(differs from account email)</span>'
+              : '')],
+          c.name ? ['Name', escapeHtml(c.name)] : null,
+          ['Customer since', formatUnix(c.created)],
+          ['Payment method', pm
+            ? (pm.type === 'card'
+              ? `${escapeHtml(pm.brand)} •••• ${escapeHtml(pm.last4)} <span class="muted">exp ${pm.exp_month}/${pm.exp_year}</span>` +
+                (new Date(pm.exp_year, pm.exp_month) < new Date() ? ' <span class="warn-text">expired</span>' : '')
+              : escapeHtml(pm.type))
+            : '<span class="muted">none on file</span>'],
+          c.balance ? ['Account balance', `${formatMoney(-c.balance, c.currency)} <span class="muted">(${c.balance < 0 ? 'credit' : 'owed'})</span>`] : null,
+          ['Delinquent', yesNo(!c.delinquent, { yes: 'no', no: 'yes', warnOnNo: true })],
+          data.upcoming_invoice
+            ? ['Next invoice', `${formatMoney(data.upcoming_invoice.amount_due, data.upcoming_invoice.currency)}` +
+              ` <span class="muted">on ${formatUnix(data.upcoming_invoice.next_payment_attempt || data.upcoming_invoice.period_end)}</span>`]
+            : null,
+        ]);
+      } else if (data.candidates?.length) {
+        customerEl.innerHTML = kvRows(
+          data.candidates.map((c) => ['Possible match', `${copyableCode(c.id)} · <a href="${escapeHtml(c.dashboard_url)}" target="_blank" rel="noopener">open in Stripe ↗</a>`]),
+        );
+      } else {
+        customerEl.innerHTML = kvRows([['Customer', '<span class="muted">none — this account has never started checkout</span>']]);
+      }
+      wireCopyLinks(customerEl);
+
+      renderStripeActions(data);
+      renderStripeSubscriptions(data.subscriptions || []);
+      renderStripeInvoices(data.invoices || []);
+    }
+
+    function renderStripeActions(data) {
+      const wrap = document.getElementById('stripe-actions');
+      wrap.innerHTML = '';
+      const linked = (data.subscriptions || []).find((s) => s.is_linked);
+      const reload = async (message) => {
+        await Promise.all([loadAccountDetail(detailAccountId, { scroll: false }), loadAccounts()]);
+        showActionResult('stripe-action-result', message);
+      };
+
+      const hasProblem = (data.checks || []).some((c) => c.level === 'error' || c.level === 'warn');
+      if (data.customer || data.candidates?.length || hasProblem) {
+        wrap.appendChild(actionButton('Relink from Stripe', async (btn) => {
+          if (!confirm(
+            'Re-read this customer\'s subscription from Stripe and overwrite the ids stored in our database? ' +
+            'Use this when a webhook was missed. If Stripe has no live subscription, the account goes back to free.'
+          )) return;
+          const res = await runAdminAction(btn, '/stripe/relink', {}, 'stripe-action-result');
+          if (!res) return;
+          let msg = res.subscription_id
+            ? `Linked to subscription <code>${escapeHtml(res.subscription_id)}</code>.`
+            : 'No live subscription in Stripe — subscription link cleared (account is now free).';
+          if (res.other_live_subscriptions?.length) {
+            msg += ` <span class="warn-text">Other live subscriptions also exist: ${res.other_live_subscriptions.map(escapeHtml).join(', ')} — cancel the extras in Stripe.</span>`;
+          }
+          await reload(msg);
+        }, { title: 'Fixes a missed checkout / cancellation webhook' }));
+      }
+
+      if (linked && ['active', 'trialing', 'past_due', 'unpaid'].includes(linked.status)) {
+        wrap.appendChild(actionButton('Resync quantity', async (btn) => {
+          const res = await runAdminAction(btn, '/stripe/resync-quantity', {}, 'stripe-action-result');
+          if (res) await reload(`Storage quantity set to ${res.quantity} GB (prorated).`);
+        }, { title: 'Sets the billed storage quantity to the current pledged GB' }));
+
+        if (linked.cancel_at_period_end) {
+          wrap.appendChild(actionButton('Undo scheduled cancel', async (btn) => {
+            const res = await runAdminAction(btn, '/stripe/cancel', { mode: 'undo' }, 'stripe-action-result');
+            if (res) await reload('Scheduled cancellation removed — the subscription will renew.');
+          }));
+        } else {
+          wrap.appendChild(actionButton('Cancel at period end', async (btn) => {
+            if (!confirm(`Cancel this subscription at the end of the current period (${formatUnix(linked.current_period_end)})? They keep what they've paid for until then.`)) return;
+            const res = await runAdminAction(btn, '/stripe/cancel', { mode: 'period_end' }, 'stripe-action-result');
+            if (res) await reload('Subscription will cancel at the end of the current period.');
+          }, { danger: true }));
+        }
+        wrap.appendChild(actionButton('Cancel now', async (btn) => {
+          if (!confirm(
+            'Cancel this subscription IMMEDIATELY in Stripe? Billing stops now and the account drops to free ' +
+            '(anything over the 50 GB free allowance will be over its limit). No automatic refund is issued — ' +
+            'do that from the Stripe dashboard if needed. This cannot be undone.'
+          )) return;
+          const res = await runAdminAction(btn, '/stripe/cancel', { mode: 'now' }, 'stripe-action-result');
+          if (res) await reload('Subscription cancelled.');
+        }, { danger: true }));
+      }
+    }
+
+    function renderStripeSubscriptions(subs) {
+      const table = document.getElementById('stripe-subs-table');
+      const empty = document.getElementById('stripe-subs-empty');
+      const tbody = table.querySelector('tbody');
+      if (!subs.length) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+      tbody.innerHTML = subs.map((s) => {
+        const items = s.items.map((i) => {
+          const what = i.is_storage ? 'Storage' : i.is_relay ? 'Relay bandwidth' : escapeHtml(i.nickname || i.price_id);
+          const qty = i.usage_type === 'metered' ? 'metered' : `× ${i.quantity ?? '?'}`;
+          return `${what} <span class="muted">${qty}</span>`;
+        }).join('<br>');
+        let ends = formatUnix(s.current_period_end);
+        if (s.cancel_at_period_end) ends = `<span class="warn-text">cancels ${formatUnix(s.cancel_at || s.current_period_end)}</span>`;
+        if (s.ended_at) ends = `ended ${formatUnix(s.ended_at)}`;
+        return `
+          <tr>
+            <td><a href="${escapeHtml(s.dashboard_url)}" target="_blank" rel="noopener"><code>${escapeHtml(s.id)}</code></a>
+              ${s.is_linked ? '<span class="tier-badge admin">linked</span>' : ''}</td>
+            <td>${statusBadge(s.status)}</td>
+            <td>${items}</td>
+            <td>${formatUnix(s.current_period_start)} – ${formatUnix(s.current_period_end)}</td>
+            <td>${ends}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    function renderStripeInvoices(invoices) {
+      const table = document.getElementById('stripe-invoices-table');
+      const empty = document.getElementById('stripe-invoices-empty');
+      const tbody = table.querySelector('tbody');
+      if (!invoices.length) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+      tbody.innerHTML = invoices.map((inv) => {
+        const amount = inv.status === 'paid'
+          ? formatMoney(inv.amount_paid, inv.currency)
+          : formatMoney(inv.amount_due, inv.currency);
+        const retry = inv.next_payment_attempt
+          ? ` <span class="muted">(next retry ${formatUnix(inv.next_payment_attempt)})</span>`
+          : '';
+        return `
+          <tr>
+            <td><a href="${escapeHtml(inv.dashboard_url)}" target="_blank" rel="noopener">${escapeHtml(inv.number || inv.id)}</a></td>
+            <td>${formatUnix(inv.created)}</td>
+            <td>${amount}</td>
+            <td>${statusBadge(inv.status)}</td>
+            <td>${inv.attempt_count ?? 0}${retry}</td>
+            <td>${inv.hosted_invoice_url ? `<a href="${escapeHtml(inv.hosted_invoice_url)}" target="_blank" rel="noopener">customer view ↗</a>` : ''}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    // --- Devices / pairings / invites ---
+
+    function daysAgo(iso) {
+      if (!iso) return null;
+      return Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
     }
 
     function renderDetailDevices(accountId, devices) {
@@ -465,16 +1008,26 @@
       empty.style.display = 'none';
 
       for (const d of devices) {
+        // The client polls every ~30s while running, so anything over a
+        // day means it's off, uninstalled, or failing to authenticate.
+        const ago = daysAgo(d.last_seen_at);
+        const seen = d.last_seen_at
+          ? `${escapeHtml(formatDate(d.last_seen_at))}${ago >= 1 ? ` <span class="warn-text">(${ago}d ago)</span>` : ''}`
+          : '<span class="warn-text">never</span>';
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${d.label || '(unlabeled)'}</td>
-          <td>${d.iroh_node_id ? `<code>${d.iroh_node_id.slice(0, 10)}…</code>` : 'not set up yet'}</td>
-          <td>${formatDate(d.last_seen_at)}</td>
-          <td><code>…${d.token_last_four || '????'}</code></td>
-          <td><a href="#" class="delete-link" data-kind="devices" data-id="${d.id}">Delete</a></td>
+          <td>${d.label ? escapeHtml(d.label) : '(unlabeled)'}</td>
+          <td>${d.iroh_node_id
+            ? `<code title="${escapeHtml(d.iroh_node_id)}">${escapeHtml(d.iroh_node_id.slice(0, 10))}…</code> <a href="#" class="copy-link" data-copy="${escapeHtml(d.iroh_node_id)}">copy</a>`
+            : 'not set up yet'}</td>
+          <td>${escapeHtml(formatDate(d.created_at))}</td>
+          <td>${seen}</td>
+          <td><code>…${escapeHtml(d.token_last_four || '????')}</code></td>
+          <td><a href="#" class="delete-link" data-kind="devices" data-id="${escapeHtml(d.id)}">Delete</a></td>
         `;
         tbody.appendChild(tr);
       }
+      wireCopyLinks(table);
       wireDeleteLinks(accountId, table);
     }
 
@@ -493,16 +1046,18 @@
       empty.style.display = 'none';
 
       for (const p of pairings) {
+        const otherId = p.account_a_id === accountId ? p.account_b_id : p.account_a_id;
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td>${p.other_email}</td>
+          <td><a href="#" class="open-account-link" data-id="${escapeHtml(otherId)}">${escapeHtml(p.other_email)}</a></td>
           <td>${formatBytes(Number(p.pledged_bytes))}</td>
-          <td>${p.status}</td>
-          <td>${formatDate(p.created_at)}</td>
-          <td><a href="#" class="delete-link" data-kind="pairings" data-id="${p.id}">Delete</a></td>
+          <td>${escapeHtml(p.status)}</td>
+          <td>${escapeHtml(formatDate(p.created_at))}</td>
+          <td><a href="#" class="delete-link" data-kind="pairings" data-id="${escapeHtml(p.id)}">Delete</a></td>
         `;
         tbody.appendChild(tr);
       }
+      wireOpenAccountLinks(table);
       wireDeleteLinks(accountId, table);
     }
 
@@ -521,18 +1076,58 @@
       empty.style.display = 'none';
 
       for (const inv of invites) {
+        const redeemer = inv.redeemed_by_account_id
+          ? `<a href="#" class="open-account-link" data-id="${escapeHtml(inv.redeemed_by_account_id)}">${escapeHtml(emailForId(inv.redeemed_by_account_id))}</a>` +
+            ` <span class="muted">${escapeHtml(formatDate(inv.redeemed_at))}</span>`
+          : inv.redeemed_at ? `<span class="muted">deleted account, ${escapeHtml(formatDate(inv.redeemed_at))}</span>` : '—';
         const tr = document.createElement('tr');
         tr.innerHTML = `
-          <td><code>${inv.code}</code></td>
+          <td><code>${escapeHtml(inv.code)}</code>${inv.note ? `<br><span class="muted">${escapeHtml(inv.note)}</span>` : ''}</td>
           <td>${formatBytes(Number(inv.pledged_bytes))}</td>
-          <td>${inv.status}</td>
+          <td>${escapeHtml(inv.status)}</td>
           <td>${inv.is_public ? 'yes' : 'no'}</td>
-          <td>${formatDate(inv.created_at)}</td>
-          <td><a href="#" class="delete-link" data-kind="invites" data-id="${inv.id}">Delete</a></td>
+          <td>${escapeHtml(formatDate(inv.created_at))}</td>
+          <td>${redeemer}</td>
+          <td><a href="#" class="delete-link" data-kind="invites" data-id="${escapeHtml(inv.id)}">Delete</a></td>
         `;
         tbody.appendChild(tr);
       }
+      wireOpenAccountLinks(table);
       wireDeleteLinks(accountId, table);
+    }
+
+    function renderDetailRedeemed(redeemed) {
+      const table = document.getElementById('detail-redeemed-table');
+      const empty = document.getElementById('detail-redeemed-empty');
+      const tbody = table.querySelector('tbody');
+      if (!redeemed.length) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      table.style.display = '';
+      empty.style.display = 'none';
+      tbody.innerHTML = redeemed.map((inv) => `
+        <tr>
+          <td><code>${escapeHtml(inv.code)}</code></td>
+          <td>${escapeHtml(inv.inviter_email || '(deleted account)')}</td>
+          <td>${formatBytes(Number(inv.pledged_bytes))}</td>
+          <td>${escapeHtml(formatDate(inv.redeemed_at))}</td>
+        </tr>`).join('');
+    }
+
+    function emailForId(id) {
+      return allAccounts.find((a) => a.id === id)?.email || id;
+    }
+
+    // Jump straight to the other side of a pairing / invite.
+    function wireOpenAccountLinks(root) {
+      root.querySelectorAll('.open-account-link').forEach((link) => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          loadAccountDetail(link.dataset.id);
+        });
+      });
     }
 
     function wireDeleteLinks(accountId, table) {
@@ -550,7 +1145,7 @@
               alert(data.error || 'Could not delete.');
               return;
             }
-            await loadAccountDetail(accountId);
+            await loadAccountDetail(accountId, { scroll: false });
             await loadAccounts();
           } catch (err) {
             alert(err.message || 'Could not delete.');
@@ -558,6 +1153,11 @@
         });
       });
     }
+
+    document.getElementById('detail-close').addEventListener('click', () => {
+      document.getElementById('detail-card').style.display = 'none';
+      detailAccountId = null;
+    });
 
     async function init() {
       const res = await fetch('/api/me', { credentials: 'same-origin' });
