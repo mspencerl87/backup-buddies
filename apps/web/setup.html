@@ -75,9 +75,10 @@
         </li>
         <li>
           <strong>Make a folder and save two files into it</strong>
-          Create a folder for the client (e.g. <code>backup-buddies-client</code>) and save these two files inside it exactly as shown — nothing to fill in on the first one, it's the same for everyone:
+          Create a folder for the client (e.g. <code>backup-buddies-client</code>) and save these two files inside it.
           <p class="muted" style="margin:0.75rem 0 0.25rem">
-            <code>docker-compose.yml</code> — pulls the published client image, no build step, no source code on your machine:
+            <code>docker-compose.yml</code> pulls the published client image (no build step, no source code on your machine).
+            <strong>Change the left side of the three highlighted lines to your own folders</strong>, and leave everything after the colon alone:
           </p>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>services:
   client:
@@ -90,36 +91,48 @@
       - BUDDY_FILES_DIR=/buddy-files
       - RESTORE_DIR=/restored
     volumes:
-      - ${DATA_DIR_HOST:-./config}:/data
-      - ${BACKUP_DIR_HOST:-./empty-backup-dir}:/backup:ro
-      - ${BUDDY_FILES_DIR_HOST:-./buddy-files}:/buddy-files
-      - ${RESTORE_DIR_HOST:-./restored}:/restored</code></pre>
+      # The client's own config (identity key, bookkeeping). Small; keep it here.
+      - ./config:/data
+      # Your files to back up. Read-only (:ro): the client never writes here.
+<strong style="color:#4f8cff">      - /mnt/storage/my-files:/backup:ro</strong>
+      # What your buddies store with you. Needs the space you pledged.
+<strong style="color:#4f8cff">      - /mnt/storage/buddy-files:/buddy-files</strong>
+      # Where files you restore from a buddy land.
+<strong style="color:#4f8cff">      - /mnt/storage/restored:/restored</strong></code></pre>
           <p class="muted" style="margin-top:0.5rem">
             <code>network_mode: host</code> runs the container directly on this machine's network instead of Docker's usual isolated one — it's what lets this device find a buddy on the same local network and connect directly, skipping the relay entirely. Linux only; if you're on Docker Desktop (Mac/Windows), see the troubleshooting section below.
           </p>
+          <p class="muted" style="margin:1rem 0 0.25rem"><strong>Where your files go.</strong>
+            The client keeps four folders apart, so nothing of its own ever lands in your data:
+          </p>
+          <ul class="muted" style="margin-top:0.25rem">
+            <li><code>/backup</code> — <strong>your files</strong>. Mounted read-only; the client only reads them. If this machine should only <em>receive</em> (hold a buddy's files, back nothing up), use <code>./empty-backup-dir:/backup:ro</code> instead.</li>
+            <li><code>/buddy-files</code> — <strong>buddy files</strong>: what your buddies store with you, encrypted (you can't read them). This is what uses the space you pledged. The client makes one subfolder per buddy inside it, so give it a folder of its own on a drive with room.</li>
+            <li><code>/restored</code> — files you <strong>restore</strong> from a buddy. Separate from your files, so a restore never overwrites anything.</li>
+            <li><code>/data</code> — the client's own <strong>config</strong>: identity key and small bookkeeping files. Leave it as <code>./config</code>, next to <code>docker-compose.yml</code>.</li>
+          </ul>
+          <p class="muted" style="margin:0.5rem 0 0.25rem">Two common setups (just the three lines you change):</p>
+          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code># A. One data drive, separate folders on it
+      - /mnt/storage/my-files:/backup:ro
+      - /mnt/storage/buddy-files:/buddy-files
+      - /mnt/storage/restored:/restored
+
+# B. Two separate mounts (two disks or NAS shares)
+      - /mnt/my-data:/backup:ro
+      - /mnt/buddy-data:/buddy-files
+      - ./restored:/restored</code></pre>
+          <p class="muted" style="margin-top:0.5rem">
+            Don't put the buddy-files or restore folder <em>inside</em> your own files' folder — you'd end up backing your buddy's files (or your restores) back up to your buddy.
+            Network shares (NFS/SMB) work: mount them on the host first, then use the mount path here.
+          </p>
           <p class="muted" style="margin:1rem 0 0.25rem">
-            <code>.env</code> — this is the one you customize. Only <strong>DEVICE_TOKEN</strong> and <strong>BACKUP_PASSPHRASE</strong> are required; the rest have sensible defaults:
+            <code>.env</code> — your token and passphrase. Only <strong>DEVICE_TOKEN</strong> and <strong>BACKUP_PASSPHRASE</strong> need filling in; the rest have sensible defaults:
           </p>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>API_URL=https://api.filegarden.net
 RELAY_URL=https://relay.filegarden.net
 
 <strong style="color:#4f8cff">DEVICE_TOKEN=paste_the_token_from_step_1_here</strong>
 <strong style="color:#4f8cff">BACKUP_PASSPHRASE=a few random words only you know</strong>
-
-# --- Folders (see "Where your files go" below) ---
-# Your files to back up. Read-only to the client; it never writes here.
-# Leave it out if this machine should only receive.
-#BACKUP_DIR_HOST=/mnt/storage/my-files
-
-# What your buddies store with you. Needs the space you pledged — give it
-# its own folder on a drive that has room.
-BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files
-
-# Where restored files land. Defaults to ./restored next to this file.
-#RESTORE_DIR_HOST=/mnt/storage/restored
-
-# The client's own config (identity key, bookkeeping). Small; keep it here.
-DATA_DIR_HOST=./config
 
 # Run as your own user, so restored files belong to you instead of root.
 # Find your numbers with:  id -u  and  id -g
@@ -143,27 +156,6 @@ PGID=1000
 # differently, or (same as DASHBOARD_PORT) you're running more than one
 # device's client on this same host.
 #SYNC_PORT=11235</code></pre>
-          <p class="muted" style="margin:1rem 0 0.25rem"><strong>Where your files go.</strong>
-            The client keeps four folders apart, so nothing of its own ever lands in your data:
-          </p>
-          <ul class="muted" style="margin-top:0.25rem">
-            <li><code>BACKUP_DIR_HOST</code> — <strong>your files</strong>. Mounted read-only; the client only reads them.</li>
-            <li><code>BUDDY_FILES_DIR_HOST</code> — <strong>buddy files</strong>: what your buddies store with you, encrypted (you can't read them). This is what uses the space you pledged. The client makes one subfolder per buddy inside it, so give it a folder of its own.</li>
-            <li><code>RESTORE_DIR_HOST</code> — files you <strong>restore</strong> from a buddy. Separate from your files, so a restore never overwrites anything.</li>
-            <li><code>DATA_DIR_HOST</code> — the client's own <strong>config</strong>: identity key and small bookkeeping files. Keep it next to <code>docker-compose.yml</code>.</li>
-          </ul>
-          <p class="muted" style="margin:0.5rem 0 0.25rem">Two common setups:</p>
-          <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code># A. One data drive, separate folders on it
-BACKUP_DIR_HOST=/mnt/storage/my-files
-BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files
-RESTORE_DIR_HOST=/mnt/storage/restored
-
-# B. Two separate mounts (two disks or NAS shares)
-BACKUP_DIR_HOST=/mnt/my-data
-BUDDY_FILES_DIR_HOST=/mnt/buddy-data</code></pre>
-          <p class="muted" style="margin-top:0.5rem">
-            Don't put the buddy-files or restore folder <em>inside</em> your own files' folder — you'd end up backing your buddy's files (or your restores) back up to your buddy.
-          </p>
           <p class="muted" style="margin-top:0.75rem">
             Example, filled in: <code>DEVICE_TOKEN=bbd_7f3a9c1e2d4b5a6f8e0c1d2b3a4f5e6d</code> and
             <code>BACKUP_PASSPHRASE=correct horse battery staple woodland</code> — yours will look
@@ -179,7 +171,7 @@ docker compose logs -f</code></pre>
         </li>
         <li>
           <strong>Confirm it found your buddy</strong>
-          Once your buddy's client is running too, you'll see a cycle line in the logs roughly every 30 seconds: "backup cycle complete" if there was something to send, or "nothing new to back up" if not — both mean the cycle actually ran and reached your buddy. This happens even on a device with no <code>BACKUP_DIR_HOST</code> set, since it's still running a cycle against an empty folder (so you'll just see "nothing new to back up" every time, which is expected and confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible).
+          Once your buddy's client is running too, you'll see a cycle line in the logs roughly every 30 seconds: "backup cycle complete" if there was something to send, or "nothing new to back up" if not — both mean the cycle actually ran and reached your buddy. This happens even on a receive-only device (<code>./empty-backup-dir</code> as its backup folder), since it's still running a cycle against an empty folder (so you'll just see "nothing new to back up" every time, which is expected and confirms your two machines can reach each other — directly, or through the relay if a direct connection isn't possible).
         </li>
       </ol>
 
@@ -195,7 +187,7 @@ docker compose logs -f</code></pre>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>curl -fsSL https://app.filegarden.net/client/install.sh | bash
 cd backup-buddies-client</code></pre>
           <p class="muted">
-            Fill in the same two <code>.env</code> values as above, then
+            Fill in the same two <code>.env</code> values as above (this version sets its folders in <code>.env</code> instead — the <code>*_DIR_HOST</code> lines in its <code>.env.example</code>), then
             <code>docker compose up -d</code> — the first run builds the
             image locally (a few minutes); after that, starting is instant.
           </p>
@@ -219,14 +211,14 @@ cd backup-buddies-client</code></pre>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
             <li>Connects directly to your buddy's device when possible — including finding them automatically on the same local network and connecting over it, never touching the relay — falling back to the relay automatically when a direct connection isn't possible</li>
             <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
-            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land under <code>RESTORE_DIR_HOST/&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land in your restore folder under <code>&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
           </ul>
         </div>
         <div class="split-col">
           <h3>Known limits, for now</h3>
           <ul>
-            <li>The backup cycle runs on a fixed ~30 second schedule — not yet configurable</li>
+            <li>Checks for changes on a schedule (every 30 seconds by default; set <code>SCAN_INTERVAL_SECS</code> in <code>.env</code> to change it) rather than instantly</li>
             <li>Backs up the whole folder you point it at — no per-file or pattern-based exclude list yet</li>
             <li>The local status dashboard has no login of its own — see its section below before exposing that port beyond your own network</li>
           </ul>
@@ -238,12 +230,12 @@ cd backup-buddies-client</code></pre>
       <h2>Useful <code>docker compose</code> commands</h2>
       <p class="muted">Run these from inside the <code>backup-buddies-client</code> folder (where its <code>docker-compose.yml</code> lives):</p>
       <ul class="tech-list">
-        <li><code>docker compose up -d</code> — start the client in the background. Safe to run again any time (e.g. after editing <code>.env</code>) — it restarts with the new settings.</li>
+        <li><code>docker compose up -d</code> — start the client in the background. Safe to run again any time (e.g. after editing <code>.env</code> or <code>docker-compose.yml</code>) — it restarts with the new settings.</li>
         <li><code>docker compose pull &amp;&amp; docker compose up -d</code> — update to the latest client: fetches the newest published image and restarts with it, keeping your <code>.env</code>, <code>docker-compose.yml</code> and data folders exactly as they are. Nothing updates itself automatically; your dashboard's Devices card shows <em>update available</em> when a newer version is out (the command it shows does the same thing). Never delete the folder and set it up again to update: that throws away this device's identity and the backups it holds for your buddy.</li>
         <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
         <li><code>docker compose ps</code> — check whether it's currently running.</li>
         <li><code>docker compose restart</code> — restart it without rebuilding.</li>
-        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and everything your buddy stores with you are kept (they live in <code>DATA_DIR_HOST</code> and <code>BUDDY_FILES_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
+        <li><code>docker compose down</code> — stop and remove the container. Your device's identity and everything your buddy stores with you are kept (they live in your config and buddy-files folders, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
       </ul>
     </section>
 
@@ -251,7 +243,7 @@ cd backup-buddies-client</code></pre>
       <h2>Troubleshooting</h2>
       <ul class="tech-list">
         <li><strong>No "registered" line in the logs:</strong> double-check <code>DEVICE_TOKEN</code> was copied correctly and the container can reach <code>api.filegarden.net</code>. A 401 here means that exact token doesn't match any device on your dashboard — it's either stale (its device was removed and re-added since, which issues a new one) or the paste picked up extra whitespace; easiest fix is to remove the device, add it again, and paste the fresh token.</li>
-        <li><strong>Won't start: "BUDDY_FILES_DIR … has no Backup Buddies marker" or "belongs to a different Backup Buddies setup":</strong> the folder mounted for buddy files isn't the one this device has been using. Almost always that's a drive or network share that wasn't mounted yet when the client started — Docker then mounts the empty folder underneath instead, and the client refuses rather than storing your buddy's files on the wrong disk. Mount the drive and run <code>docker compose up -d</code> again. If you deliberately moved the buddy files, point <code>BUDDY_FILES_DIR_HOST</code> at the new folder. To deliberately start over with a new, empty folder, delete <code>buddy-files-id</code> from your config folder (your buddies will re-send what they had stored with you).</li>
+        <li><strong>Won't start: "BUDDY_FILES_DIR … has no Backup Buddies marker" or "belongs to a different Backup Buddies setup":</strong> the folder mounted for buddy files isn't the one this device has been using. Almost always that's a drive or network share that wasn't mounted yet when the client started — Docker then mounts the empty folder underneath instead, and the client refuses rather than storing your buddy's files on the wrong disk. Mount the drive and run <code>docker compose up -d</code> again. If you deliberately moved the buddy files, change the <code>/buddy-files</code> line in <code>docker-compose.yml</code> to the new folder. To deliberately start over with a new, empty folder, delete <code>buddy-files-id</code> from your config folder (your buddies will re-send what they had stored with you).</li>
         <li><strong>"backup failed: your backup folder looks empty…":</strong> the folder with your files is suddenly empty, but your buddy holds files from it. The client won't mirror that as "delete everything" — check the drive is mounted. If you really did delete everything on purpose, add <code>ALLOW_EMPTY_BACKUP_DIR=true</code> to <code>.env</code> and run <code>docker compose up -d</code>.</li>
         <li><strong>A file shows "your buddy's client is out of date — files over 512 MB will send once they update":</strong> your buddy is on an older client that can only receive files up to 512 MB. Everything smaller still backs up normally; ask your buddy to update (<code>docker compose pull &amp;&amp; docker compose up -d</code>) and the rest goes out on the next cycle.</li>
         <li><strong>A file shows "can't read this file on this device — check its permissions":</strong> the client runs as the <code>PUID</code>/<code>PGID</code> in your <code>.env</code> and can only back up files that user can read. Everything else keeps backing up. Fix the file's permissions (or run <code>id -u</code>/<code>id -g</code> and check <code>PUID</code>/<code>PGID</code> match the files' owner). While any folder can't be read, deletions are paused so nothing inside it is mistaken for deleted.</li>
@@ -260,9 +252,10 @@ cd backup-buddies-client</code></pre>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto; margin-top:0.5rem"><code>docker compose down
 mkdir -p /mnt/storage/buddy-files          # pick your folder
 mv ./data/received/* /mnt/storage/buddy-files/
-echo "BUDDY_FILES_DIR_HOST=/mnt/storage/buddy-files" &gt;&gt; .env
+# then point the buddy-files line in docker-compose.yml at it:
+#   - /mnt/storage/buddy-files:/buddy-files
 docker compose up -d</code></pre>
-          Your existing <code>DATA_DIR_HOST=./data</code> keeps working as the config folder. If the client instead refuses to start saying buddy files exist in <em>both</em> places, a folder was half-moved — finish moving everything from <code>./data/received/</code> into your buddy-files folder. Old restores in <code>./data/restored</code> stay where they are; new ones go to <code>RESTORE_DIR_HOST</code>.</li>
+          Your existing <code>./data</code> config folder keeps working as it is. If the client instead refuses to start saying buddy files exist in <em>both</em> places, a folder was half-moved — finish moving everything from <code>./data/received/</code> into your buddy-files folder. Old restores in <code>./data/restored</code> stay where they are; new ones go to your <code>/restored</code> folder.</li>
         <li><strong>Fails to start with an "address already in use" error, or logs show it exiting immediately:</strong> something else on this host — often another device's client — already has that <code>DASHBOARD_PORT</code> or <code>SYNC_PORT</code>. Give this device its own, different values for both in its <code>.env</code> (see above) and restart. With <code>network_mode: host</code>, these bind directly on the host, so they must be unique across every client running on the same machine.</li>
         <li><strong>On Docker Desktop (Mac/Windows), the dashboard or buddy connections stop working after adding <code>network_mode: host</code>:</strong> host networking isn't fully supported there the way it is on Linux. Remove that line, add back a <code>ports:</code> section instead (<code>"${DASHBOARD_PORT:-8080}:8080"</code> and <code>"${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"</code>), and everything still works — you just won't get local-network (mDNS) direct connections to a buddy on the same LAN; relay and direct-over-internet connections are unaffected.</li>
         <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
