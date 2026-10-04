@@ -3,9 +3,22 @@ import crypto from 'node:crypto';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireEmailVerified } from '../middleware/require-email-verified.js';
+import { rateLimit } from '../lib/rate-limit.js';
 import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
 
 export const invitesRouter = Router();
+
+// Invite codes are 10 hex characters — fine against casual guessing, but
+// nothing stopped a logged-in account from trying codes in a loop to land
+// in a stranger's pairing. Per account (not IP), so it can't be dodged by
+// faking a header; generous enough that a real person never sees it.
+const redeemPerAccount = rateLimit({
+  name: 'redeem-account',
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  key: (req) => req.account?.id,
+  message: 'Too many invite attempts — try again in an hour.',
+});
 
 // Pledges are constrained to clean, even steps rather than an arbitrary
 // byte count — easier to reason about across pairings/billing, and avoids
@@ -312,7 +325,7 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
 }
 
 // Redeem someone else's invite code directly (they sent it to you).
-invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, async (req, res) => {
+invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, redeemPerAccount, async (req, res) => {
   const result = await redeemInvite({
     lockQuery: `SELECT * FROM invites WHERE code = $1 FOR UPDATE`,
     lockParam: req.params.code,
@@ -415,7 +428,7 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
 // to you directly. pledged_bytes in the body is what the redeemer saw and
 // clicked on in "Find a buddy"; redeemInvite re-checks it against the
 // invite's actual size before pairing (see the comment there).
-invitesRouter.post('/invites/public/:id/redeem', requireAuth, requireEmailVerified, async (req, res) => {
+invitesRouter.post('/invites/public/:id/redeem', requireAuth, requireEmailVerified, redeemPerAccount, async (req, res) => {
   const expectedPledgedBytes = Number(req.body?.pledged_bytes);
   if (!Number.isInteger(expectedPledgedBytes) || expectedPledgedBytes <= 0) {
     return res.status(400).json({ error: 'pledged_bytes is required in the request body' });

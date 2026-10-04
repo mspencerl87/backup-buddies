@@ -6,10 +6,37 @@ import { pool } from '../db/pool.js';
 import { SESSION_COOKIE, requireAuth } from '../middleware/require-auth.js';
 import { sendVerificationEmail, verifyEmailToken } from '../lib/email-verification.js';
 import { requestPasswordReset, resetPasswordWithToken } from '../lib/password-reset.js';
+import { rateLimit, bodyEmail } from '../lib/rate-limit.js';
 
 export const authRouter = Router();
 
 const SESSION_TTL_DAYS = 30;
+
+// --- Rate limits (lib/rate-limit.js) ---
+// Per-IP limits stop one source hammering an endpoint; the per-email login
+// limit stops password guessing against one account spread across many IPs
+// (and can't be dodged by faking an IP header). Numbers are generous enough
+// that a real person never sees them.
+const MINUTE = 60 * 1000;
+const loginPerIp = rateLimit({ name: 'login-ip', windowMs: 15 * MINUTE, max: 20 });
+const loginPerEmail = rateLimit({
+  name: 'login-email',
+  windowMs: 15 * MINUTE,
+  max: 10,
+  key: bodyEmail,
+  message: 'Too many sign-in attempts for this account — try again in a few minutes, or reset your password.',
+});
+// Every signup sends a verification email, so this is what keeps a bot
+// signup wave from burning through the SMTP mailbox's sending limits.
+const signupPerIp = rateLimit({
+  name: 'signup-ip',
+  windowMs: 60 * MINUTE,
+  max: 5,
+  message: 'Too many sign-ups from your network — try again in an hour.',
+});
+const forgotPerIp = rateLimit({ name: 'forgot-ip', windowMs: 15 * MINUTE, max: 5 });
+const resetPerIp = rateLimit({ name: 'reset-ip', windowMs: 15 * MINUTE, max: 10 });
+const verifyPerIp = rateLimit({ name: 'verify-ip', windowMs: 15 * MINUTE, max: 20 });
 const OAUTH_STATE_COOKIE = 'oauth_state';
 const googleClient = process.env.GOOGLE_CLIENT_ID
   ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
@@ -34,7 +61,7 @@ async function createSession(accountId) {
   return result.rows[0].id;
 }
 
-authRouter.post('/signup', async (req, res) => {
+authRouter.post('/signup', signupPerIp, async (req, res) => {
   const { email, password, accepted_terms } = req.body ?? {};
 
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -86,7 +113,7 @@ authRouter.post('/signup', async (req, res) => {
   }
 });
 
-authRouter.post('/login', async (req, res) => {
+authRouter.post('/login', loginPerIp, loginPerEmail, async (req, res) => {
   const { email, password } = req.body ?? {};
 
   if (typeof email !== 'string' || typeof password !== 'string') {
@@ -266,7 +293,7 @@ authRouter.get('/auth/google/callback', async (req, res) => {
 // No auth required — the token itself (single-use, 48h expiry) is the
 // credential; this lets a verification link work even in a browser that
 // isn't currently logged in as that account.
-authRouter.post('/auth/verify-email', async (req, res) => {
+authRouter.post('/auth/verify-email', verifyPerIp, async (req, res) => {
   const { token } = req.body ?? {};
   const result = await verifyEmailToken(token);
 
@@ -303,7 +330,7 @@ authRouter.post('/auth/resend-verification', requireAuth, async (req, res) => {
 // who's registered. The actual work runs in the background for the same
 // reason: awaiting the SMTP send would make "account exists" respond
 // measurably slower than "no such account".
-authRouter.post('/auth/forgot-password', (req, res) => {
+authRouter.post('/auth/forgot-password', forgotPerIp, (req, res) => {
   const { email } = req.body ?? {};
   if (typeof email !== 'string' || !email.trim()) {
     return res.status(400).json({ error: 'email is required' });
@@ -326,7 +353,7 @@ authRouter.post('/auth/forgot-password', (req, res) => {
 // /auth/verify-email: the single-use, expiring token is the credential.
 // Success logs out every existing session for the account, so they sign in
 // fresh with the new password.
-authRouter.post('/auth/reset-password', async (req, res) => {
+authRouter.post('/auth/reset-password', resetPerIp, async (req, res) => {
   const { token, password } = req.body ?? {};
   const result = await resetPasswordWithToken(token, password);
 

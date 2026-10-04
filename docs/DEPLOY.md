@@ -865,3 +865,45 @@ relay-1. Nothing else depends on it.
 - A brand-new device is denied for its first few seconds, because the
   client opens its relay connection just before it registers its node id.
   iroh retries and gets in automatically.
+
+## 24. Rate limiting on login, signup, password reset and invites
+
+`lib/rate-limit.js`: a small in-memory limiter with no dependency and no
+shared store, since there's one API process. A restart resets the counters,
+which is harmless. Over a limit, the request gets a 429 with `Retry-After`
+and a "try again in N minutes" message, which every form already shows.
+
+| Endpoint | Limit | Keyed by |
+|---|---|---|
+| `POST /login` | 20 / 15 min | IP |
+| `POST /login` | 10 / 15 min | email being signed into |
+| `POST /signup` | 5 / hour | IP (protects the SMTP mailbox from bot signups) |
+| `POST /auth/forgot-password` | 5 / 15 min | IP (on top of its per-account cooldown and global cap) |
+| `POST /auth/reset-password` | 10 / 15 min | IP |
+| `POST /auth/verify-email` | 20 / 15 min | IP |
+| `POST /invites/…/redeem` | 20 / hour | account (stops guessing invite codes) |
+
+Device clients (`/devices/*`) and relay-1 (`/relay/access`) are never
+limited. When a limit trips, the API logs one `[rate-limit] …` line per key
+per window, so `docker compose logs api | grep rate-limit` shows who hit what.
+
+**No migration, no env vars.** Merging to `main` deploys it.
+
+**The real visitor IP** comes from Cloudflare's `CF-Connecting-IP` header,
+because every request arrives Cloudflare → Caddy → API and the socket
+address is always Caddy's. app-1's port 443 is open to the internet, so
+someone who finds app-1's real IP and skips Cloudflare could fake that
+header and dodge the per-IP limits. That's why login also has a per-email
+limit, and invite redemption is per-account: neither can be faked.
+
+To close it fully (optional), restrict app-1's inbound 80/443 in the Linode
+Cloud Firewall to Cloudflare's published ranges
+(https://www.cloudflare.com/ips/). Afterwards, confirm Caddy can still renew
+its certificates. Watch `docker compose logs caddy` around the next renewal,
+or run a forced renewal, since a challenge that can't get through would
+eventually expire the cert.
+
+**Side effect to know about:** the per-email login limit means someone
+spamming wrong passwords for a user's email can lock that user out of
+password login for up to 15 minutes. "Continue with Google" and password
+reset still work for them in the meantime.
