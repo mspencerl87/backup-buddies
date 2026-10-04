@@ -30,8 +30,11 @@ devicesRouter.post('/devices', requireAuth, async (req, res) => {
 });
 
 devicesRouter.get('/devices', requireAuth, async (req, res) => {
+  // client_version via to_jsonb so this query works whether or not
+  // migration 015 has been applied yet (a missing column just reads NULL).
   const result = await pool.query(
-    `SELECT id, iroh_node_id, label, token_last_four, created_at, last_seen_at
+    `SELECT id, iroh_node_id, label, token_last_four, created_at, last_seen_at,
+            to_jsonb(devices) ->> 'client_version' AS client_version
        FROM devices
       WHERE account_id = $1
       ORDER BY created_at`,
@@ -52,6 +55,30 @@ devicesRouter.delete('/devices/:id', requireAuth, async (req, res) => {
 });
 
 // ---- Client-side (device-token-authed): the headless agent itself ----
+
+// Clients 0.2.0+ identify themselves as "backup-buddies-client/<version>"
+// in the User-Agent (apps/client/src/main.rs). Stored per device so the web
+// dashboard can flag devices running an outdated client. Only written when
+// it changes, so the 30s poll doesn't turn into a write every time.
+const CLIENT_UA = /^backup-buddies-client\/(\d+\.\d+\.\d+[\w.-]*)/;
+let clientVersionColumnMissing = false;
+
+async function recordClientVersion(req) {
+  const version = CLIENT_UA.exec(req.get('user-agent') || '')?.[1];
+  if (!version || version === req.device.client_version || clientVersionColumnMissing) return;
+  try {
+    await pool.query(`UPDATE devices SET client_version = $1 WHERE id = $2`, [version, req.device.id]);
+  } catch (err) {
+    // 42703 = undefined column: migration 015 isn't applied yet. Never let
+    // that break a device's poll — just stop trying until the next restart.
+    if (err.code === '42703') {
+      clientVersionColumnMissing = true;
+      console.warn('devices.client_version missing — apply db/migrations/015_device_client_version.sql');
+      return;
+    }
+    throw err;
+  }
+}
 
 // The client calls this on every startup (and periodically) once it has
 // generated or loaded its persistent Iroh keypair, so the server always
@@ -89,6 +116,7 @@ devicesRouter.put('/devices/me/node-id', requireDeviceAuth, async (req, res) => 
 // last_seen_at) even when called with no new node id to report.
 devicesRouter.get('/devices/me/buddies', requireDeviceAuth, async (req, res) => {
   await pool.query(`UPDATE devices SET last_seen_at = now() WHERE id = $1`, [req.device.id]);
+  await recordClientVersion(req);
 
   // Piggybacks relay-bandwidth reporting on this existing 30s poll rather
   // than a separate endpoint/schedule — see bandwidth.rs on the client.

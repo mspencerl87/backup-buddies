@@ -128,6 +128,34 @@ cargo build --release
 docker build -t backup-buddies-client .
 ```
 
+## Updating, and releasing a new version
+
+Users update in place, from inside their `backup-buddies-client` folder:
+
+```bash
+curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
+```
+
+That replaces only the code (`src/`, `assets/`, `Cargo.*`, `Dockerfile`,
+`docker-compose.yml`) and runs `docker compose up -d --build`. It never
+touches `.env` or `data/`. Everything is downloaded to a temp folder first,
+so a failed download leaves the old install untouched. A hand-edited
+`docker-compose.yml` is saved as `docker-compose.yml.bak`.
+
+The client sends `User-Agent: backup-buddies-client/<Cargo.toml version>` on
+every API call. The API records it per device (`devices.client_version`),
+and the web dashboard compares it to the version in `apps/client/Cargo.toml`
+(served at `/client/Cargo.toml`). Any device on an older version, or one
+that reports no version (anything before 0.2.0), gets an "update available"
+badge with the command above.
+
+**So: bump `version` in `Cargo.toml` whenever you ship a client change users
+should get**, and update `Cargo.lock` in the same commit. Running
+`cargo build` once does that, or edit the `backup-buddies-client` entry by
+hand. The Dockerfile builds with `--locked`, so a stale lock fails the build.
+Without a bump, nobody is told to update. Remember that app-1 only serves
+new client code after a `git pull` there (see docs/DEPLOY.md).
+
 ## Data directory
 
 Everything persistent lives under `/data` inside the container, bind-mounted

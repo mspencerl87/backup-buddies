@@ -12,7 +12,7 @@
   <meta property="og:url" content="https://app.filegarden.net/setup.html">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="stylesheet" href="/style.css?v=e379dc49">
+  <link rel="stylesheet" href="/style.css?v=e608602f">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -194,10 +194,10 @@ cd backup-buddies-client</code></pre>
       <p class="muted">Run these from inside the <code>backup-buddies-client</code> folder (where its <code>docker-compose.yml</code> lives):</p>
       <ul class="tech-list">
         <li><code>docker compose up -d</code> — start the client in the background. Safe to run again any time (e.g. after editing <code>.env</code>) — it restarts with the new settings.</li>
-        <li><code>docker compose pull && docker compose up -d</code> — update to the latest published client version. Nothing updates itself automatically, so run this whenever you want the newest release.</li>
+        <li><code>curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code> — update to the latest client. Downloads the new code, rebuilds, and restarts, keeping your <code>.env</code> and <code>data/</code> folder exactly as they are. Nothing updates itself automatically; your dashboard's Devices card shows <em>update available</em> when a newer version is out. (Never delete the folder and reinstall to update: that throws away this device's identity and the backups it holds for your buddy.)</li>
         <li><code>docker compose logs -f</code> — follow the client's logs live. <kbd>Ctrl+C</kbd> to stop watching (the client keeps running).</li>
         <li><code>docker compose ps</code> — check whether it's currently running.</li>
-        <li><code>docker compose restart</code> — restart it without pulling or rebuilding.</li>
+        <li><code>docker compose restart</code> — restart it without rebuilding.</li>
         <li><code>docker compose down</code> — stop and remove the container. Your device's identity and anything received from your buddy are kept (they live in <code>DATA_DIR_HOST</code>, outside the container) — <code>docker compose up -d</code> picks up right where it left off.</li>
       </ul>
     </section>

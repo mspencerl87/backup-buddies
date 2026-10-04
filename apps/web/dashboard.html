@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard — Backup Buddies</title>
   <meta name="description" content="Your Backup Buddies dashboard — backup status, disk usage, and buddy pairings.">
-  <link rel="stylesheet" href="/style.css?v=e379dc49">
+  <link rel="stylesheet" href="/style.css?v=e608602f">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -58,11 +58,20 @@
       <p class="muted">Each machine running the backup client needs its own device token. <a href="/setup.html">How do I set up the client?</a></p>
       <table id="devices-table" style="display:none">
         <thead>
-          <tr><th>Label</th><th>Status</th><th>Last seen</th><th>Token</th><th></th></tr>
+          <tr><th>Label</th><th>Status</th><th>Last seen</th><th>Version</th><th>Token</th><th></th></tr>
         </thead>
         <tbody></tbody>
       </table>
       <p id="devices-empty" class="muted">No devices yet — add one to get a token for the Docker client.</p>
+      <div id="client-update-notice" class="client-update-notice" style="display:none">
+        <strong>A newer client is available</strong> (<span id="client-latest-version"></span>) for the device(s)
+        marked above. Run this on each one, from inside its <code>backup-buddies-client</code> folder:
+        <pre><code id="client-update-command">curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code></pre>
+        <button type="button" class="btn btn-secondary btn-sm" id="copy-update-command">Copy command</button>
+        <span class="muted">It updates the code and rebuilds in place. Your <code>.env</code> (token and passphrase)
+        and <code>data/</code> folder, including the backups you hold for your buddy, are kept. Don't delete the
+        folder and reinstall instead.</span>
+      </div>
       <div class="inline-form" style="margin-top:1rem">
         <input type="text" id="device-label" placeholder="e.g. Spencer's desktop">
         <button class="btn" id="add-device-btn" type="button">Add device</button>
@@ -380,6 +389,46 @@
       };
     }
 
+    // The latest client version is whatever apps/client/Cargo.toml says —
+    // Caddy serves that folder at /client/ (it's what install.sh downloads
+    // from), so this is always the version a fresh install or update gets.
+    let latestClientVersion = null;
+    async function loadLatestClientVersion() {
+      try {
+        const res = await fetch('/client/Cargo.toml', { cache: 'no-cache' });
+        if (!res.ok) return null;
+        const match = /^version\s*=\s*"([^"]+)"/m.exec(await res.text());
+        return match ? match[1] : null;
+      } catch {
+        return null;
+      }
+    }
+
+    // Numeric x.y.z comparison; true if `a` is older than `b`.
+    function isOlderVersion(a, b) {
+      const pa = a.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+      const pb = b.split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < 3; i += 1) {
+        if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0);
+      }
+      return false;
+    }
+
+    // A device needs updating if it reports an older version — or reports
+    // none at all while it's been seen running (clients before 0.2.0 didn't
+    // report a version, so they're older by definition).
+    function deviceNeedsUpdate(d) {
+      if (!latestClientVersion || !d.last_seen_at) return false;
+      if (!d.client_version) return true;
+      return isOlderVersion(d.client_version, latestClientVersion);
+    }
+
+    function escapeText(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
     function renderDevices(devices) {
       const table = document.getElementById('devices-table');
       const empty = document.getElementById('devices-empty');
@@ -399,11 +448,19 @@
         const status = d.iroh_node_id ? 'connected' : 'not set up yet';
         const lastSeen = d.last_seen_at ? formatDate(d.last_seen_at) : 'never';
         const tr = document.createElement('tr');
+        const needsUpdate = deviceNeedsUpdate(d);
+        const version = d.client_version
+          ? `v${escapeText(d.client_version)}`
+          : (d.last_seen_at ? 'older than 0.2.0' : '—');
+        const versionCell = needsUpdate
+          ? `${version} <span class="tier-badge paused">update available</span>`
+          : version;
         tr.innerHTML = `
-          <td>${d.label || '(unlabeled)'}</td>
+          <td>${escapeText(d.label || '(unlabeled)')}</td>
           <td>${status}</td>
           <td>${lastSeen}</td>
-          <td><code>…${d.token_last_four || '????'}</code></td>
+          <td>${versionCell}</td>
+          <td><code>…${escapeText(d.token_last_four || '????')}</code></td>
           <td><a href="#" class="remove-device-link" data-id="${d.id}">Remove</a></td>
         `;
         tbody.appendChild(tr);
@@ -421,13 +478,31 @@
 
     async function loadDevices() {
       try {
-        const res = await fetch('/api/devices', { credentials: 'same-origin' });
+        const [res, latest] = await Promise.all([
+          fetch('/api/devices', { credentials: 'same-origin' }),
+          latestClientVersion ? Promise.resolve(latestClientVersion) : loadLatestClientVersion(),
+        ]);
+        latestClientVersion = latest;
         const data = await parseJsonResponse(res);
         renderDevices(data.devices);
+        const anyOutdated = data.devices.some(deviceNeedsUpdate);
+        document.getElementById('client-update-notice').style.display = anyOutdated ? 'block' : 'none';
+        if (anyOutdated) document.getElementById('client-latest-version').textContent = `v${latestClientVersion}`;
       } catch (err) {
         document.getElementById('device-error').textContent = err.message || 'Could not load devices.';
       }
     }
+
+    document.getElementById('copy-update-command').addEventListener('click', async (e) => {
+      const command = document.getElementById('client-update-command').textContent;
+      try {
+        await navigator.clipboard.writeText(command);
+        e.target.textContent = 'Copied';
+        setTimeout(() => { e.target.textContent = 'Copy command'; }, 1500);
+      } catch {
+        window.prompt('Copy this command:', command);
+      }
+    });
 
     document.getElementById('add-device-btn').addEventListener('click', async () => {
       const errorEl = document.getElementById('device-error');

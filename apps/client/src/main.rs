@@ -354,7 +354,15 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let http = reqwest::Client::new();
+    // The User-Agent carries this build's version (Cargo.toml) on every API
+    // call, so the server can record which version each device runs and the
+    // web dashboard can tell the user when an update is available (see
+    // apps/api/src/routes/devices.js). Bump Cargo.toml's version whenever
+    // you ship a client change people should update to.
+    let http = reqwest::Client::builder()
+        .user_agent(concat!("backup-buddies-client/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("failed to build HTTP client")?;
 
     register_node_id(&http, &config, &endpoint_id).await?;
 

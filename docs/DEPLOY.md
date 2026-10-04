@@ -907,3 +907,38 @@ eventually expire the cert.
 spamming wrong passwords for a user's email can lock that user out of
 password login for up to 15 minutes. "Continue with Google" and password
 reset still work for them in the meantime.
+
+## 25. Client version reporting + in-place updates
+
+Clients 0.2.0+ send `User-Agent: backup-buddies-client/<version>`. The API
+stores it per device (`devices.client_version`), and the dashboard's Devices
+card compares it to `apps/client/Cargo.toml` (served by Caddy at
+`/client/Cargo.toml`). Outdated devices, including every pre-0.2.0 client,
+since those don't report a version, get an "update available" badge and a
+copy-able update command. The admin account view shows each device's
+version too.
+
+Updating is now in place, via `install.sh --update`:
+```bash
+curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
+```
+It replaces only the code and rebuilds, keeping `.env` and `data/`. Before
+this there was no update path: `install.sh` refused an existing folder, and
+the setup page's old `docker compose pull` advice did nothing, because the
+client is built locally from source. Deleting the folder to reinstall would
+have thrown away the device's identity and the backups it holds for its
+buddy.
+
+**Migration** (apply any time; the code works with or without it, and
+versions just aren't recorded until it's in):
+```bash
+cd /opt/backup-buddies/deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/015_device_client_version.sql
+```
+
+**Releasing a client change from now on:** bump `version` in
+`apps/client/Cargo.toml` (and the matching `Cargo.lock` entry), push, then
+`git pull` on app-1 if nothing else triggered a deploy (section 7). Without
+the version bump, nobody is told to update. See apps/client/README.md,
+"Updating, and releasing a new version".

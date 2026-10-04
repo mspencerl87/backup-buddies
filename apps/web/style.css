@@ -490,6 +490,33 @@ th.sortable.sort-desc::after {
   margin: 0;
 }
 
+/* Dashboard Devices card: shown when a device runs an outdated client. */
+.client-update-notice {
+  margin-top: 0.9rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid rgba(244, 163, 94, 0.45);
+  border-radius: 8px;
+  background: rgba(244, 163, 94, 0.07);
+  font-size: 0.88rem;
+}
+
+.client-update-notice pre {
+  margin: 0.6rem 0;
+  overflow-x: auto;
+}
+
+.client-update-notice pre code {
+  display: block;
+  padding: 0.55rem 0.7rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.client-update-notice .btn-sm {
+  display: block;
+  margin-bottom: 0.6rem;
+}
+
 /* --- Admin account detail --- */
 
 .detail-header {

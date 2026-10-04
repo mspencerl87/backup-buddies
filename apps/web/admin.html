@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin — Backup Buddies</title>
   <meta name="description" content="Backup Buddies admin dashboard.">
-  <link rel="stylesheet" href="/style.css?v=e379dc49">
+  <link rel="stylesheet" href="/style.css?v=e608602f">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -79,7 +79,7 @@
         <h3>Devices</h3>
         <table id="detail-devices-table" style="display:none">
           <thead>
-            <tr><th>Label</th><th>Node id</th><th>Registered</th><th>Last seen</th><th>Token</th><th></th></tr>
+            <tr><th>Label</th><th>Node id</th><th>Registered</th><th>Last seen</th><th>Version</th><th>Token</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>
@@ -1036,6 +1036,7 @@
             : 'not set up yet'}</td>
           <td>${escapeHtml(formatDate(d.created_at))}</td>
           <td>${seen}</td>
+          <td>${d.client_version ? `v${escapeHtml(d.client_version)}` : (d.last_seen_at ? '<span class="muted">&lt;0.2.0</span>' : '—')}</td>
           <td><code>…${escapeHtml(d.token_last_four || '????')}</code></td>
           <td><a href="#" class="delete-link" data-kind="devices" data-id="${escapeHtml(d.id)}">Delete</a></td>
         `;

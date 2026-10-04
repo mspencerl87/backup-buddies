@@ -8,8 +8,23 @@
 # this works without any GitHub access). Creates ./backup-buddies-client/
 # in the current directory and leaves you with instructions, never starts
 # anything on its own.
+#
+# Updating an existing install (run from inside backup-buddies-client/, or
+# from the folder that contains it):
+#
+#   curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
+#
+# Replaces only the code (source, Dockerfile, compose file) and rebuilds.
+# Never touches .env (device token, backup passphrase) or ./data (this
+# device's identity and the backups it holds for its buddies) — deleting
+# the folder and reinstalling would lose both, so never update that way.
 
 set -euo pipefail
+
+MODE="install"
+if [ "${1:-}" = "--update" ]; then
+  MODE="update"
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Error: docker is not installed. Install Docker first: https://docs.docker.com/get-docker/" >&2
@@ -21,38 +36,87 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-BASE_URL="https://app.filegarden.net/client"
+BASE_URL="${BB_CLIENT_BASE_URL:-https://app.filegarden.net/client}"
 DEST="backup-buddies-client"
 
-if [ -d "$DEST" ]; then
-  echo "Error: ./$DEST already exists — remove it or run this from a different directory." >&2
-  exit 1
-fi
-
-mkdir -p "$DEST/src" "$DEST/assets"
-cd "$DEST"
-
-echo "Downloading client files from $BASE_URL ..."
-for f in docker-compose.yml .env.example Dockerfile Cargo.toml Cargo.lock; do
-  curl -fsSL -o "$f" "$BASE_URL/$f"
-done
-
+TOP_FILES="docker-compose.yml .env.example Dockerfile Cargo.toml Cargo.lock"
 # Every module main.rs pulls in via `mod ...;` — Caddy serves the whole
 # apps/client/ tree statically but doesn't offer directory listing, so this
 # has to be an explicit list rather than something discovered at runtime.
 # Keep this in sync with apps/client/src/*.rs — a new module there needs
 # adding here too, or customers' builds will fail on a missing `mod`.
 SRC_FILES="main.rs backup.rs bandwidth.rs dashboard.rs manifest.rs netinfo.rs protocol.rs receive.rs restore.rs"
-for f in $SRC_FILES; do
-  curl -fsSL -o "src/$f" "$BASE_URL/src/$f"
-done
-
 # dashboard.rs embeds these via include_str! at compile time — same
 # keep-in-sync caveat as SRC_FILES above, against apps/client/assets/*.
 ASSET_FILES="favicon.svg mark.svg"
-for f in $ASSET_FILES; do
-  curl -fsSL -o "assets/$f" "$BASE_URL/assets/$f"
-done
+
+# Downloads the full set of client files into directory $1.
+download_into() {
+  local dir="$1"
+  mkdir -p "$dir/src" "$dir/assets"
+  for f in $TOP_FILES; do curl -fsSL -o "$dir/$f" "$BASE_URL/$f"; done
+  for f in $SRC_FILES; do curl -fsSL -o "$dir/src/$f" "$BASE_URL/src/$f"; done
+  for f in $ASSET_FILES; do curl -fsSL -o "$dir/assets/$f" "$BASE_URL/assets/$f"; done
+}
+
+client_version() {
+  sed -n 's/^version = "\(.*\)"/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+is_client_dir() {
+  [ -f "$1/.env" ] && [ -f "$1/docker-compose.yml" ] && grep -q '^name = "backup-buddies-client"' "$1/Cargo.toml" 2>/dev/null
+}
+
+if [ "$MODE" = "update" ]; then
+  if is_client_dir "."; then
+    TARGET="."
+  elif is_client_dir "$DEST"; then
+    TARGET="$DEST"
+  else
+    echo "Error: no existing install found here. Run this from inside your backup-buddies-client" >&2
+    echo "folder (the one with .env in it), or from the folder that contains it." >&2
+    exit 1
+  fi
+  cd "$TARGET"
+
+  OLD_VERSION="$(client_version Cargo.toml)"
+  # Download everything to a staging folder first, so a failed or partial
+  # download never leaves a half-updated client behind.
+  STAGING="$(mktemp -d)"
+  trap 'rm -rf "$STAGING"' EXIT
+  echo "Downloading the latest client from $BASE_URL ..."
+  download_into "$STAGING"
+  NEW_VERSION="$(client_version "$STAGING/Cargo.toml")"
+
+  # Keep a copy if someone hand-edited their compose file.
+  if [ -f docker-compose.yml ] && ! cmp -s docker-compose.yml "$STAGING/docker-compose.yml"; then
+    cp docker-compose.yml docker-compose.yml.bak
+    echo "Note: your docker-compose.yml differed from the new one — saved a copy as docker-compose.yml.bak"
+  fi
+
+  mkdir -p src assets
+  for f in $TOP_FILES; do cp "$STAGING/$f" "$f"; done
+  for f in $SRC_FILES; do cp "$STAGING/src/$f" "src/$f"; done
+  for f in $ASSET_FILES; do cp "$STAGING/assets/$f" "assets/$f"; done
+
+  echo "Updated client code: ${OLD_VERSION:-unknown} -> ${NEW_VERSION:-unknown}. Your .env and ./data were not touched."
+  echo "Rebuilding and restarting (a few minutes)..."
+  docker compose up -d --build
+  echo
+  echo "Done. Check it with: docker compose logs -f"
+  exit 0
+fi
+
+if [ -d "$DEST" ]; then
+  echo "Error: ./$DEST already exists. To update it, run:" >&2
+  echo "  curl -fsSL $BASE_URL/install.sh | bash -s -- --update" >&2
+  echo "(Don't delete it to reinstall — its .env and data/ hold your device token, passphrase, and backups.)" >&2
+  exit 1
+fi
+
+echo "Downloading client files from $BASE_URL ..."
+download_into "$DEST"
+cd "$DEST"
 
 cp .env.example .env
 

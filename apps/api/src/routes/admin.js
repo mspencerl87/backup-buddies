@@ -92,7 +92,8 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
       [accountId],
     ),
     pool.query(
-      `SELECT id, iroh_node_id, label, token_last_four, created_at, last_seen_at
+      `SELECT id, iroh_node_id, label, token_last_four, created_at, last_seen_at,
+              to_jsonb(devices) ->> 'client_version' AS client_version
          FROM devices
         WHERE account_id = $1
         ORDER BY created_at`,
