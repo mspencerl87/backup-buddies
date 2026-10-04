@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Backup Buddies</title>
-  <link rel="stylesheet" href="/style.css?v=c9d9a708">
+  <link rel="stylesheet" href="/style.css?v=e379dc49">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -50,6 +50,67 @@
         <h3>Direct, peer-to-peer</h3>
         <p>Your files move straight between your two devices — we just handle the matchmaking.</p>
       </div>
+    </section>
+
+    <section class="comparison">
+      <h2>Not quite cloud storage. Not quite Syncthing.</h2>
+      <p class="muted">
+        Backup Buddies borrows the direct-connection tech behind tools like
+        ZeroTier and the peer-to-peer philosophy of Syncthing, but points
+        them at a different problem: real backup redundancy with another
+        person, not just syncing your own devices.
+      </p>
+      <div class="comparison-table-wrap">
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th scope="col"></th>
+              <th scope="col">Cloud storage (S3, Backblaze, etc.)</th>
+              <th scope="col">Syncthing / ZeroTier</th>
+              <th scope="col" class="us-col">Backup Buddies</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">What it is</th>
+              <td>You rent storage from a company</td>
+              <td>You sync or network your own devices together</td>
+              <td class="us-col">You trade storage with someone else's device</td>
+            </tr>
+            <tr>
+              <th scope="row">Pricing</th>
+              <td>Pay per GB stored, every month, forever — plus egress fees</td>
+              <td>Free, but it's bring-your-own storage and hardware</td>
+              <td class="us-col">Free up to 50GB. No per-GB storage fee, ever — pay only for relay bandwidth you can't avoid</td>
+            </tr>
+            <tr>
+              <th scope="row">Connection</th>
+              <td>Always through their servers</td>
+              <td>Direct peer-to-peer between your devices, with a relay/mesh fallback</td>
+              <td class="us-col">Same idea — direct first, relay fallback — but between two different people's devices</td>
+            </tr>
+            <tr>
+              <th scope="row">Who's on the other end</th>
+              <td>A company's data center</td>
+              <td>Just you, across your own devices</td>
+              <td class="us-col">A buddy you chose, backing each other up</td>
+            </tr>
+            <tr>
+              <th scope="row">Encryption</th>
+              <td>Varies by provider and plan</td>
+              <td>Varies by setup</td>
+              <td class="us-col">Always, before it leaves your device — nobody, including us, can read it</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="comparison-summary">
+        Think of it as ZeroTier's direct-connection tech and Syncthing's
+        peer-to-peer philosophy, aimed at a different problem: instead of
+        syncing your own devices, you pair with someone else's for real
+        backup redundancy — at cloud-storage reliability, without the
+        monthly bill.
+      </p>
     </section>
 
     <section class="screenshots">
