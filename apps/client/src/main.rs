@@ -50,6 +50,11 @@ struct Config {
     // land: RESTORE_DIR/<their node id>/... Never inside BACKUP_DIR, which
     // is mounted read-only. Defaults to DATA_DIR/restored (pre-split).
     restore_dir: PathBuf,
+    // RESTORE_DIR as the person knows it on their own machine, for the
+    // dashboard's "Restored N file(s) to …" line — the container path
+    // (/restored) means nothing to someone looking in their file manager.
+    // See host_path_for_display.
+    restore_dir_display: String,
     // Where the real files to back up live. Optional — a client that's
     // only ever meant to receive (e.g. this machine has lots of disk and
     // is mainly someone else's buddy) doesn't need one. None here means
@@ -117,6 +122,7 @@ impl Config {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| data_dir.join("restored"));
+        let restore_dir_display = host_path_for_display(&restore_dir);
         let backup_dir = std::env::var("BACKUP_DIR").ok().map(PathBuf::from);
         let dashboard_port = std::env::var("DASHBOARD_PORT")
             .ok()
@@ -143,6 +149,7 @@ impl Config {
             data_dir,
             buddy_files_dir,
             restore_dir,
+            restore_dir_display,
             backup_dir,
             dashboard_bind,
             stale_after_secs,
@@ -259,6 +266,27 @@ impl Config {
         }
         Ok(())
     }
+}
+
+// Inside the container, RESTORE_DIR is just /restored — the host folder it's
+// mounted from isn't visible to us. But docker-compose.yml loads .env with
+// env_file, so whatever the person set there (RESTORE_DIR_HOST, or
+// DATA_DIR_HOST for the pre-split layout) is in our environment too — and
+// it's the path they'd recognise, since they wrote it. Falls back to the
+// compose file's defaults when those aren't set, and to the real path when
+// not running in Docker at all.
+fn host_path_for_display(restore_dir: &Path) -> String {
+    let var = |name: &str| std::env::var(name).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if !Path::new("/.dockerenv").exists() {
+        return restore_dir.display().to_string();
+    }
+    let host = if var("RESTORE_DIR").is_some() {
+        var("RESTORE_DIR_HOST").unwrap_or_else(|| "./restored".to_string())
+    } else {
+        // Old compose file: restores live under DATA_DIR/restored.
+        format!("{}/restored", var("DATA_DIR_HOST").unwrap_or_else(|| "./data".to_string()).trim_end_matches('/'))
+    };
+    host.trim_end_matches('/').to_string()
 }
 
 async fn ensure_writable_dir(name: &str, dir: &Path) -> Result<()> {
@@ -543,6 +571,7 @@ async fn main() -> Result<()> {
         let data_dir = config.data_dir.clone();
         let buddy_files_dir = config.buddy_files_dir.clone();
         let restore_dir = config.restore_dir.clone();
+        let restore_dir_display = config.restore_dir_display.clone();
         let backup_dir = config.backup_dir.clone();
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
@@ -560,6 +589,7 @@ async fn main() -> Result<()> {
                 data_dir,
                 buddy_files_dir,
                 restore_dir,
+                restore_dir_display,
                 backup_dir,
                 pledge_book,
                 bandwidth_book,

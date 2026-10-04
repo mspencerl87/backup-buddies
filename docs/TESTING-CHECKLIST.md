@@ -954,6 +954,19 @@ device+inode, not path. Nothing is ever moved automatically.
       config — Disk card and the buddy's "Their actual disk" probe report
       that disk's numbers, not the config disk's
 - [ ] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
+- [x] Client 0.3.1 (2026-10-04), from Spencer's testb screenshot: restoring
+      from a buddy holding nothing of ours said "Restored 0 file(s) to
+      /restored/<id>". Now says "Nothing to restore — this buddy isn't
+      holding any of this device's files." Restore results show the host
+      path (`RESTORE_DIR_HOST` from `.env`, which `env_file` passes into
+      the container; falls back to compose defaults, or `DATA_DIR_HOST/
+      restored` on the old layout) instead of the container's `/restored`.
+      Restore button deliberately stays enabled even when this device's
+      manifest is empty: a rebuilt device with fresh config is exactly
+      who needs it, and its buddy still has the files
+- [ ] Confirm on testa (port 8080, testb card → Restore): result line shows
+      `/home/sleblanc/bbdata/testa/restored/<testb id>`, and `hello.txt`
+      is there decrypted
 - [ ] Note for a follow-up: everything the client creates is owned by root
       (container runs as root), so users need `sudo` to move/inspect their
       folders. Consider `PUID`/`PGID` support like linuxserver.io images

@@ -157,6 +157,9 @@ struct AppState {
     buddy_files_dir: PathBuf,
     // Where dashboard restores land — RESTORE_DIR/<their node id>/.
     restore_dir: PathBuf,
+    // The same folder as the person knows it on the host (see
+    // main.rs's host_path_for_display) — what restore results show.
+    restore_dir_display: String,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
@@ -336,6 +339,7 @@ pub async fn run(
     data_dir: PathBuf,
     buddy_files_dir: PathBuf,
     restore_dir: PathBuf,
+    restore_dir_display: String,
     backup_dir: Option<PathBuf>,
     pledge_book: PledgeBook,
     bandwidth_book: BandwidthBook,
@@ -354,6 +358,7 @@ pub async fn run(
         data_dir,
         buddy_files_dir,
         restore_dir,
+        restore_dir_display,
         backup_dir,
         pledge_book,
         bandwidth_book,
@@ -499,7 +504,7 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
         data_dir: state.data_dir.display().to_string(),
         buddy_files_dir: state.buddy_files_dir.display().to_string(),
-        restore_dir: state.restore_dir.display().to_string(),
+        restore_dir: state.restore_dir_display.clone(),
         version: env!("CARGO_PKG_VERSION"),
         uptime_secs: state.started_at.elapsed().as_secs(),
         mdns_peers_visible: state.mdns_peers.lock().unwrap().len(),
@@ -623,7 +628,7 @@ async fn restore_version_handler(
             }
             Json(RestoreResponse {
                 restored_files: stats.files_restored,
-                dir: restore_dir.display().to_string(),
+                dir: format!("{}/{}", state.restore_dir_display, node_id_str),
                 bytes_restored: stats.bytes_restored,
                 duration_ms: stats.duration_ms,
                 connection: stats.connection,
@@ -715,7 +720,7 @@ async fn restore_handler(
             }
             Json(RestoreResponse {
                 restored_files: stats.files_restored,
-                dir: restore_dir.display().to_string(),
+                dir: format!("{}/{}", state.restore_dir_display, node_id_str),
                 bytes_restored: stats.bytes_restored,
                 duration_ms: stats.duration_ms,
                 connection: stats.connection,
@@ -1105,6 +1110,14 @@ function fmtConnection(connection) {
 // per-row restore) so the transfer-metrics phrasing stays identical
 // everywhere it shows up.
 function describeRestoreResult(body) {
+  // Restore asks the buddy for everything it's holding from this device —
+  // zero means it has nothing live from us (e.g. this device has never
+  // sent them anything), not that something failed.
+  if (body.restored_files === 0) {
+    let msg = "Nothing to restore — this buddy isn't holding any of this device's files.";
+    if (body.connection) msg += " · " + fmtConnection(body.connection);
+    return msg;
+  }
   let msg = "Restored " + body.restored_files + " file(s) to " + body.dir;
   const rate = fmtRate(body.bytes_restored, body.duration_ms);
   if (rate) {
