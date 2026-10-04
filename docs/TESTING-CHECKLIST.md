@@ -950,8 +950,7 @@ device+inode, not path. Nothing is ever moved automatically.
       `install.sh --update` on image installs pulls only and never touches
       the compose file (4eeb462), so old image installs simply stay on the
       old layout, which keeps working
-- [ ] Layout B (low risk — same code path as layout A, just a different
-      filesystem): buddy files on a different mount/disk than config — Disk
+- [x] Layout B (closed out on TrueNAS SMB + NFS, see below): buddy files on a different mount/disk than config — Disk
       card and the buddy's "Their actual disk" probe report that disk's
       numbers, not the config disk's
 - [x] **Client 0.4.0 (2026-10-04): PUID/PGID + missing-drive protection.**
@@ -1005,8 +1004,11 @@ device+inode, not path. Nothing is ever moved automatically.
       guard stops anything being stored there. `create_host_path: false`
       in compose would prevent it but would make new users create folders
       by hand first; left as is
-- [ ] SMB receiving: a file from testb (`~/bbdata/testb/my-files/`) lands
-      in `/mnt/testa-smb/testa-buddy-files/<testb id>/`
+- [x] SMB receiving confirmed (2026-10-04): testb's `hello-b.txt` landed
+      encrypted (199 B, owned by sleblanc) in
+      `/mnt/testa-smb/testa-buddy-files/<testb id>/` at 20:34 — before the
+      unmount test — and was intact after the share was remounted. Layout B
+      fully closed out on both SMB and NFS
 - [ ] Empty-backup-folder guard live: move testa's `my-files` contents
       aside → card shows "backup failed: your backup folder looks
       empty…", nothing deleted on testb; move them back → normal
