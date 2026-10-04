@@ -1,6 +1,6 @@
 [package]
 name = "backup-buddies-client"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 # Pinned to iroh 1.3.0 to match deploy/relay's iroh-relay:v1.3.0 image —
 # client and relay protocol versions should move together. Verified to

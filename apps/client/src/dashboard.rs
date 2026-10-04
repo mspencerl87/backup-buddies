@@ -1186,12 +1186,17 @@ async function fetchBuddyDisk(nodeId) {
 // either way, success or failure.
 async function doRestore(nodeId, paths, onProgress) {
   let timer = null;
+  // A progress poll can still be in flight when the restore itself
+  // finishes; its late reply must not overwrite the final result with
+  // "Restoring…" again (and leave the button disabled). clearInterval only
+  // stops *future* polls, so this flag drops replies from the last one.
+  let finished = false;
   if (onProgress) {
     timer = setInterval(async () => {
       try {
         const res = await fetch("/api/buddies/" + encodeURIComponent(nodeId) + "/restore-progress");
         const body = await res.json().catch(() => ({}));
-        if (body && body.active) onProgress(body.progress);
+        if (!finished && body && body.active) onProgress(body.progress);
       } catch {
         // a missed poll just means one stale tick of progress text —
         // not worth surfacing as an error on top of the restore itself
@@ -1208,6 +1213,7 @@ async function doRestore(nodeId, paths, onProgress) {
     if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
     return body;
   } finally {
+    finished = true;
     if (timer) clearInterval(timer);
   }
 }

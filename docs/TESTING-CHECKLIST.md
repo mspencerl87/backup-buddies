@@ -976,9 +976,23 @@ device+inode, not path. Nothing is ever moved automatically.
       its progress line and disabled button through 3 refreshes, and the
       "Restored 1 file(s) to /home/sleblanc/…" result stayed through
       further refreshes; no page errors
-- [ ] Confirm on testa (port 8080, testb card → Restore): result line shows
-      `/home/sleblanc/bbdata/testa/restored/<testb id>`, and `hello.txt`
-      is there decrypted
+- [x] Restore confirmed live on testa (2026-10-04): `cat
+      ~/bbdata/testa/restored/*/hello.txt` → `hello from testa` (testb
+      held it encrypted, testa pulled it back and decrypted it into
+      `RESTORE_DIR_HOST`). Card also showed "✓ reconciled — 1 file(s)
+      match" and testb's real disk numbers
+- [x] **Found and fixed (client 0.3.3)** from that same test: the card stuck
+      on "Restoring 1 of 1 file(s) — 199 B of 199 B (100%)" with the button
+      disabled. A progress poll still in flight when the restore finished
+      replied late and overwrote the final result (`clearInterval` only
+      stops future polls). 0.3.2 made it stick, since status now persists
+      across refreshes. `doRestore` now drops progress replies once the
+      restore has finished. Reproduced in headless Chromium against the
+      deployed 0.3.2 page (slow progress endpoint) — stuck forever — and
+      confirmed fixed with the 0.3.3 page
+- [ ] Re-check on testa after pulling 0.3.3: restore result line reads
+      "Restored 1 file(s) to /home/sleblanc/bbdata/testa/restored/…" and
+      stays; button re-enables
 - [ ] Note for a follow-up: everything the client creates is owned by root
       (container runs as root), so users need `sudo` to move/inspect their
       folders. Consider `PUID`/`PGID` support like linuxserver.io images
