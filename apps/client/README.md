@@ -131,17 +131,28 @@ docker build -t backup-buddies-client .
 
 ## Updating, and releasing a new version
 
-Users update in place, from inside their `backup-buddies-client` folder:
+There are two ways people run the client, and one update command covers
+both. Users run it from inside their client folder (the one with `.env`):
 
 ```bash
 curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
 ```
 
-That replaces only the code (`src/`, `assets/`, `Cargo.*`, `Dockerfile`,
-`docker-compose.yml`) and runs `docker compose up -d --build`. It never
-touches `.env` or `data/`. Everything is downloaded to a temp folder first,
-so a failed download leaves the old install untouched. A hand-edited
-`docker-compose.yml` is saved as `docker-compose.yml.bak`.
+- **Image installs** (the setup page's two files: a `docker-compose.yml`
+  running `ghcr.io/…/client:latest`, plus `.env`): runs
+  `docker compose pull && docker compose up -d`. Nothing in the folder is
+  changed; the compose file is the user's own. Setup-page users can also
+  just run that pull command themselves.
+- **Source installs** (made by `install.sh`, with `Cargo.toml` and `src/`):
+  replaces only the code (`src/`, `assets/`, `Cargo.*`, `Dockerfile`,
+  `docker-compose.yml`) and runs `docker compose up -d --build`.
+  Everything is downloaded to a temp folder first, so a failed download
+  leaves the old install untouched. A hand-edited `docker-compose.yml` is
+  saved as `docker-compose.yml.bak`.
+
+Neither path touches `.env` or the data folders. A folder that's neither
+kind (no client `Cargo.toml`, and no uncommented `image:` line for the
+client) is refused rather than guessed at.
 
 The client sends `User-Agent: backup-buddies-client/<Cargo.toml version>` on
 every API call. The API records it per device (`devices.client_version`),

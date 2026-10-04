@@ -922,12 +922,20 @@ Updating is now in place, via `install.sh --update`:
 ```bash
 curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
 ```
-It replaces only the code and rebuilds, keeping `.env` and `data/`. Before
-this there was no update path: `install.sh` refused an existing folder, and
-the setup page's old `docker compose pull` advice did nothing, because the
-client is built locally from source. Deleting the folder to reinstall would
-have thrown away the device's identity and the backups it holds for its
-buddy.
+It handles both kinds of install, and never touches `.env` or the data
+folders:
+- **Image installs** (the setup page's compose file running the published
+  `ghcr.io/…/client:latest` image): `docker compose pull && docker compose
+  up -d`. That's also what the setup page tells those users to run.
+- **Source installs** (made by `install.sh`): replaces only the code and
+  rebuilds.
+
+Correction to the first version of this section: it said the setup page's
+`docker compose pull` advice "did nothing because the client is built from
+source". That was wrong. The setup page installs the prebuilt image, and
+for those installs `pull` is the correct update. The first `--update` also
+only understood source installs, so for image installs it refused with "no
+existing install found". It refused safely, but uselessly. Both are fixed.
 
 **Migration** (apply any time; the code works with or without it, and
 versions just aren't recorded until it's in):

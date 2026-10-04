@@ -14,7 +14,12 @@
 #
 #   curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update
 #
-# Replaces only the code (source, Dockerfile, compose file) and rebuilds.
+# Works for both kinds of install:
+#   - built from source by this script: replaces only the code (source,
+#     Dockerfile, compose file) and rebuilds;
+#   - the setup page's two-file setup (docker-compose.yml running the
+#     published client image + .env): pulls the latest image and restarts.
+#     Its docker-compose.yml is the user's own and is left as-is.
 # Never touches .env (device token, backup passphrase) or the data folders
 # (./config or ./data: this device's identity; ./buddy-files: the backups it
 # holds for its buddies, unless .env points them elsewhere) — deleting
@@ -64,21 +69,42 @@ client_version() {
   sed -n 's/^version = "\(.*\)"/\1/p' "$1" 2>/dev/null | head -n 1
 }
 
-is_client_dir() {
+# Installed by this script: builds the client from source.
+is_source_install() {
   [ -f "$1/.env" ] && [ -f "$1/docker-compose.yml" ] && grep -q '^name = "backup-buddies-client"' "$1/Cargo.toml" 2>/dev/null
 }
 
+# Set up from the setup page (apps/web/setup.html): just a compose file that
+# runs the published client image, plus .env — no source code.
+is_image_install() {
+  [ -f "$1/.env" ] && [ -f "$1/docker-compose.yml" ] && [ ! -f "$1/Cargo.toml" ] \
+    && grep -qE '^[[:space:]]*image:[[:space:]]*[^[:space:]#]*backup-buddies/client' "$1/docker-compose.yml"
+}
+
 if [ "$MODE" = "update" ]; then
-  if is_client_dir "."; then
-    TARGET="."
-  elif is_client_dir "$DEST"; then
-    TARGET="$DEST"
-  else
-    echo "Error: no existing install found here. Run this from inside your backup-buddies-client" >&2
-    echo "folder (the one with .env in it), or from the folder that contains it." >&2
+  TARGET=""
+  KIND=""
+  for dir in "." "$DEST"; do
+    if is_source_install "$dir"; then TARGET="$dir"; KIND="source"; break; fi
+    if is_image_install "$dir"; then TARGET="$dir"; KIND="image"; break; fi
+  done
+  if [ -z "$TARGET" ]; then
+    echo "Error: no existing install found here. Run this from inside your client folder" >&2
+    echo "(the one with .env and docker-compose.yml in it), or from the folder that contains" >&2
+    echo "backup-buddies-client/." >&2
     exit 1
   fi
   cd "$TARGET"
+
+  if [ "$KIND" = "image" ]; then
+    echo "Found an install that runs the published client image. Pulling the latest and restarting..."
+    docker compose pull
+    docker compose up -d
+    echo
+    echo "Done. Your .env, docker-compose.yml and data folders were not touched."
+    echo "Check it with: docker compose logs -f"
+    exit 0
+  fi
 
   OLD_VERSION="$(client_version Cargo.toml)"
   # Download everything to a staging folder first, so a failed or partial
