@@ -871,8 +871,12 @@ can change that.
          (not junk) with the right subject and real account details (ID,
          password sign-in, verified, subscribed, relay active, Stripe
          customer, 2 pairings / 55 GB, device testb + last seen, browser)
-   - [ ] Glance at once: Reply in Purelymail addresses the user's email
-         (Reply-To was confirmed in the local test, not yet seen live)
+   - [x] Reply-To confirmed live (2026-10-04): hitting Reply in Purelymail
+         addressed the user, and the reply arrived in their Gmail inbox from
+         support@filegarden.net, threaded as "Re: [Support] …". Support form
+         fully closed out. Note: a reply quotes the account-details block
+         back to the user by default — it's their own data, but trim the
+         quote when replying if you'd rather not send IDs back
    - [ ] Optional later: if volume grows, point `SUPPORT_EMAIL` at a
          helpdesk inbox (e.g. self-hosted FreeScout/Zammad) — no code change
          needed, the email format already carries everything
