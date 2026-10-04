@@ -9,6 +9,7 @@ import { invitesRouter } from './routes/invites.js';
 import { billingRouter } from './routes/billing.js';
 import { devicesRouter } from './routes/devices.js';
 import { adminRouter } from './routes/admin.js';
+import { supportRouter } from './routes/support.js';
 import { syncRelayUsageToStripe } from './jobs/sync-relay-usage.js';
 import { runStaleAccountCleanup } from './jobs/stale-account-cleanup.js';
 import { sendStaleAccountDigest } from './jobs/stale-account-digest.js';
@@ -31,6 +32,10 @@ app.use(meRouter);
 app.use(invitesRouter);
 app.use(billingRouter);
 app.use(devicesRouter);
+app.use(supportRouter);
+// Keep adminRouter last: it applies requireAuth + requireAdmin to *every*
+// request that reaches it (adminRouter.use(...) with no path), so any
+// router mounted after it is unreachable for non-admins.
 app.use(adminRouter);
 
 // Catch-all error handler: any route above that throws (or rejects, since

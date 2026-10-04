@@ -215,7 +215,8 @@ label:first-child {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   padding: 0.6rem 0.75rem;
   border-radius: 8px;
@@ -227,10 +228,18 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+textarea {
+  font-family: inherit;
+  line-height: 1.5;
+  min-height: 8rem;
+  resize: vertical;
 }
 
 form .btn {

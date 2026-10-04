@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard — Backup Buddies</title>
-  <link rel="stylesheet" href="/style.css?v=a3a74fb7">
+  <link rel="stylesheet" href="/style.css?v=c9d9a708">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -33,7 +33,8 @@
       <p id="paused-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid #e5a443; border-radius:8px; background:#2a1d10;">
         Buddy syncing is paused because of a billing issue — no new files are being sent or
         received with your buddy until this is fixed. Your existing backups aren't affected.
-        <a href="#billing" style="margin-left:0.25rem">Fix billing</a>
+        <a href="#billing" style="margin-left:0.25rem">Fix billing</a> ·
+        <a href="#support">Contact support</a>
       </p>
       <p id="verify-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid var(--border); border-radius:8px; background:#2a2310;">
         Please verify your email — you'll need to before pairing with a buddy.
@@ -145,6 +146,35 @@
         <tbody></tbody>
       </table>
       <p id="invites-empty" class="muted">You haven't created any invites yet.</p>
+    </div>
+
+    <div class="card" id="support">
+      <h2>Contact support</h2>
+      <p class="muted">
+        Questions about your account, login, billing or backups? We'll get your account details
+        automatically and reply to your email. For bugs and feature ideas, use the
+        <a href="https://github.com/mspencerl87/backup-buddies-feedback/issues" target="_blank" rel="noopener">feedback tracker</a>
+        instead.
+      </p>
+      <form id="support-form">
+        <label for="support-category">What's this about?</label>
+        <select id="support-category" required>
+          <option value="" disabled selected>Choose one…</option>
+          <option value="account">Account or login</option>
+          <option value="billing">Billing or payments</option>
+          <option value="pairing">Buddy pairing</option>
+          <option value="backup">Backups or restore</option>
+          <option value="other">Something else</option>
+        </select>
+        <label for="support-subject">Subject (optional)</label>
+        <input type="text" id="support-subject" maxlength="120" placeholder="e.g. Charged twice this month">
+        <label for="support-message">Message</label>
+        <textarea id="support-message" required minlength="10" maxlength="5000"
+          placeholder="What happened, and what did you expect? Never include your password or your device's backup passphrase."></textarea>
+        <button class="btn" type="submit" id="support-submit" style="margin-top:1rem">Send to support</button>
+      </form>
+      <p class="error" id="support-error"></p>
+      <p id="support-result" class="muted" style="display:none"></p>
     </div>
     </div>
   </main>
@@ -414,6 +444,41 @@
 
     document.getElementById('invite-public').addEventListener('change', (e) => {
       document.getElementById('invite-criteria-rows').style.display = e.target.checked ? 'block' : 'none';
+    });
+
+    // --- Contact support ---
+    const supportForm = document.getElementById('support-form');
+    supportForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('support-error');
+      const resultEl = document.getElementById('support-result');
+      const submitBtn = document.getElementById('support-submit');
+      errorEl.textContent = '';
+      resultEl.style.display = 'none';
+      submitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/support', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: document.getElementById('support-category').value,
+            subject: document.getElementById('support-subject').value,
+            message: document.getElementById('support-message').value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Something went wrong. Please email support@filegarden.net.';
+          return;
+        }
+        supportForm.reset();
+        resultEl.textContent = data.message || "Thanks — we'll reply by email.";
+        resultEl.style.display = 'block';
+      } catch (err) {
+        errorEl.textContent = 'Could not reach the server. Try again, or email support@filegarden.net.';
+      } finally {
+        submitBtn.disabled = false;
+      }
     });
 
     async function init() {

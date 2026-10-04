@@ -840,15 +840,37 @@ can change that.
    - [ ] Support rule (also for anyone helping later): only act on
          account changes requested *from the registered email address*;
          never ask a user for their password or `BACKUP_PASSPHRASE`
-4. **In-app "Contact support" form** (logged-in users only)
-   - [ ] `POST /support` (session-authenticated): emails support@ with
-         the account ID, email, plan / `relay_status`, and the user's
-         message auto-attached, with `Reply-To` set to the account's email.
-         Rate-limited
-   - [ ] Form on `dashboard.html` (e.g. near `#billing`)
-   - [ ] Confirm live: submit from a test account → email lands at
-         support@ with the right account details → replying reaches the
-         user
+4. **In-app "Contact support" form — built 2026-10-04** (`routes/support.js`,
+   "Contact support" card on `dashboard.html`; `docs/DEPLOY.md` §22)
+   - [x] `POST /support` (session required): category (account / billing
+         / pairing / backup / other), optional subject, 10–5000 char
+         message. Emails `SUPPORT_EMAIL` (default support@filegarden.net)
+         as plain text with `Reply-To` = the account's email, plus account
+         ID, sign-in method(s), email-verified, plan, relay status / pause
+         reason, Stripe customer ID, active pairings + GB pledged, devices
+         with last-seen, and browser user-agent. Nothing stored; the email
+         is the record. 5 requests/hour per account (in memory)
+   - [x] **Found and fixed while testing**: mounting the new router after
+         `adminRouter` made `/support` return "admin access required" for
+         everyone — `adminRouter.use(requireAuth, requireAdmin)` has no
+         path, so it gates *every* request that reaches it. Mounted
+         `supportRouter` before it, with a comment in `index.js` so the next
+         router added doesn't hit the same thing
+   - [x] **Tested locally (2026-10-04)** against the real API + scratch
+         Postgres + SMTP sink: no session `401`; bad category / short
+         message `400`; valid request `200`, email to support@ with the
+         right Reply-To and details; a `\r\nBcc:` in the subject stayed
+         inside the subject (no header injection); 6th request in an hour
+         `429` with only 5 emails sent. Card rendered and checked in
+         headless Chromium, including the server-error message
+   - [x] `SUPPORT_EMAIL` moved to `lib/mailer.js` (shared by this and the
+         password-reset emails); `sendMail` gained an optional `replyTo`
+   - [ ] Confirm live on production: send one from the dashboard, check it
+         lands in support@ (not spam), and that hitting Reply in Purelymail
+         addresses the user
+   - [ ] Optional later: if volume grows, point `SUPPORT_EMAIL` at a
+         helpdesk inbox (e.g. self-hosted FreeScout/Zammad) — no code change
+         needed, the email format already carries everything
 
 ## Housekeeping (not bugs)
 

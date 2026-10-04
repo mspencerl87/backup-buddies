@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool.js';
-import { sendMail } from './mailer.js';
+import { sendMail, SUPPORT_EMAIL } from './mailer.js';
 
 // Password reset links, issued two ways:
 //   - by an admin from the account-detail view (routes/admin.js →
@@ -28,8 +28,6 @@ const SELF_SERVICE_COOLDOWN_SECONDS = 60;
 // Cloudflare without `trust proxy` configured, so req.ip isn't the real
 // client — see docs/TESTING-CHECKLIST.md.)
 const SELF_SERVICE_SENDS_PER_MINUTE = 20;
-
-export const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@filegarden.net';
 
 const BACKUPS_NOTE =
   "Your backups aren't affected by this: files are encrypted with the passphrase on your own device, " +

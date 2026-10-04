@@ -761,3 +761,24 @@ node scripts/stamp-asset-versions.mjs           # rewrite in place
 ```
 If `main` ever gets branch protection that blocks the bot's push, the job
 warns instead of failing the deploy. Stamp by hand in that case.
+
+## 22. In-app "Contact support" form
+
+Adds a "Contact support" card to the dashboard, backed by `POST /support`
+(`routes/support.js`). Logged-in users pick a category and write a
+message; the API emails it to `SUPPORT_EMAIL` (default
+`support@filegarden.net`) with the account's details attached and
+`Reply-To` set to the user's address, so replying from the support inbox
+goes straight to them. Nothing is stored. Limit: 5 requests per account per
+hour.
+
+**No migration, no new required env vars.** It uses the existing `SMTP_*`
+settings; optional `SUPPORT_EMAIL` changes the destination. `apps/api/**`
+and `apps/web/**` are CI trigger paths, so pushing to `main` deploys it.
+If SMTP isn't configured, the form tells the user to email support
+directly instead of pretending it sent.
+
+Note for future routers: `supportRouter` is mounted *before* `adminRouter`
+in `index.js` on purpose. `adminRouter` applies `requireAuth` +
+`requireAdmin` to every request that reaches it, so anything mounted after
+it is admin-only by accident.

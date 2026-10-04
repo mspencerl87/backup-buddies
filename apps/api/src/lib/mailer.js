@@ -8,6 +8,10 @@ import nodemailer from 'nodemailer';
 //   SMTP_USER=you@yourdomain.com
 //   SMTP_PASS=...              (an app password, if 2FA is on)
 //   MAIL_FROM="Backup Buddies <you@yourdomain.com>"   (optional, defaults to SMTP_USER)
+// Where account/billing/login help goes — shown in emails and used as the
+// destination for the dashboard's "Contact support" form.
+export const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'support@filegarden.net';
+
 let transporter;
 
 function getTransporter() {
@@ -41,12 +45,21 @@ export function isMailConfigured() {
 // *is* configured but sending actually fails, so callers that need to know
 // (e.g. "resend verification") can surface that rather than silently
 // pretending it worked.
-export async function sendMail({ to, subject, text, html }) {
+// `replyTo` is optional — used by the support form so replying to the
+// email goes straight to the user rather than back to our own mailbox.
+export async function sendMail({ to, subject, text, html, replyTo }) {
   const t = getTransporter();
   if (!t) {
     console.warn(`SMTP not configured — email not sent: "${subject}" to ${to}`);
     return false;
   }
-  await t.sendMail({ from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, text, html });
+  await t.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html,
+    ...(replyTo ? { replyTo } : {}),
+  });
   return true;
 }
