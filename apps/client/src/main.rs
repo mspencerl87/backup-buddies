@@ -23,6 +23,13 @@ use serde::Deserialize;
 
 use receive::{PledgeBook, PledgeState};
 
+// How often the outbound loop below polls for buddies/pledges and runs a
+// backup cycle. Not yet configurable (see docs/TESTING-CHECKLIST.md's
+// "Rescan interval/toggle display" item) — a single named constant so the
+// dashboard can at least show the real value instead of a hardcoded guess,
+// without this being a config knob yet.
+const BACKUP_CYCLE_INTERVAL_SECS: u64 = 30;
+
 struct Config {
     api_url: String,
     device_token: String,
@@ -256,6 +263,15 @@ async fn main() -> Result<()> {
 
     tracing::info!(node_id = %endpoint_id, "backup-buddies client starting");
 
+    // Who's currently visible on the local network via mDNS — shared so the
+    // dashboard can show a live count (Syncthing-style "discovery" signal),
+    // not just something logged once at discovery time. Same set the
+    // logging block below already tracked locally; now just behind a Mutex
+    // so two consumers (this task and the dashboard's /api/status) can both
+    // read it.
+    let mdns_peers: Arc<Mutex<std::collections::HashSet<EndpointId>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
+
     // Log what mDNS actually sees, so this is visible/debuggable from the
     // container logs rather than a silent background mechanism — doesn't
     // affect connection behavior either way, iroh uses the address lookup
@@ -271,14 +287,14 @@ async fn main() -> Result<()> {
     // and log the rest at DEBUG instead.
     {
         let mut events = mdns.subscribe().await;
+        let mdns_peers = mdns_peers.clone();
         tokio::spawn(async move {
             use n0_future::StreamExt;
-            let mut currently_visible: std::collections::HashSet<EndpointId> =
-                std::collections::HashSet::new();
             while let Some(event) = events.next().await {
                 match event {
                     DiscoveryEvent::Discovered { endpoint_info, .. } => {
-                        if currently_visible.insert(endpoint_info.endpoint_id) {
+                        let newly_seen = mdns_peers.lock().unwrap().insert(endpoint_info.endpoint_id);
+                        if newly_seen {
                             tracing::info!(
                                 endpoint_id = %endpoint_info.endpoint_id,
                                 "found a buddy on the local network (mDNS) — direct LAN connection possible"
@@ -291,7 +307,7 @@ async fn main() -> Result<()> {
                         }
                     }
                     DiscoveryEvent::Expired { endpoint_id } => {
-                        currently_visible.remove(&endpoint_id);
+                        mdns_peers.lock().unwrap().remove(&endpoint_id);
                         tracing::debug!(%endpoint_id, "mDNS-discovered buddy no longer visible on the local network");
                     }
                     // DiscoveryEvent is #[non_exhaustive] — future variants
@@ -388,6 +404,7 @@ async fn main() -> Result<()> {
         let cycle_stats = cycle_stats.clone();
         let reconcile_stats = reconcile_stats.clone();
         let self_label = self_label.clone();
+        let mdns_peers = mdns_peers.clone();
         let relay_url = config.relay_url.clone();
         let passphrase = config.passphrase.clone();
         let stale_after_secs = config.stale_after_secs;
@@ -402,6 +419,8 @@ async fn main() -> Result<()> {
                 cycle_stats,
                 reconcile_stats,
                 self_label,
+                mdns_peers,
+                BACKUP_CYCLE_INTERVAL_SECS,
                 endpoint,
                 relay_url,
                 passphrase,
@@ -806,7 +825,7 @@ async fn main() -> Result<()> {
                     Err(err) => tracing::warn!(?err, "could not fetch buddy devices from API"),
                 }
 
-                tokio::time::sleep(Duration::from_secs(30)).await;
+                tokio::time::sleep(Duration::from_secs(BACKUP_CYCLE_INTERVAL_SECS)).await;
             }
         }
     };

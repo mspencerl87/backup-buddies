@@ -955,16 +955,17 @@ other migration there).
       `backup::reconcile_with_buddy` computes the manifest-vs-buddy
       comparison every 10 minutes per buddy, and it's now surfaced on the
       dashboard buddy card.
-    - Rescan interval/toggle display — we don't have a configurable scan
-      interval today (fixed ~30s cycle, see "Documented, intentional
-      limits" above), so this would first need that to become
-      configurable before there's anything to display.
-    - Discovery peer count — how many buddies are currently visible via
-      mDNS on the local network right now, not just logged once at
-      discovery time. Needs the main.rs mDNS task to publish a live
-      count somewhere the dashboard can read (e.g. a shared
-      `Arc<Mutex<HashSet<EndpointId>>>` alongside the existing dedup set)
-      rather than only logging.
+    - ~~Rescan interval display~~ — **done** (2026-10-04), display-only:
+      the interval itself still isn't configurable (fixed ~30s cycle, see
+      "Documented, intentional limits" above — now named
+      `BACKUP_CYCLE_INTERVAL_SECS` in main.rs rather than a bare literal),
+      but the dashboard's "This Device" card now shows the real value
+      ("Rescan interval: 30s") instead of nothing. Making it an actual
+      env-configurable knob (with a toggle) is still open if ever wanted.
+    - ~~Discovery peer count~~ — **done** (2026-10-04): the mDNS task's
+      dedup set (`main.rs`) is now a shared `Arc<Mutex<HashSet<EndpointId>>>`
+      instead of task-local, and "This Device" shows a live
+      "Discovery (LAN): N peers" count alongside the existing log lines.
   - Bigger lift:
     - Live streaming transfer rate (bytes/sec updating during an
       in-progress cycle, not just the after-the-fact rate computed from

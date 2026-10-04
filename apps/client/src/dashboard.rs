@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Instant,
@@ -161,6 +161,14 @@ struct AppState {
     // see main.rs's self_label for where it's filled in. None until the
     // first successful poll of /devices/me/buddies, or if never labeled.
     self_label: Arc<Mutex<Option<String>>>,
+    // Endpoint ids currently visible via mDNS on the local network — see
+    // main.rs's mdns_peers for where it's maintained. A live count, not a
+    // one-time "ever seen" log — Syncthing-style discovery visibility.
+    mdns_peers: Arc<Mutex<HashSet<EndpointId>>>,
+    // How often the outbound loop polls/backs up — see main.rs's
+    // BACKUP_CYCLE_INTERVAL_SECS. Not configurable yet, just surfaced so
+    // the dashboard shows the real value instead of a hardcoded guess.
+    cycle_interval_secs: u64,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -242,6 +250,12 @@ struct StatusResponse {
     // recently and which build it's running.
     version: &'static str,
     uptime_secs: u64,
+    // How many buddies are visible on the local network via mDNS right
+    // now, and the fixed interval (seconds) the outbound loop polls/backs
+    // up on — both Syncthing-style discovery/rescan signals, surfaced
+    // read-only (see AppState's comments on mdns_peers/cycle_interval_secs).
+    mdns_peers_visible: usize,
+    cycle_interval_secs: u64,
     local_backup: Option<LocalBackupStatus>,
     disk: Option<DiskStatus>,
     // Sum of every buddy's pledged_bytes — the total we've promised to
@@ -318,6 +332,8 @@ pub async fn run(
     cycle_stats: CycleBook,
     reconcile_stats: ReconcileBook,
     self_label: Arc<Mutex<Option<String>>>,
+    mdns_peers: Arc<Mutex<HashSet<EndpointId>>>,
+    cycle_interval_secs: u64,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -332,6 +348,8 @@ pub async fn run(
         cycle_stats,
         reconcile_stats,
         self_label,
+        mdns_peers,
+        cycle_interval_secs,
         endpoint,
         relay_url,
         passphrase,
@@ -470,6 +488,8 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         data_dir: state.data_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
         uptime_secs: state.started_at.elapsed().as_secs(),
+        mdns_peers_visible: state.mdns_peers.lock().unwrap().len(),
+        cycle_interval_secs: state.cycle_interval_secs,
         local_backup,
         disk,
         pledged_out_total_bytes,
@@ -897,6 +917,14 @@ const INDEX_HTML: &str = r#"<!doctype html>
       <div class="stat" id="local-size-stat" style="display:none;">
         <div class="label">Local size</div>
         <div class="value" id="local-files-size">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Discovery (LAN)</div>
+        <div class="value" id="device-mdns-peers">…</div>
+      </div>
+      <div class="stat">
+        <div class="label">Rescan interval</div>
+        <div class="value" id="device-cycle-interval">…</div>
       </div>
     </div>
   </div>
@@ -1812,6 +1840,9 @@ async function refresh() {
 
   document.getElementById("device-version").textContent = data.version;
   document.getElementById("device-uptime").textContent = fmtUptime(data.uptime_secs);
+  document.getElementById("device-mdns-peers").textContent =
+    data.mdns_peers_visible + (data.mdns_peers_visible === 1 ? " peer" : " peers");
+  document.getElementById("device-cycle-interval").textContent = data.cycle_interval_secs + "s";
   const localFilesStat = document.getElementById("local-files-stat");
   const localSizeStat = document.getElementById("local-size-stat");
   if (data.local_backup) {
