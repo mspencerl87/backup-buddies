@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /dashboard.html
+Disallow: /find-a-buddy.html
+Disallow: /forgot-password.html
+Disallow: /reset-password.html
+Disallow: /verify-email.html
+
+Sitemap: https://app.filegarden.net/sitemap.xml
