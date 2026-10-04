@@ -865,9 +865,14 @@ can change that.
          headless Chromium, including the server-error message
    - [x] `SUPPORT_EMAIL` moved to `lib/mailer.js` (shared by this and the
          password-reset emails); `sendMail` gained an optional `replyTo`
-   - [ ] Confirm live on production: send one from the dashboard, check it
-         lands in support@ (not spam), and that hitting Reply in Purelymail
-         addresses the user
+   - [x] **Confirmed live on production (2026-10-04)** from the testb
+         account: dashboard showed the "Thanks — we'll reply to …" message;
+         the email landed in the support@filegarden.net Purelymail inbox
+         (not junk) with the right subject and real account details (ID,
+         password sign-in, verified, subscribed, relay active, Stripe
+         customer, 2 pairings / 55 GB, device testb + last seen, browser)
+   - [ ] Glance at once: Reply in Purelymail addresses the user's email
+         (Reply-To was confirmed in the local test, not yet seen live)
    - [ ] Optional later: if volume grows, point `SUPPORT_EMAIL` at a
          helpdesk inbox (e.g. self-hosted FreeScout/Zammad) — no code change
          needed, the email format already carries everything
