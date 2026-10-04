@@ -681,10 +681,15 @@ production or a Stripe test account:
 - [ ] Account-detail view's note correctly explains the pause and its
       reason/since-date for a paused account
 
-## Not yet exercised
+## Not yet exercised — now fully closed out (2026-10-04)
 
 Restore path (single file, all files, per-version restore of a deleted
-file) is now fully exercised. Remaining:
+file) was already fully exercised; everything else below is now
+confirmed too, which closes out **every ship-blocker** from the
+original priority list (marketplace, payment-failed handling,
+relay-bandwidth billing, disk-space-floor rejection). Keeping the
+entries below as the record of how each was confirmed, rather than
+deleting them once checked.
 
 - [x] ~~Pledge-enforcement rejection~~ — stale, contradicted the
       "Pledge-cap rejection, functionally confirmed (2026-10-02)" entry
@@ -692,8 +697,33 @@ file) is now fully exercised. Remaining:
       this extensively (`pledge-test-1`/`-3`/`-5`, rejected correctly on
       every cycle for over half an hour straight). Removing as a
       duplicate rather than leaving two contradictory lines.
-- [ ] Disk-space-floor rejection (2GB flat / 5% of filesystem,
-      whichever's bigger) — never triggered
+- [x] **Confirmed live end-to-end (2026-10-04)**: never triggered before
+      since every real test device has far more than 2GB free, so this
+      needed a disposable low-disk device rather than any of
+      testa/testb/testc's real disks. Set up a throwaway "testd" device
+      on a 3GB loopback-mounted ext4 filesystem (`fallocate`/`mkfs.ext4`/
+      `mount -o loop`), filled it with a dummy file down to ~2.1GB free
+      (just over the 2GB floor), paired it with testb, then had testb
+      back up a 150MB file to it. Confirmed on both ends: testd's own
+      dashboard showed `Disk: Used 816.8 MB, Free 2.1 GB, Total 2.9 GB`
+      (matching `df` exactly, so `statvfs` against the loop mount reads
+      correctly); testb's dashboard showed the testd buddy card as
+      `backup failed`, "2 cycles in a row", with the exact customer-
+      facing message from `protocol.rs`'s `PutRejectReason::DiskFull`:
+      "disktest-150mb.bin (your buddy doesn't have enough real disk
+      space left)". The receive-side real-disk guard
+      (`disk_has_room_for` in `receive.rs`) works exactly as coded.
+      **Bonus confirmation**, same session: the separate
+      pledge-vs-real-disk dashboard warning (not the same thing as this
+      rejection — a heads-up shown *before* the disk actually runs out)
+      fired correctly too, both on testd (small disk, artificially
+      over-pledged for the test) and incidentally on testc (`pledged out
+      to buddies: 50.0 GB (more than they have free!)` against its real
+      47.9GB disk) — that one wasn't deliberately tested this session but
+      is clearly already working in production.
+      Cleaned up afterward: reverted testb's `BACKUP_DIR_HOST` back to
+      unset, removed the loopback disk, tore down the testd container,
+      deleted the throwaway account from `/admin.html`.
 - [x] ~~Stale-buddy badge~~ — stale entry, contradicted by "Found and
       fixed: the stale-buddy badge never tripped..." above, which
       confirms this live on testb (2026-10-03). Removing as a duplicate.
