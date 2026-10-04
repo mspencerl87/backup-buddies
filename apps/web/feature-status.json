@@ -27,7 +27,7 @@
     },
     {
       "title": "Dashboard",
-      "description": "Per-buddy backup status, your device's build/uptime/local file count, each buddy's real disk usage, and a lifetime direct-vs-relay bandwidth breakdown."
+      "description": "Per-buddy backup status, your device's name/build/uptime/local file count, how many buddies are currently visible on your local network, each buddy's real disk usage, and a lifetime direct-vs-relay bandwidth breakdown."
     },
     {
       "title": "Find a buddy",
