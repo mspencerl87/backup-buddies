@@ -45,7 +45,7 @@ fi
 BASE_URL="${BB_CLIENT_BASE_URL:-https://app.filegarden.net/client}"
 DEST="backup-buddies-client"
 
-TOP_FILES="docker-compose.yml .env.example Dockerfile Cargo.toml Cargo.lock"
+TOP_FILES="docker-compose.yml .env.example Dockerfile docker-entrypoint.sh Cargo.toml Cargo.lock"
 # Every module main.rs pulls in via `mod ...;` — Caddy serves the whole
 # apps/client/ tree statically but doesn't offer directory listing, so this
 # has to be an explicit list rather than something discovered at runtime.

@@ -198,7 +198,95 @@ impl Config {
         }
 
         self.check_pre_split_layout().await?;
+        self.check_buddy_files_identity().await?;
         Ok(())
+    }
+
+    // Guards against BUDDY_FILES_DIR being the wrong folder — most often a
+    // drive that isn't mounted yet when the container starts, in which case
+    // Docker binds the empty mount-point folder instead and incoming buddy
+    // files would land on the OS disk (then vanish from view once the real
+    // drive mounts over them). The first time a folder is used, the client
+    // writes a random ID into it (BUDDY_FILES_MARKER) and keeps a copy in
+    // DATA_DIR (BUDDY_FILES_ID_RECORD); every later start checks they still
+    // match.
+    //
+    //   record   marker      →
+    //   none     none        first run (or an install from before this
+    //                        check): stamp the folder, keep the record
+    //   none     present     config was reset, folder kept: adopt its ID
+    //   X        X           fine
+    //   X        none        folder isn't the one we were using (unmounted
+    //                        drive, wrong path) → refuse to start
+    //   X        Y           a different buddy-files folder → refuse
+    //
+    // To start over on purpose with a new, empty folder, delete
+    // DATA_DIR/buddy-files-id (the refusal message says so).
+    async fn check_buddy_files_identity(&self) -> Result<()> {
+        let record_path = self.data_dir.join(BUDDY_FILES_ID_RECORD);
+        let marker_path = self.buddy_files_dir.join(BUDDY_FILES_MARKER);
+        // The ID is the first line; the marker file also carries a comment
+        // explaining what it is.
+        let read_id = |p: PathBuf| async move {
+            tokio::fs::read_to_string(&p)
+                .await
+                .ok()
+                .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                .filter(|s| !s.is_empty())
+        };
+        let record = read_id(record_path.clone()).await;
+        let marker = read_id(marker_path.clone()).await;
+
+        match (record, marker) {
+            (Some(expected), Some(found)) if expected == found => Ok(()),
+            (Some(expected), found) => {
+                let what = match found {
+                    None => "has no Backup Buddies marker — it isn't the folder this device has been storing buddy files in",
+                    Some(_) => "belongs to a different Backup Buddies setup than this device's",
+                };
+                anyhow::bail!(
+                    "BUDDY_FILES_DIR ({}) {what}. If that folder is on a drive or network share, it may not be \
+                     mounted yet — mount it and start the client again. If you moved the buddy files, point \
+                     BUDDY_FILES_DIR_HOST at the new folder. To deliberately start over with a new, empty \
+                     folder (your buddies will re-send what they had stored here), delete {} and start again. \
+                     (Expected marker {expected}.)",
+                    self.buddy_files_dir.display(),
+                    record_path.display(),
+                );
+            }
+            (None, Some(found)) => {
+                tokio::fs::write(&record_path, format!("{found}\n"))
+                    .await
+                    .with_context(|| format!("can't write {}", record_path.display()))?;
+                Ok(())
+            }
+            (None, None) => {
+                // Only needs to be unique per folder, not secret.
+                let id = {
+                    use sha2::{Digest, Sha256};
+                    let seed = format!(
+                        "{:?}|{}|{}",
+                        std::time::SystemTime::now(),
+                        std::process::id(),
+                        self.buddy_files_dir.display()
+                    );
+                    hex::encode(&Sha256::digest(seed.as_bytes())[..16])
+                };
+                tokio::fs::write(
+                    &marker_path,
+                    format!(
+                        "{id}\n# Backup Buddies: this folder holds files your buddies store with you.\n\
+                         # Don't delete this file — the client uses it to check this folder is mounted.\n"
+                    ),
+                )
+                .await
+                .with_context(|| format!("can't write {}", marker_path.display()))?;
+                tokio::fs::write(&record_path, format!("{id}\n"))
+                    .await
+                    .with_context(|| format!("can't write {}", record_path.display()))?;
+                Ok(())
+            }
+        }
     }
 
     // Before BUDDY_FILES_DIR / RESTORE_DIR existed, both lived inside
@@ -243,6 +331,25 @@ impl Config {
         // Empty leftover from the old layout — tidy it away so DATA_DIR
         // holds config only. remove_dir only succeeds on an empty dir.
         if received_moved {
+            // `mv data/received/* newfolder/` skips dotfiles, so the
+            // buddy-files marker (see check_buddy_files_identity) can be
+            // left behind. Carry it over — but only once the new folder
+            // actually has buddy files in it: if it's empty, it may be an
+            // unmounted drive, and stamping it would defeat that check.
+            let legacy_marker = legacy_received.join(BUDDY_FILES_MARKER);
+            let new_marker = self.buddy_files_dir.join(BUDDY_FILES_MARKER);
+            if tokio::fs::metadata(&legacy_marker).await.is_ok() {
+                if tokio::fs::metadata(&new_marker).await.is_err()
+                    && dir_has_entries(&self.buddy_files_dir).await
+                {
+                    tokio::fs::copy(&legacy_marker, &new_marker)
+                        .await
+                        .with_context(|| format!("can't write {}", new_marker.display()))?;
+                }
+                if tokio::fs::metadata(&new_marker).await.is_ok() {
+                    let _ = tokio::fs::remove_file(&legacy_marker).await;
+                }
+            }
             let _ = tokio::fs::remove_dir(&legacy_received).await;
         }
 
@@ -289,6 +396,10 @@ fn host_path_for_display(restore_dir: &Path) -> String {
     host.trim_end_matches('/').to_string()
 }
 
+// See Config::check_buddy_files_identity.
+const BUDDY_FILES_MARKER: &str = ".backup-buddies-id";
+const BUDDY_FILES_ID_RECORD: &str = "buddy-files-id";
+
 async fn ensure_writable_dir(name: &str, dir: &Path) -> Result<()> {
     tokio::fs::create_dir_all(dir)
         .await
@@ -318,11 +429,16 @@ async fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
+// Ignores the buddy-files marker, which on its own doesn't make a folder
+// "have buddy files" (see check_buddy_files_identity).
 async fn dir_has_entries(dir: &Path) -> bool {
-    match tokio::fs::read_dir(dir).await {
-        Ok(mut entries) => matches!(entries.next_entry().await, Ok(Some(_))),
-        Err(_) => false,
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return false };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if entry.file_name() != BUDDY_FILES_MARKER {
+            return true;
+        }
     }
+    false
 }
 
 #[derive(Deserialize)]

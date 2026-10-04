@@ -954,59 +954,42 @@ device+inode, not path. Nothing is ever moved automatically.
       filesystem): buddy files on a different mount/disk than config — Disk
       card and the buddy's "Their actual disk" probe report that disk's
       numbers, not the config disk's
-- [ ] Consider: guard against an unmounted data drive. If a mount point
-      isn't mounted when the container starts, Docker binds the empty
-      folder and buddy files get written to the OS disk, then hidden once
-      the drive mounts. A marker file in BUDDY_FILES_DIR checked at startup
-      (refuse to start with a clear error if missing) would catch it
-- [x] A dashboard restore lands in `RESTORE_DIR_HOST/<buddy>/` on the host
-      (confirmed 2026-10-04, see below)
-- [x] Client 0.3.1 (2026-10-04), from Spencer's testb screenshot: restoring
-      from a buddy holding nothing of ours said "Restored 0 file(s) to
-      /restored/<id>". Now says "Nothing to restore — this buddy isn't
-      holding any of this device's files." Restore results show the host
-      path (`RESTORE_DIR_HOST` from `.env`, which `env_file` passes into
-      the container; falls back to compose defaults, or `DATA_DIR_HOST/
-      restored` on the old layout) instead of the container's `/restored`.
-      Restore button deliberately stays enabled even when this device's
-      manifest is empty: a rebuilt device with fresh config is exactly
-      who needs it, and its buddy still has the files
-- [x] **Found and fixed (client 0.3.2, 2026-10-04)**: Spencer saw the
-      restore result flash and disappear. Pre-existing bug: `refresh()`
-      rebuilds every buddy card from scratch every 5s, so the result line
-      — and the live "Restoring N of M" progress during any restore longer
-      than 5s — was wiped on the next refresh, and the button re-enabled
-      mid-restore. Restore status now lives in a per-buddy map
-      (`restoreStatus`, same pattern as `buddyDiskCache`) and is
-      re-applied whenever a card is rebuilt. Verified in headless Chromium
-      against the real embedded page with mocked API: a 12s restore kept
-      its progress line and disabled button through 3 refreshes, and the
-      "Restored 1 file(s) to /home/sleblanc/…" result stayed through
-      further refreshes; no page errors
-- [x] Restore confirmed live on testa (2026-10-04): `cat
-      ~/bbdata/testa/restored/*/hello.txt` → `hello from testa` (testb
-      held it encrypted, testa pulled it back and decrypted it into
-      `RESTORE_DIR_HOST`). Card also showed "✓ reconciled — 1 file(s)
-      match" and testb's real disk numbers
-- [x] **Found and fixed (client 0.3.3)** from that same test: the card stuck
-      on "Restoring 1 of 1 file(s) — 199 B of 199 B (100%)" with the button
-      disabled. A progress poll still in flight when the restore finished
-      replied late and overwrote the final result (`clearInterval` only
-      stops future polls). 0.3.2 made it stick, since status now persists
-      across refreshes. `doRestore` now drops progress replies once the
-      restore has finished. Reproduced in headless Chromium against the
-      deployed 0.3.2 page (slow progress endpoint) — stuck forever — and
-      confirmed fixed with the 0.3.3 page
-- [x] Confirmed live on testa with 0.3.3 (2026-10-04): result line read
-      "Restored 1 file(s) to /home/sleblanc/bbdata/testa/restored/<testb
-      id> — 199 B in 1.2s (165 B/s) · direct, 0ms" and stayed — host path,
-      persists across refreshes, no stuck progress
-- [ ] Before r/homelab launch: `PUID`/`PGID` support. The container runs as
-      root, so everything it creates is root-owned: restored files can't be
-      edited/deleted without `sudo`, and buddy files on an NFS share with
-      the default `root_squash` may not be writable at all. Run as the
-      user's own UID/GID instead (like linuxserver.io images)
-
+- [x] **Client 0.4.0 (2026-10-04): PUID/PGID + missing-drive protection.**
+      - `PUID`/`PGID` in `.env` → new `docker-entrypoint.sh` (root only long
+        enough to chown config/buddy-files/restores — never the read-only
+        backup folder — then `setpriv` to that user). Ownership fix only
+        walks a folder if something within 2 levels isn't owned yet.
+        Unset = root, as before. Tested with `setpriv` and a stand-in
+        client: no PUID → uid 0; PUID=1000 → folders chowned once, client
+        runs as 1000 and can write; restart doesn't re-chown; PGID defaults
+        to PUID; non-numeric value refused; `restore` args pass through
+      - Buddy-files folder stamped with an ID (`.backup-buddies-id`, copy in
+        `DATA_DIR/buddy-files-id`); mismatch or missing → refuse to start
+        (unmounted drive, wrong folder). Real binary vs real folders: fresh
+        stamps, restart OK, empty mount point refused with nothing written,
+        foreign folder refused, reset config adopts the folder's ID, `mv
+        received/*` leftover marker carried over and old folder removed,
+        moved-but-unmounted refused without stamping the empty folder, then
+        fine once mounted. Found + fixed while testing: the marker's comment
+        lines were compared along with the ID, so every restart failed
+      - Backup folder: completely empty while the buddy holds files from it
+        → cycle fails with "is the drive mounted?" instead of deleting
+        everything (`ALLOW_EMPTY_BACKUP_DIR=true` overrides). Unreadable
+        file → reported as a failed file, rest of the cycle continues
+        (previously one unreadable file aborted the whole cycle). Unreadable
+        folder → reported, and *no* deletions that cycle (its files used to
+        be silently skipped and so mirrored as deleted). Unit tests,
+        including a real permission-denied folder run as uid 1000
+- [ ] testa/testb on 0.4.0: add `PUID=1000`/`PGID=1000` to `.env`, `up -d`
+      → one-time "Setting ownership" lines in the logs, then files under
+      `~/docker/<dev>/config` and `~/bbdata/<dev>/{buddy-files,restored}`
+      owned by sleblanc; syncing and a restore still work
+- [ ] Missing-drive guard live: `docker compose down`, point
+      `BUDDY_FILES_DIR_HOST` at an empty folder, `up -d` → refuses to start
+      with the marker error; point it back → starts
+- [ ] Empty-backup-folder guard live: move testa's `my-files` contents
+      aside → card shows "backup failed: your backup folder looks
+      empty…", nothing deleted on testb; move them back → normal
 ## Housekeeping (not bugs)
 
 - [ ] Pledges aren't set via `.env` at all — they're created through the

@@ -33,6 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/backup-buddies-client /usr/local/bin/backup-buddies-client
+# Optional PUID/PGID support (see the script). chmod here rather than relying
+# on the host's file mode: install.sh downloads files without +x.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 # Persistent state (the Iroh identity key + anything received from a buddy)
 # lives here — the customer's docker-compose.yml mounts a named volume or
@@ -45,4 +49,6 @@ ENV DATA_DIR=/data
 # 127.0.0.1 on the host.
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/backup-buddies-client"]
+# Passes any arguments through, so `docker compose run --rm client restore
+# <node id>` still works.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

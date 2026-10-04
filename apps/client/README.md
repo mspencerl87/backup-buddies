@@ -226,6 +226,36 @@ Buddy files (`BUDDY_FILES_DIR`):
 Restores (`RESTORE_DIR`): `<buddy node id>/...` — only appears after a
 restore.
 
+## Running as your own user (PUID/PGID)
+
+Set `PUID`/`PGID` in `.env` (from `id -u` / `id -g`) and the container's
+entrypoint (`docker-entrypoint.sh`) starts as root just long enough to hand
+the client's own folders — config, buddy files, restores, never your
+read-only backup folder — to that user, then runs the client as it via
+`setpriv`. Restored files then belong to you, and buddy files can live on
+an NFS share where root is squashed. The ownership fix only walks a folder
+when something near its top (two levels) isn't owned yet, so restarts don't
+stat every stored file. Unset, the client runs as root as before.
+
+## Wrong-folder and missing-drive protection
+
+- **Buddy files:** the first time a buddy-files folder is used, the client
+  writes a random ID into `.backup-buddies-id` there and keeps a copy in
+  `DATA_DIR/buddy-files-id`. If they don't match on a later start — most
+  often a drive that wasn't mounted yet, so Docker bound the empty mount
+  point — the client refuses to start rather than storing buddy files on
+  the wrong disk. Deleting `buddy-files-id` deliberately starts over. A
+  marker left behind by `mv received/* new/` (globs skip dotfiles) is
+  carried over automatically, but only once the new folder has files in it.
+- **Your files:** if `BACKUP_DIR` scans completely but comes back empty
+  while the buddy holds files from it, the cycle fails with an explanation
+  instead of sending a delete for every file. `ALLOW_EMPTY_BACKUP_DIR=true`
+  overrides it.
+- **Unreadable files or folders:** an unreadable file is reported as a
+  failed file and the rest of the cycle carries on (it used to abort the
+  whole cycle). An unreadable folder is reported and pauses *all*
+  deletions that cycle — its contents would otherwise look deleted.
+
 ## Disk safety: pledges vs. the real disk
 
 A pledge is just a number two accounts agreed on over the API — it's not a

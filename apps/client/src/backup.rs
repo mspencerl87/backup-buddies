@@ -84,11 +84,59 @@ pub async fn run_backup_cycle(
     let buddy_node_id = buddy_id.to_string();
     let mut manifest = Manifest::load(data_dir, &buddy_node_id).await;
 
-    let local_files = scan_local_files(backup_dir).await?;
+    let scan = scan_local_files(backup_dir).await?;
+    let local_files = scan.files;
+
+    // A folder that suddenly looks completely empty while the buddy holds
+    // files from it is far more likely to be a drive that isn't mounted (or
+    // a broken mount) than someone deliberately deleting everything —
+    // mirroring it would send a delete for every file. Stop and say so
+    // instead; ALLOW_EMPTY_BACKUP_DIR=true overrides it for the real thing.
+    if looks_like_missing_drive(local_files.len(), scan.unreadable.len(), manifest.entries.len())
+        && !allow_empty_backup_dir()
+    {
+        anyhow::bail!(
+            "your backup folder ({}) looks empty, but {} file(s) from it are backed up with this buddy — \
+             not deleting them all. Is the drive with your files mounted? If you really did delete \
+             everything, set ALLOW_EMPTY_BACKUP_DIR=true in .env and restart.",
+            backup_dir.display(),
+            manifest.entries.len()
+        );
+    }
+
+    // Problems on this side (files or folders we can't read) are reported
+    // like any other failed file, but don't stop the rest of the cycle.
+    let mut files_failed = 0usize;
+    let mut failed_paths = Vec::new();
+    for path in &scan.unreadable {
+        files_failed += 1;
+        if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
+            failed_paths.push(FailedFile {
+                path: if path.is_empty() { "(backup folder)".to_string() } else { path.clone() },
+                reason: Some("can't open this on this device — check permissions; deletions paused until fixed"),
+            });
+        }
+    }
 
     let mut to_put: Vec<(String, PathBuf, u64, String)> = Vec::new();
     for (rel_path, abs_path, size) in &local_files {
-        let sha256 = hash_file(abs_path).await?;
+        let sha256 = match hash_file(abs_path).await {
+            Ok(sha256) => sha256,
+            Err(err) => {
+                // One unreadable file used to abort the whole cycle (so
+                // nothing else got backed up either). It stays in
+                // local_paths below, so it's never mistaken for deleted.
+                tracing::warn!(path = %rel_path, ?err, "can't read file — skipping it this cycle");
+                files_failed += 1;
+                if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
+                    failed_paths.push(FailedFile {
+                        path: rel_path.clone(),
+                        reason: Some("can't read this file on this device — check its permissions"),
+                    });
+                }
+                continue;
+            }
+        };
         let changed = manifest
             .entries
             .get(rel_path)
@@ -100,10 +148,18 @@ pub async fn run_backup_cycle(
     }
 
     let local_paths: HashSet<&String> = local_files.iter().map(|(rel, _, _)| rel).collect();
-    let to_delete: Vec<String> =
-        manifest.entries.keys().filter(|rel| !local_paths.contains(rel)).cloned().collect();
+    if !scan.unreadable.is_empty() {
+        tracing::warn!(
+            unreadable = scan.unreadable.len(),
+            "parts of the backup folder couldn't be read — not mirroring any deletions this cycle"
+        );
+    }
+    let to_delete = deletions_to_mirror(manifest.entries.keys(), &local_paths, scan.unreadable.len());
 
-    if to_put.is_empty() && to_delete.is_empty() {
+    // Nothing to send and nothing wrong locally: skip the connection (the
+    // caller pings instead). With local failures, still connect, so the
+    // dashboard's reachability/staleness stays based on a real connection.
+    if to_put.is_empty() && to_delete.is_empty() && files_failed == 0 {
         return Ok(BackupCycleStats::default());
     }
 
@@ -117,8 +173,6 @@ pub async fn run_backup_cycle(
     let recipient = age::scrypt::Recipient::new(passphrase.clone());
 
     let mut put_count = 0;
-    let mut files_failed = 0usize;
-    let mut failed_paths = Vec::new();
     for (rel_path, abs_path, size, sha256) in &to_put {
         match put_one_file(&conn, &recipient, rel_path, abs_path).await {
             Ok(ciphertext_size) => {
@@ -354,7 +408,7 @@ async fn hash_file(path: &Path) -> Result<String> {
 /// to show what's actually sitting in the directory, independent of
 /// whether it's been backed up to any particular buddy yet.
 pub async fn local_backup_summary(backup_dir: &Path) -> Result<(usize, u64)> {
-    let files = scan_local_files(backup_dir).await?;
+    let files = scan_local_files(backup_dir).await?.files;
     let total_bytes = files.iter().map(|(_, _, size)| size).sum();
     Ok((files.len(), total_bytes))
 }
@@ -363,22 +417,132 @@ pub async fn local_backup_summary(backup_dir: &Path) -> Result<(usize, u64)> {
 // this is built for, but a large BACKUP_DIR would block the async runtime
 // for the duration of the scan. If that becomes a problem, wrap this body
 // in tokio::task::spawn_blocking.
-async fn scan_local_files(backup_dir: &Path) -> Result<Vec<(String, PathBuf, u64)>> {
+/// What a scan of BACKUP_DIR found: the files it could see, plus anything
+/// it couldn't open (relative paths). Unreadable entries matter: a folder
+/// the client isn't allowed to open looks exactly like a folder that was
+/// deleted, so callers must not treat "not in `files`" as "gone" while
+/// `unreadable` is non-empty.
+struct LocalScan {
+    files: Vec<(String, PathBuf, u64)>,
+    unreadable: Vec<String>,
+}
+
+fn rel_to(backup_dir: &Path, abs_path: &Path) -> String {
+    abs_path
+        .strip_prefix(backup_dir)
+        .unwrap_or(abs_path)
+        .to_string_lossy()
+        .replace('\\', "/") // normalize separators in case this ever runs on Windows
+}
+
+async fn scan_local_files(backup_dir: &Path) -> Result<LocalScan> {
     let mut out = Vec::new();
-    for entry in
-        walkdir::WalkDir::new(backup_dir).follow_links(false).into_iter().filter_map(|e| e.ok())
-    {
+    let mut unreadable = Vec::new();
+    for entry in walkdir::WalkDir::new(backup_dir).follow_links(false) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                // Permission denied on a folder (or a file vanishing mid-walk).
+                // Recorded rather than skipped silently — see LocalScan.
+                let path = err.path().map(|p| rel_to(backup_dir, p)).unwrap_or_default();
+                tracing::warn!(path = %path, %err, "can't read part of BACKUP_DIR");
+                unreadable.push(path);
+                continue;
+            }
+        };
         if !entry.file_type().is_file() {
             continue;
         }
         let abs_path = entry.path().to_path_buf();
-        let rel_path = abs_path
-            .strip_prefix(backup_dir)
-            .unwrap_or(&abs_path)
-            .to_string_lossy()
-            .replace('\\', "/"); // normalize separators in case this ever runs on Windows
+        let rel_path = rel_to(backup_dir, &abs_path);
         let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
         out.push((rel_path, abs_path, size));
     }
-    Ok(out)
+    Ok(LocalScan { files: out, unreadable })
+}
+
+/// True when BACKUP_DIR scanned completely (nothing unreadable) yet came
+/// back empty while the buddy holds files from it — the signature of a
+/// drive that isn't mounted rather than a real "delete everything".
+fn looks_like_missing_drive(local_files: usize, unreadable: usize, backed_up: usize) -> bool {
+    local_files == 0 && unreadable == 0 && backed_up > 0
+}
+
+/// Which backed-up paths to delete from the buddy. Anything under a folder
+/// we couldn't open is missing from `local_paths` without having been
+/// deleted, so there are no deletions at all while any part of the scan
+/// failed — new and changed files still go out.
+fn deletions_to_mirror<'a>(
+    backed_up: impl Iterator<Item = &'a String>,
+    local_paths: &HashSet<&String>,
+    unreadable: usize,
+) -> Vec<String> {
+    if unreadable > 0 {
+        return Vec::new();
+    }
+    backed_up.filter(|rel| !local_paths.contains(rel)).cloned().collect()
+}
+
+/// ALLOW_EMPTY_BACKUP_DIR=true lets a cycle mirror "everything was deleted"
+/// to the buddy. Off by default — see the empty-folder guard in
+/// run_backup_cycle.
+fn allow_empty_backup_dir() -> bool {
+    matches!(
+        std::env::var("ALLOW_EMPTY_BACKUP_DIR").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Ok("1" | "true" | "yes")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bb-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn empty_folder_with_backed_up_files_looks_like_missing_drive() {
+        assert!(looks_like_missing_drive(0, 0, 12));
+        assert!(!looks_like_missing_drive(0, 0, 0), "a fresh, empty folder is fine");
+        assert!(!looks_like_missing_drive(3, 0, 12), "some files present: ordinary deletions");
+        assert!(!looks_like_missing_drive(0, 1, 12), "unreadable is handled by pausing deletions instead");
+    }
+
+    #[test]
+    fn deletions_pause_while_anything_is_unreadable() {
+        let backed_up = ["a.txt".to_string(), "photos/b.jpg".to_string()];
+        let present = "a.txt".to_string();
+        let local: HashSet<&String> = [&present].into_iter().collect();
+        assert_eq!(deletions_to_mirror(backed_up.iter(), &local, 0), vec!["photos/b.jpg".to_string()]);
+        assert!(deletions_to_mirror(backed_up.iter(), &local, 1).is_empty());
+    }
+
+    // Root ignores permissions, so this only proves anything when run as a
+    // normal user; as root it returns early rather than giving a false pass.
+    #[tokio::test]
+    async fn unreadable_folder_is_reported_not_treated_as_deleted() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp("scan");
+        std::fs::write(dir.join("a.txt"), b"a").unwrap();
+        let locked = dir.join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::write(locked.join("b.txt"), b"b").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable_anyway = std::fs::read_dir(&locked).is_ok();
+
+        let scan = scan_local_files(&dir).await.unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        if readable_anyway {
+            eprintln!("running as root: permission check skipped");
+            return;
+        }
+        let names: Vec<&str> = scan.files.iter().map(|(rel, _, _)| rel.as_str()).collect();
+        assert_eq!(names, vec!["a.txt"]);
+        assert_eq!(scan.unreadable, vec!["locked".to_string()]);
+    }
 }
