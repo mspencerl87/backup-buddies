@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import { sendMail } from '../lib/mailer.js';
+import { sendMail, SUPPORT_EMAIL } from '../lib/mailer.js';
 import { isAdminEmail } from '../lib/admin.js';
 
 // "1 month of no activity" before the account holder gets a warning email
@@ -83,7 +83,9 @@ async function warnStaleAccount(account) {
         `actually looking first, but it's worth checking in.\n\n` +
         `To keep your account, just run your backup client again (or check ` +
         `${process.env.APP_URL || ''}/setup.html if it's stopped working) — no other action is needed.\n\n` +
-        `If you meant to stop using Backup Buddies, you don't need to do anything further.`,
+        `If you meant to stop using Backup Buddies, you don't need to do anything further.` +
+        `\n\nQuestions? Just reply to this email (it goes to ${SUPPORT_EMAIL}).`,
+      replyTo: SUPPORT_EMAIL,
       html:
         `<p>We haven't seen a backup client running on your account in over ${INACTIVITY_DAYS} days.</p>` +
         `<p>Accounts that stay inactive are periodically reviewed by hand for removal — including any ` +
@@ -92,7 +94,8 @@ async function warnStaleAccount(account) {
         `<p>To keep your account, just run your backup client again (or check ` +
         `<a href="${process.env.APP_URL || ''}/setup.html">your setup</a> if it's stopped working) — no ` +
         `other action is needed.</p>` +
-        `<p>If you meant to stop using Backup Buddies, you don't need to do anything further.</p>`,
+        `<p>If you meant to stop using Backup Buddies, you don't need to do anything further.</p>` +
+        `<p>Questions? Just reply to this email (it goes to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>).</p>`,
     });
   } catch (err) {
     console.error(`Failed to send stale-account warning to ${account.email}:`, err);

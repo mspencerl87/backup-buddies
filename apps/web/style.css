@@ -1271,3 +1271,17 @@ code {
   background: var(--accent-grad);
   transform: scale(1.2);
 }
+
+/* Important "read this before you continue" notes — same amber as the
+   dashboard's billing-paused banner. */
+.callout-warning {
+  border: 1px solid #e5a443;
+  border-radius: 8px;
+  background: #2a1d10;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  color: var(--text);
+}
+.callout-warning strong:first-child {
+  color: #f0b45a;
+}

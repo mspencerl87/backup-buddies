@@ -12,7 +12,7 @@
   <meta property="og:url" content="https://app.filegarden.net/getting-started.html">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="stylesheet" href="/style.css?v=e608602f">
+  <link rel="stylesheet" href="/style.css?v=5004c723">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
   <link rel="apple-touch-icon" href="/assets/favicon-180.png">
@@ -91,6 +91,13 @@
         <li>Follow the full walkthrough on the <a href="/setup.html">Client setup</a> page to install and run it with that token.</li>
         <li>Do this on every machine you want backed up. Your buddy needs to do the same on theirs — both sides have to be running the client for anything to happen.</li>
       </ul>
+      <div class="callout-warning">
+          <strong>Save your backup passphrase in a password manager.</strong>
+          <code>BACKUP_PASSPHRASE</code> is the only key to your backups — files are encrypted with it on your
+          own machine, and nobody else ever has it. If you lose it, what your buddy holds for you can never be
+          decrypted: not by a password reset (that's only your website login), not by support, not by us.
+          It's not stored anywhere but your <code>.env</code> file, which won't help if the machine itself dies.
+        </div>
     </section>
 
     <section class="about-section">
@@ -127,6 +134,7 @@
   <footer>
     <a href="/terms.html">Terms of Service</a>
     <a href="/privacy.html">Privacy Policy</a>
+    <a href="mailto:support@filegarden.net">Account help: support@filegarden.net</a>
     <a href="https://github.com/mspencerl87/backup-buddies-feedback/issues" target="_blank" rel="noopener">Report a bug / request a feature</a>
   </footer>
 </body>

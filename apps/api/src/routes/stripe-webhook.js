@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { stripe } from '../lib/stripe.js';
-import { sendMail } from '../lib/mailer.js';
+import { sendMail, SUPPORT_EMAIL } from '../lib/mailer.js';
 
 export const stripeWebhookRouter = Router();
 
@@ -81,13 +81,17 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
                 `has been paused — your existing backups are untouched, but your device won't send or ` +
                 `receive any new files with your buddy until this is fixed.\n\n` +
                 `Update your payment method here: ${appUrl}/dashboard.html#billing\n\n` +
-                `Syncing resumes automatically as soon as a payment goes through.`,
+                `Syncing resumes automatically as soon as a payment goes through.\n\n` +
+                `Questions, or think this is a mistake? Just reply to this email (it goes to ${SUPPORT_EMAIL}), or use Contact support on your dashboard.`,
+              replyTo: SUPPORT_EMAIL,
               html:
                 `<p>We weren't able to charge your card after several attempts, so your buddy syncing ` +
                 `has been paused — your existing backups are untouched, but your device won't send or ` +
                 `receive any new files with your buddy until this is fixed.</p>` +
                 `<p><a href="${appUrl}/dashboard.html#billing">Update your payment method</a></p>` +
-                `<p>Syncing resumes automatically as soon as a payment goes through.</p>`,
+                `<p>Syncing resumes automatically as soon as a payment goes through.</p>` +
+                `<p>Questions, or think this is a mistake? Email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> ` +
+                `or use <a href="${appUrl}/dashboard.html#support">Contact support</a> on your dashboard.</p>`,
             });
           } catch (err) {
             // Don't fail the whole webhook over a flaky SMTP send — the

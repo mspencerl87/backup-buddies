@@ -824,19 +824,21 @@ can change that.
          cooldown and global cap are in place
 2. **Recovery story for the encryption passphrase** — no code change
    needed (see above), docs only:
-   - [ ] `setup.html` / `getting-started.html` tell users plainly to store
+   - [x] `setup.html` / `getting-started.html` tell users plainly to store
          `BACKUP_PASSPHRASE` somewhere safe (password manager), and that
-         neither a password reset nor support can recover it
+         neither a password reset nor support can recover it (warning box,
+         2026-10-04)
 3. **support@filegarden.net**
    - [x] Created in Purelymail by Spencer (2026-10-04)
    - [x] Linked from `forgot-password.html` / `reset-password.html` (body
          and footer) and from every reset-related email
-   - [ ] Linked from `login.html`, the forgot/reset pages, the site
-         footer, `status.html`, and the payment-failed email (a paused
-         account is exactly who'll need it)
-   - [ ] Add a `.github/ISSUE_TEMPLATE/config.yml` `contact_links` entry
+   - [x] Linked from every page footer (login, forgot/reset, status
+         included) and the payment-failed, relay-limit and stale-account
+         emails, which also set Reply-To to support (2026-10-04)
+   - [x] Add a `.github/ISSUE_TEMPLATE/config.yml` `contact_links` entry
          in `backup-buddies-feedback` pointing account/billing/login
-         problems to this address instead of a public issue
+         problems to this address instead of a public issue (done
+         2026-10-04, `f7302fe` in the feedback repo; README updated too)
    - [ ] Support rule (also for anyone helping later): only act on
          account changes requested *from the registered email address*;
          never ask a user for their password or `BACKUP_PASSPHRASE`

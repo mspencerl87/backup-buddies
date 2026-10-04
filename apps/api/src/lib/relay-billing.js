@@ -1,5 +1,5 @@
 import { pool } from '../db/pool.js';
-import { sendMail } from './mailer.js';
+import { sendMail, SUPPORT_EMAIL } from './mailer.js';
 
 // Shared relay-bandwidth billing constants and the write side of the
 // pipeline (the read/report side lives in jobs/sync-relay-usage.js).
@@ -125,7 +125,9 @@ async function enforceFreeRelayCap(accountId, email) {
         `To keep syncing now, add a payment method — relay traffic on a paid plan is $${RELAY_USD_PER_GB.toFixed(2)}/GB, ` +
         `and syncing resumes right away: ${appUrl}/dashboard.html#billing\n\n` +
         `Tip: if your device and your buddy's can reach each other directly (e.g. by forwarding a port on your router), ` +
-        `that traffic doesn't use the relay at all and is always free.`,
+        `that traffic doesn't use the relay at all and is always free.` +
+        `\n\nQuestions? Just reply to this email (it goes to ${SUPPORT_EMAIL}).`,
+      replyTo: SUPPORT_EMAIL,
       html:
         `<p>Your devices couldn't connect to your buddy directly, so your backups have been going through our relay — ` +
         `and you've now used this month's free ${FREE_RELAY_GB_PER_MONTH} GB of it. Buddy syncing is paused until the ` +
@@ -133,7 +135,8 @@ async function enforceFreeRelayCap(accountId, email) {
         `<p>To keep syncing now, <a href="${appUrl}/dashboard.html#billing">add a payment method</a> — relay traffic on a ` +
         `paid plan is $${RELAY_USD_PER_GB.toFixed(2)}/GB, and syncing resumes right away.</p>` +
         `<p>Tip: if your device and your buddy's can reach each other directly (e.g. by forwarding a port on your router), ` +
-        `that traffic doesn't use the relay at all and is always free.</p>`,
+        `that traffic doesn't use the relay at all and is always free.</p>` +
+        `<p>Questions? Just reply to this email (it goes to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>).</p>`,
     });
   } catch (err) {
     console.error(`Failed to send free-relay-cap email to ${email}:`, err);
