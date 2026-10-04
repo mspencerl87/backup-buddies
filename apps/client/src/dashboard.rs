@@ -157,6 +157,10 @@ struct AppState {
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     reconcile_stats: ReconcileBook,
+    // This device's own label, as set in the web dashboard's Devices card —
+    // see main.rs's self_label for where it's filled in. None until the
+    // first successful poll of /devices/me/buddies, or if never labeled.
+    self_label: Arc<Mutex<Option<String>>>,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -226,6 +230,10 @@ struct LocalBackupStatus {
 #[derive(Serialize)]
 struct StatusResponse {
     node_id: String,
+    // This device's own label (see AppState::self_label's comment) — None
+    // until it's known. The frontend falls back to showing node_id when
+    // this is absent.
+    label: Option<String>,
     backup_dir: Option<String>,
     data_dir: String,
     // Build version and process uptime — the same two numbers a
@@ -309,6 +317,7 @@ pub async fn run(
     bandwidth_book: BandwidthBook,
     cycle_stats: CycleBook,
     reconcile_stats: ReconcileBook,
+    self_label: Arc<Mutex<Option<String>>>,
     endpoint: Endpoint,
     relay_url: RelayUrl,
     passphrase: SecretString,
@@ -322,6 +331,7 @@ pub async fn run(
         bandwidth_book,
         cycle_stats,
         reconcile_stats,
+        self_label,
         endpoint,
         relay_url,
         passphrase,
@@ -451,8 +461,11 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         None => None,
     };
 
+    let label = state.self_label.lock().unwrap().clone();
+
     Json(StatusResponse {
         node_id: state.node_id.clone(),
+        label,
         backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
         data_dir: state.data_dir.display().to_string(),
         version: env!("CARGO_PKG_VERSION"),
@@ -741,7 +754,17 @@ const INDEX_HTML: &str = r#"<!doctype html>
     background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   header .sub { color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem; }
-  main { max-width: 920px; margin: 0 auto; padding: 1.5rem; }
+  main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+  /* This Device / Disk / Bandwidth on the left, buddy cards on the right —
+     a fixed two-column split (not a height-balanced masonry one) since
+     which side a card belongs on is decided by what it is, not by what
+     fits where. Mirrors the web dashboard's own left/right grouping. */
+  .device-grid { display: flex; gap: 1.25rem; align-items: flex-start; }
+  .device-grid-left { flex: 1; min-width: 0; }
+  .device-grid-right { flex: 1.3; min-width: 0; }
+  @media (max-width: 860px) {
+    .device-grid { flex-direction: column; }
+  }
   .card {
     position: relative; overflow: hidden;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -851,9 +874,11 @@ const INDEX_HTML: &str = r#"<!doctype html>
     <img src="/mark.svg" alt="">
     <h1>Backup Buddies</h1>
   </div>
-  <div class="sub">This device: <code id="node-id">…</code> · backing up <code id="backup-dir">…</code></div>
+  <div class="sub">This device: <span id="device-label">…</span> <code id="node-id" class="muted"></code> · backing up <code id="backup-dir">…</code></div>
 </header>
 <main>
+<div class="device-grid">
+<div class="device-grid-left">
   <div class="card" id="device-card">
     <h2>This Device</h2>
     <div class="disk-stats">
@@ -919,8 +944,12 @@ const INDEX_HTML: &str = r#"<!doctype html>
     <div class="bar-track"><div class="bar-fill" id="bw-bar" style="width:0%"></div></div>
     <div class="muted" style="margin-top:0.4rem; font-size:0.78rem;" id="bw-note"></div>
   </div>
+</div>
+<div class="device-grid-right">
   <div id="empty" class="card" style="display:none;">No buddies seen yet — waiting on the first poll of the API.</div>
   <div id="buddies"></div>
+</div>
+</div>
 </main>
 
 <div class="modal-backdrop" id="browse-modal">
@@ -1771,7 +1800,14 @@ function renderBandwidth(data) {
 async function refresh() {
   const res = await fetch("/api/status");
   const data = await res.json();
-  document.getElementById("node-id").textContent = data.node_id;
+  // Prefer the human-readable label set in the web dashboard's Devices
+  // card (see dashboard.rs's AppState::self_label) — falls back to the
+  // bare node id until that's known, same fallback the buddy cards below
+  // already use for their own label/node_id pairs. When a label is known,
+  // the full node id is still shown alongside it (muted) since it's
+  // sometimes needed for support/debugging.
+  document.getElementById("device-label").textContent = data.label || data.node_id;
+  document.getElementById("node-id").textContent = data.label ? "(" + data.node_id + ")" : "";
   document.getElementById("backup-dir").textContent = data.backup_dir || "(nothing — receive-only)";
 
   document.getElementById("device-version").textContent = data.version;

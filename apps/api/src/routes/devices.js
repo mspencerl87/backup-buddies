@@ -126,5 +126,10 @@ devicesRouter.get('/devices/me/buddies', requireDeviceAuth, async (req, res) => 
     [req.device.account_id],
   );
 
-  res.json({ buddy_devices: result.rows, paused });
+  // This device's own label (as set in the dashboard's Devices card) —
+  // req.device already has it from requireDeviceAuth's `SELECT *`, no
+  // extra query needed. The client surfaces this on its own dashboard's
+  // "This Device" line so it reads as something recognizable instead of
+  // the raw Iroh node id.
+  res.json({ buddy_devices: result.rows, paused, self_label: req.device.label });
 });

@@ -178,6 +178,12 @@ struct BuddiesResponse {
     // defaulting to "not paused" rather than failing the whole poll.
     #[serde(default)]
     paused: bool,
+    // This device's own label, as set in the web dashboard's Devices card
+    // (devices.js's GET /devices/me/buddies). `#[serde(default)]` for the
+    // same reason as `paused` above; None until the first successful poll,
+    // or if the device was never given a label.
+    #[serde(default)]
+    self_label: Option<String>,
 }
 
 #[tokio::main]
@@ -364,16 +370,24 @@ async fn main() -> Result<()> {
     let reconcile_stats: dashboard::ReconcileBook =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
+    // This device's own label, as set in the web dashboard's Devices card
+    // — None until the outbound loop's first successful poll of
+    // /devices/me/buddies fills it in (see fetch_buddy_devices). The local
+    // dashboard shows this instead of the bare node id once it's known, so
+    // "This Device" reads as something recognizable rather than a token.
+    let self_label: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
     let dashboard_task = {
         let endpoint = endpoint.clone();
-        let config_dashboard_bind = config.dashboard_bind.clone();
         let node_id_str = endpoint_id.to_string();
+        let config_dashboard_bind = config.dashboard_bind.clone();
         let data_dir = config.data_dir.clone();
         let backup_dir = config.backup_dir.clone();
         let pledge_book = pledge_book.clone();
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         let reconcile_stats = reconcile_stats.clone();
+        let self_label = self_label.clone();
         let relay_url = config.relay_url.clone();
         let passphrase = config.passphrase.clone();
         let stale_after_secs = config.stale_after_secs;
@@ -387,6 +401,7 @@ async fn main() -> Result<()> {
                 bandwidth_book,
                 cycle_stats,
                 reconcile_stats,
+                self_label,
                 endpoint,
                 relay_url,
                 passphrase,
@@ -434,6 +449,7 @@ async fn main() -> Result<()> {
         let bandwidth_book = bandwidth_book.clone();
         let cycle_stats = cycle_stats.clone();
         let reconcile_stats = reconcile_stats.clone();
+        let self_label = self_label.clone();
         async move {
             // When each buddy's manifest was last reconciled against what
             // they actually report holding for us (see
@@ -448,7 +464,11 @@ async fn main() -> Result<()> {
             const RECONCILE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
             loop {
                 match fetch_buddy_devices(&http, &config, &bandwidth_book).await {
-                    Ok((true, _buddies)) => {
+                    Ok((true, _buddies, label)) => {
+                        // Still record the label even while paused — it's
+                        // this device's own identity, unrelated to whether
+                        // buddy syncing is currently allowed.
+                        *self_label.lock().unwrap() = label;
                         // Account is paused (relay_status != 'active' —
                         // see stripe-webhook.js) — per product decision,
                         // this stops ALL buddy syncing, not just relay
@@ -463,7 +483,8 @@ async fn main() -> Result<()> {
                              skipping all buddy activity this cycle"
                         );
                     }
-                    Ok((false, buddies)) => {
+                    Ok((false, buddies, label)) => {
+                        *self_label.lock().unwrap() = label;
                         for buddy in buddies {
                             let Some(node_id_str) = &buddy.iroh_node_id else {
                                 tracing::info!(
@@ -833,12 +854,13 @@ async fn register_node_id(http: &reqwest::Client, config: &Config, endpoint_id: 
     Ok(())
 }
 
-// Returns (paused, buddy_devices) — see BuddiesResponse::paused.
+// Returns (paused, buddy_devices, self_label) — see BuddiesResponse's
+// fields.
 async fn fetch_buddy_devices(
     http: &reqwest::Client,
     config: &Config,
     bandwidth_book: &bandwidth::BandwidthBook,
-) -> Result<(bool, Vec<BuddyDevice>)> {
+) -> Result<(bool, Vec<BuddyDevice>, Option<String>)> {
     // Piggyback relay-bandwidth reporting on this existing poll (see
     // apps/api/src/routes/devices.js) rather than a separate endpoint —
     // whole megabytes of relay traffic accumulated since the last
@@ -862,7 +884,7 @@ async fn fetch_buddy_devices(
     }
 
     let resp: BuddiesResponse = resp.json().await?;
-    Ok((resp.paused, resp.buddy_devices))
+    Ok((resp.paused, resp.buddy_devices, resp.self_label))
 }
 
 // Connectivity check for a buddy we're not backing anything up to (no
