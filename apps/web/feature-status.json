@@ -48,6 +48,11 @@
   ],
   "limitations": [
     {
+      "title": "Password reset and account support",
+      "status": "in_progress",
+      "description": "Self-service password reset, a dedicated support email, and an in-app “Contact support” form for account, login, and billing questions are being added. Resetting your website password will never affect your backups: files are encrypted with the passphrase on your own device, which is separate from your account password. That also means nobody, including us, can recover that passphrase if it's lost, so keep it somewhere safe."
+    },
+    {
       "title": "Direct connections aren't guaranteed on every network",
       "status": "limitation",
       "description": "Whether a direct connection is possible depends on your router/network's NAT behavior. Many home networks and local networks work great. Some networks — strict corporate firewalls especially — block the hole-punching direct connections need entirely, forwarded port or not. When that happens, your backups still complete normally through our relay; this is expected, graceful behavior, not a failure."

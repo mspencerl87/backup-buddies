@@ -751,6 +751,70 @@ deleting them once checked.
       under some condition (e.g. a container restart mid-cycle,
       startup-time NAT/relay-mode race) that hasn't been isolated yet.
 
+## Planned — account support channel (added 2026-10-04, not yet built)
+
+Spencer noticed there's no way for a user to reach us about account
+problems (locked out, password reset, billing/login questions). The
+public `backup-buddies-feedback` repo is the right place for bugs and
+feature requests but is **not** suitable for this: issues are public
+(emails, account IDs and billing details would be exposed), anyone can
+claim to be anyone there, and it requires a GitHub account. Agreed plan,
+in priority order:
+
+**Already settled before building (checked against the code, 2026-10-04):**
+a password reset can't cost anyone their backups. File encryption uses
+`BACKUP_PASSPHRASE` (age/scrypt, read in `apps/client/src/main.rs`), which
+lives only on the user's own machine and is completely separate from the
+website account password. Flip side worth putting in the support FAQ:
+**we can never recover a lost `BACKUP_PASSPHRASE`**, and no support request
+can change that.
+
+1. **Self-service password reset** (none exists today; `routes/auth.js`
+   has no reset/forgot route and `login.html` has no link)
+   - [ ] Migration adding `password_reset_token_hash` /
+         `password_reset_sent_at` to `accounts` (same hash-only-in-DB
+         pattern as `007_email_verification.sql` / `devices.token_hash`)
+   - [ ] `POST /auth/forgot-password`: always returns the same generic
+         response whether or not the email exists (no account
+         enumeration), rate-limited per email and per IP, sends the link via
+         the existing `lib/mailer.js` `sendMail`
+   - [ ] `POST /auth/reset-password`: token is single-use, short expiry
+         (~1 hour), cleared on use; invalidates all existing sessions for
+         that account after a successful reset
+   - [ ] Google-only accounts (no password hash): the reset email says
+         "this account signs in with Google" instead of sending a reset link
+   - [ ] `forgot-password.html` + `reset-password.html` pages, and a
+         "Forgot password?" link on `login.html`
+   - [ ] Confirm live: request → email arrives → reset works → old
+         password rejected → old session logged out → reused/expired link
+         rejected
+2. **Recovery story for the encryption passphrase** — no code change
+   needed (see above), docs only:
+   - [ ] `setup.html` / `getting-started.html` tell users plainly to store
+         `BACKUP_PASSPHRASE` somewhere safe (password manager), and that
+         neither a password reset nor support can recover it
+3. **support@filegarden.net**
+   - [ ] Create it in Purelymail (alias forwarding to Spencer, or its own
+         mailbox)
+   - [ ] Linked from `login.html`, the forgot/reset pages, the site
+         footer, `status.html`, and the payment-failed email (a paused
+         account is exactly who'll need it)
+   - [ ] Add a `.github/ISSUE_TEMPLATE/config.yml` `contact_links` entry
+         in `backup-buddies-feedback` pointing account/billing/login
+         problems to this address instead of a public issue
+   - [ ] Support rule (also for anyone helping later): only act on
+         account changes requested *from the registered email address*;
+         never ask a user for their password or `BACKUP_PASSPHRASE`
+4. **In-app "Contact support" form** (logged-in users only)
+   - [ ] `POST /support` (session-authenticated): emails support@ with
+         the account ID, email, plan / `relay_status`, and the user's
+         message auto-attached, with `Reply-To` set to the account's email.
+         Rate-limited
+   - [ ] Form on `dashboard.html` (e.g. near `#billing`)
+   - [ ] Confirm live: submit from a test account → email lands at
+         support@ with the right account details → replying reaches the
+         user
+
 ## Housekeeping (not bugs)
 
 - [ ] Pledges aren't set via `.env` at all — they're created through the
