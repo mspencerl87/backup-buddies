@@ -964,6 +964,18 @@ device+inode, not path. Nothing is ever moved automatically.
       Restore button deliberately stays enabled even when this device's
       manifest is empty: a rebuilt device with fresh config is exactly
       who needs it, and its buddy still has the files
+- [x] **Found and fixed (client 0.3.2, 2026-10-04)**: Spencer saw the
+      restore result flash and disappear. Pre-existing bug: `refresh()`
+      rebuilds every buddy card from scratch every 5s, so the result line
+      — and the live "Restoring N of M" progress during any restore longer
+      than 5s — was wiped on the next refresh, and the button re-enabled
+      mid-restore. Restore status now lives in a per-buddy map
+      (`restoreStatus`, same pattern as `buddyDiskCache`) and is
+      re-applied whenever a card is rebuilt. Verified in headless Chromium
+      against the real embedded page with mocked API: a 12s restore kept
+      its progress line and disabled button through 3 refreshes, and the
+      "Restored 1 file(s) to /home/sleblanc/…" result stayed through
+      further refreshes; no page errors
 - [ ] Confirm on testa (port 8080, testb card → Restore): result line shows
       `/home/sleblanc/bbdata/testa/restored/<testb id>`, and `hello.txt`
       is there decrypted

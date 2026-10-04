@@ -1212,20 +1212,40 @@ async function doRestore(nodeId, paths, onProgress) {
   }
 }
 
-async function restoreNow(nodeId, btn, resultEl) {
-  btn.disabled = true;
-  resultEl.textContent = "Restoring…";
+// Per-buddy restore status, kept outside the card itself: refresh()
+// rebuilds every buddy card from scratch every few seconds, so anything
+// written only into the card's DOM (the "Restored N file(s)…" line, or the
+// live progress while a restore runs) would vanish on the next refresh.
+// Same idea as buddyDiskCache. Survives until the page is reloaded or
+// another restore from that buddy replaces it.
+const restoreStatus = new Map(); // nodeId -> { text, color, running }
+
+function setRestoreStatus(nodeId, status) {
+  restoreStatus.set(nodeId, status);
+  applyRestoreStatus(nodeId, document);
+}
+
+// `root` is the card being built (not yet in the page) or `document`.
+function applyRestoreStatus(nodeId, root) {
+  const status = restoreStatus.get(nodeId);
+  const sel = '[data-node-id="' + CSS.escape(nodeId) + '"]';
+  const resultEl = root.querySelector(".restore-result" + sel);
+  const btn = root.querySelector(".restore-btn" + sel);
+  if (btn) btn.disabled = Boolean(status && status.running);
+  if (!resultEl) return;
+  resultEl.textContent = status ? status.text : "";
+  resultEl.style.color = status && status.color ? status.color : "";
+}
+
+async function restoreNow(nodeId) {
+  setRestoreStatus(nodeId, { text: "Restoring…", running: true });
   try {
     const body = await doRestore(nodeId, [], (p) => {
-      resultEl.textContent = describeRestoreProgress(p);
+      setRestoreStatus(nodeId, { text: describeRestoreProgress(p), running: true });
     });
-    resultEl.textContent = describeRestoreResult(body);
-    resultEl.style.color = "var(--ok)";
+    setRestoreStatus(nodeId, { text: describeRestoreResult(body), color: "var(--ok)", running: false });
   } catch (err) {
-    resultEl.textContent = "Restore failed: " + err.message;
-    resultEl.style.color = "var(--danger)";
-  } finally {
-    btn.disabled = false;
+    setRestoreStatus(nodeId, { text: "Restore failed: " + err.message, color: "var(--danger)", running: false });
   }
 }
 
@@ -1765,12 +1785,13 @@ function renderBuddy(b) {
     <div style="margin-top: 1rem;">
       <button class="restore-btn" data-node-id="${b.node_id}">Restore from this buddy</button>
       <button class="secondary browse-btn" data-node-id="${b.node_id}">Browse files…</button>
-      <div class="restore-result"></div>
+      <div class="restore-result" data-node-id="${b.node_id}"></div>
     </div>
   `;
   const btn = div.querySelector(".restore-btn");
-  const resultEl = div.querySelector(".restore-result");
-  btn.addEventListener("click", () => restoreNow(b.node_id, btn, resultEl));
+  btn.addEventListener("click", () => restoreNow(b.node_id));
+  // Re-apply any restore result/progress from before this rebuild.
+  applyRestoreStatus(b.node_id, div);
   const browseBtn = div.querySelector(".browse-btn");
   const label = b.label ? b.label : b.node_id.slice(0, 12) + "…";
   browseBtn.addEventListener("click", () => openBrowseModal(b.node_id, label));
