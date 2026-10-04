@@ -642,16 +642,18 @@ notes):
   "Paused only" filter checkbox and a clearer note in the account-detail
   view.
 
-None of this has touched production yet — all written and locally
-verified (Rust build/test/clippy; Node files syntax-checked; inline
-`<script>` blocks in the two HTML files syntax-checked) but not run
-against a real Stripe test-mode failed/retried/exhausted invoice cycle,
-since that needs either waiting out Stripe's real retry schedule or
-using the Stripe CLI (`stripe trigger invoice.payment_failed`) against
-the live webhook, which I can't do myself (this sandbox's egress proxy
-blocks `app.filegarden.net` — see earlier entries in this file) —
-Spencer will need to run this against production or a Stripe test
-account:
+**Deployed to production (2026-10-03)**: migration `012` applied
+cleanly (`ALTER TABLE`/`CREATE INDEX`, no errors), containers rebuilt,
+and `GET /admin/accounts` confirmed returning `relay_paused_at`/
+`relay_paused_reason` on every account instead of 500ing. Code-level
+and schema-level verification is done; what's left is exercising the
+actual pause behavior against a real Stripe failed/retried/exhausted
+invoice cycle, since that needs either waiting out Stripe's real retry
+schedule or using the Stripe CLI (`stripe trigger
+invoice.payment_failed`) against the live webhook, which I can't do
+myself (this sandbox's egress proxy blocks `app.filegarden.net` — see
+earlier entries in this file) — Spencer will need to run this against
+production or a Stripe test account:
 
 - [ ] A real `invoice.payment_failed` with `next_payment_attempt` still
       set (mid-retry) does *not* pause anything
@@ -695,8 +697,29 @@ file) is now fully exercised. Remaining:
 - [x] ~~Stale-buddy badge~~ — stale entry, contradicted by "Found and
       fixed: the stale-buddy badge never tripped..." above, which
       confirms this live on testb (2026-10-03). Removing as a duplicate.
-- [ ] Relay-bandwidth billing report (the ~30s "how many MB since last
-      report" cycle) — never specifically checked
+- [x] **Confirmed live end-to-end (2026-10-04)**, from real production
+      data rather than a staged test: `relay_usage_events` already had
+      real rows for testa and testb, both `synced_to_stripe = t`
+      (`id b2cbdc92…` / `a79ba8fe…`) — turns out testa and testb are
+      both already subscribed, which wasn't obvious going in (testb's
+      ~1GB events are almost certainly testb↔testc relay traffic; a
+      ~1GB and a 1MB event on testa's account are more surprising, since
+      testa↔testb should be going direct on the same host — worth a
+      look at *why* testa sees relay traffic at all, but not a blocker).
+      Checked testa's actual Stripe subscription page: the upcoming
+      invoice shows a real "Backup Buddies Relay Bandwidth" line item,
+      4,202 units (MB) at $0.00001953/unit = $0.08 — and
+      `$0.00001953 = $0.02/GB ÷ 1024`, exactly `RELAY_USD_PER_GB` from
+      `relay-billing.js`. Confirms all three pipeline stages for real:
+      `recordRelayUsage` writes the event, the sync job
+      (`jobs/sync-relay-usage.js`) reports it to Stripe's
+      `relay_bandwidth_mb` meter, and it aggregates onto the real
+      invoice at the correct rate. Last remaining question (not a
+      blocker): why does testa, which should be direct-connecting to
+      testb on the same host, have any relay traffic at all? Worth a
+      look if it recurs, since it suggests testa falls back to relay
+      under some condition (e.g. a container restart mid-cycle,
+      startup-time NAT/relay-mode race) that hasn't been isolated yet.
 
 ## Housekeeping (not bugs)
 

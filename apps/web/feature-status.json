@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-03",
+  "updated": "2026-10-04",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -36,6 +36,10 @@
     {
       "title": "Free tier",
       "description": "The first 50GB you pledge to buddies is free, no card required."
+    },
+    {
+      "title": "Relay bandwidth billing",
+      "description": "On a paid plan, relay usage (when a direct connection isn't possible) is metered and billed at $0.02/GB, shown as its own line item on your invoice — confirmed end-to-end against real billing."
     }
   ],
   "limitations": [
@@ -53,11 +57,6 @@
       "title": "Low-disk protection",
       "status": "in_progress",
       "description": "Your device is designed to refuse new incoming files once its own disk runs low, independent of pledge size — built, but not yet exercised against a real low-disk machine."
-    },
-    {
-      "title": "Relay bandwidth billing",
-      "status": "in_progress",
-      "description": "Relay usage is metered and reported on paid accounts; full end-to-end confirmation against billing is still being verified."
     },
     {
       "title": "Fixed backup interval, no file filtering",
