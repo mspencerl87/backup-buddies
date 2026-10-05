@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-04",
+  "updated": "2026-10-05",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -70,6 +70,11 @@
       "title": "One buddy per pledge",
       "status": "limitation",
       "description": "Each pledge is a 1:1 relationship with a single buddy — there's no way to share one backup folder across multiple buddies at once."
+    },
+    {
+      "title": "File names are visible to your buddy",
+      "status": "limitation",
+      "description": "File contents are encrypted, but your files are stored on your buddy's device under their names and folder paths, so your buddy can see those names and file sizes. Encrypting names as well is planned."
     }
   ]
 }

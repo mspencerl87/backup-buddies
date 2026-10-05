@@ -136,10 +136,13 @@
         </li>
         <li>
           <strong>Files are encrypted before they leave your machine.</strong>
-          Each file is encrypted client-side, then content-addressed with a
-          BLAKE3 hash. The hash becomes the file's identifier — your buddy's
-          device (and anything in between) only ever sees opaque ciphertext
-          and a hash, never plaintext.
+          Each file's contents are encrypted on your device with
+          <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a>,
+          using a key derived from your backup passphrase. The encrypted file
+          is sent under its path inside your backup folder, along with a
+          SHA-256 hash so both sides can verify it arrived intact. Your
+          buddy's device sees that path and the file's size, but never its
+          contents.
         </li>
         <li>
           <strong>Devices connect directly, peer-to-peer.</strong>
@@ -184,7 +187,7 @@
           <ul>
             <li>Your files' contents</li>
             <li>Your encryption keys</li>
-            <li>File names or folder structure (encrypted along with the content)</li>
+            <li>File names or folder structure (these never reach our servers)</li>
             <li>Anything your buddy's device stores on their disk</li>
           </ul>
         </div>
@@ -192,12 +195,25 @@
     </section>
 
     <section class="about-section">
+      <h2>What your buddy can see</h2>
+      <p class="muted">
+        Your buddy's device stores your files encrypted, so it can never read
+        what's inside them. It does see each file's name, its folder path
+        inside your backup folder, and its size, because that's how the files
+        are stored on their disk. If file names themselves are sensitive,
+        keep that in mind when choosing a buddy and what to back up.
+        Encrypting names as well is planned.
+      </p>
+    </section>
+
+    <section class="about-section">
       <h2>The technical stack</h2>
       <p class="muted">For anyone who wants the specifics:</p>
       <ul class="tech-list">
         <li><strong>Transport:</strong> <a href="https://github.com/n0-computer/iroh" target="_blank" rel="noopener">Iroh</a>, a QUIC-based peer-to-peer networking library with built-in NAT hole-punching and relay fallback.</li>
-        <li><strong>Content addressing:</strong> iroh-blobs, with BLAKE3 hashing — files are identified and verified by content hash, not filename.</li>
-        <li><strong>Encryption:</strong> performed entirely client-side before any data is hashed or transferred; your buddy and our relay only ever handle ciphertext.</li>
+        <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
+        <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file, verified on arrival. Every ~10 minutes your device also checks what your buddy actually holds against what it expects, and re-sends anything missing.</li>
+        <li><strong>File names:</strong> files are stored on your buddy's device under their path within your backup folder, so your buddy can see file and folder names and sizes (never contents). Encrypting names too is on the roadmap.</li>
         <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established — it's a blind forwarder, not a storage point.</li>
         <li><strong>Server:</strong> a small Node/Express API and Postgres database, holding only accounts, device identities (public node IDs, not keys), buddy pairings, and invite codes.</li>
       </ul>
