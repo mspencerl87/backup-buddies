@@ -856,6 +856,19 @@ async fn main() -> Result<()> {
             let mut last_reconcile: std::collections::HashMap<String, std::time::Instant> =
                 std::collections::HashMap::new();
             const RECONCILE_INTERVAL: Duration = Duration::from_secs(600); // 10 minutes
+
+            // Don't dial anyone until the relay connection is up (~3s
+            // after start). A connection opened before then has the direct
+            // LAN path as its only path; seen live, iroh then closes that
+            // path once the relay arrives ("failed closing path
+            // err=LastOpenPath") and the connection hangs ~45s and times
+            // out, failing the rest of the first cycle after every restart.
+            // Bounded, so a device that can't reach the relay (LAN-only)
+            // still starts backing up, just as before.
+            if tokio::time::timeout(Duration::from_secs(15), endpoint.online()).await.is_err() {
+                tracing::warn!("relay still not connected after 15s — starting backups anyway (direct connections only until it is)");
+            }
+
             loop {
                 match fetch_buddy_devices(&http, &config, &bandwidth_book).await {
                     Ok((true, _buddies, label)) => {
