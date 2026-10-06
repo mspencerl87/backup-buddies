@@ -268,7 +268,8 @@ stat every stored file. Unset, the client runs as root as before.
 - **Your files:** if `BACKUP_DIR` scans completely but comes back empty
   while the buddy holds files from it, the cycle fails with an explanation
   instead of sending a delete for every file. `ALLOW_EMPTY_BACKUP_DIR=true`
-  overrides it.
+  overrides it; remove it again afterwards (the client warns at startup
+  while it's set).
 - **Unreadable files or folders:** an unreadable file is reported as a
   failed file and the rest of the cycle carries on (it used to abort the
   whole cycle). An unreadable folder is reported and pauses *all*

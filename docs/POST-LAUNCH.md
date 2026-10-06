@@ -52,11 +52,13 @@ Last reviewed: 2026-10-04.
 - Marketplace UI details (stale criteria on private invites, size preselect
   from the dashboard link).
 - Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted).
-- Error messages show container paths (`/backup`) instead of host paths.
+- ~~Error messages show container paths (`/backup`) instead of host paths~~ —
+  client 0.7.3 uses `BACKUP_DIR_HOST` / `BUDDY_FILES_DIR_HOST` when set,
+  otherwise says to look in docker-compose.yml.
 - ~~A buddy card with one permanently-stuck file (e.g. over the pledge)
   shows a red "backup failed" pill~~ — done in client 0.7.0: amber
   "N file(s) don't fit" when every refusal is pledge/disk full.
-- Dashboard restores log nothing on success (only failures), which made a
-  "did it run?" question harder to answer — add an info line.
+- ~~Dashboard restores log nothing on success~~ — client 0.7.3 logs
+  every dashboard restore, success or failure.
 - Long-term: Syncthing-style dashboard tiers, auto-derived marketplace
   fields, helpdesk inbox.

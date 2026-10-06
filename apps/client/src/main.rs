@@ -117,6 +117,14 @@ impl Config {
                  lost or cracked (there's no \"forgot passphrase\" flow by design)"
             );
         }
+        // Meant for one restart after deliberately emptying the folder, but
+        // easy to leave on (seen on a test device), which silently disables
+        // the guard against an unmounted drive wiping the buddy's copy.
+        if backup::allow_empty_backup_dir() {
+            tracing::warn!(
+                "ALLOW_EMPTY_BACKUP_DIR is on: if the drive with your files isn't mounted, its empty                  folder will be mirrored to your buddy as \"everything deleted\". Remove it from .env                  once your deliberate cleanup has synced."
+            );
+        }
         let relay_url = std::env::var("RELAY_URL")
             .unwrap_or_else(|_| "https://relay.filegarden.net".to_string())
             .parse()
@@ -419,6 +427,25 @@ fn host_path_for_display(restore_dir: &Path) -> String {
         format!("{}/restored", var("DATA_DIR_HOST").unwrap_or_else(|| "./data".to_string()).trim_end_matches('/'))
     };
     host.trim_end_matches('/').to_string()
+}
+
+// The host folder behind one of the container's mounts (/backup,
+// /buddy-files), when .env names it — env_file passes *_DIR_HOST through,
+// same as RESTORE_DIR_HOST above. The setup page's newer compose file puts
+// host paths in docker-compose.yml instead, which we can't see; then this
+// is None. Outside Docker the path is already the real one.
+pub fn host_dir(dir: &Path, host_var: &str) -> Option<String> {
+    if !Path::new("/.dockerenv").exists() {
+        return Some(dir.display().to_string());
+    }
+    std::env::var(host_var).ok().map(|s| s.trim().trim_end_matches('/').to_string()).filter(|s| !s.is_empty())
+}
+
+/// `host_dir`, or the container path plus where to find the real one —
+/// for messages telling someone which folder to go and look at.
+pub fn host_dir_label(dir: &Path, host_var: &str) -> String {
+    host_dir(dir, host_var)
+        .unwrap_or_else(|| format!("{} (the folder mapped to it in docker-compose.yml)", dir.display()))
 }
 
 // See Config::check_buddy_files_identity.

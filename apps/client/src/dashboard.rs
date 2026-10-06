@@ -476,7 +476,10 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
         let (sent_files, sent_bytes) = crate::index::get().sent_summary(&node_id).unwrap_or((0, 0));
 
         let sender_dir = state.buddy_files_dir.join(&node_id);
-        let received = receive::list_sender_files(&sender_dir).await;
+        // Live files only: the listing also has deleted-but-recoverable
+        // entries (kept under .versions/ for restores), which made this
+        // read one more than the sender's own count and the reconciliation.
+        let received: Vec<_> = receive::list_sender_files(&sender_dir).await.into_iter().filter(|f| !f.deleted).collect();
         let received_files = received.len();
         let received_total_bytes: u64 = received.iter().map(|f| f.size).sum();
 
@@ -528,9 +531,13 @@ async fn status_handler(State(state): State<AppState>) -> Json<StatusResponse> {
     Json(StatusResponse {
         node_id: state.node_id.clone(),
         label,
-        backup_dir: state.backup_dir.as_ref().map(|p| p.display().to_string()),
+        backup_dir: state
+            .backup_dir
+            .as_ref()
+            .map(|p| crate::host_dir(p, "BACKUP_DIR_HOST").unwrap_or_else(|| p.display().to_string())),
         data_dir: state.data_dir.display().to_string(),
-        buddy_files_dir: state.buddy_files_dir.display().to_string(),
+        buddy_files_dir: crate::host_dir(&state.buddy_files_dir, "BUDDY_FILES_DIR_HOST")
+            .unwrap_or_else(|| state.buddy_files_dir.display().to_string()),
         restore_dir: state.restore_dir_display.clone(),
         version: env!("CARGO_PKG_VERSION"),
         latest_version,
@@ -656,6 +663,14 @@ async fn restore_version_handler(
     .await
     {
         Ok(stats) => {
+            tracing::info!(
+                buddy = %node_id_str,
+                files = stats.files_restored,
+                bytes = stats.bytes_restored,
+                duration_ms = stats.duration_ms,
+                dir = %format!("{}/{}", state.restore_dir_display, node_id_str),
+                "restore from the dashboard complete"
+            );
             if let Some(connection) = &stats.connection {
                 crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
                     .await;
@@ -669,7 +684,10 @@ async fn restore_version_handler(
             })
             .into_response()
         }
-        Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
+        Err(err) => {
+            tracing::warn!(buddy = %node_id_str, error = %err, "restore from the dashboard failed");
+            (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response()
+        }
     }
 }
 
@@ -748,6 +766,14 @@ async fn restore_handler(
 
     match result {
         Ok(stats) => {
+            tracing::info!(
+                buddy = %node_id_str,
+                files = stats.files_restored,
+                bytes = stats.bytes_restored,
+                duration_ms = stats.duration_ms,
+                dir = %format!("{}/{}", state.restore_dir_display, node_id_str),
+                "restore from the dashboard complete"
+            );
             if let Some(connection) = &stats.connection {
                 crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
                     .await;
@@ -761,7 +787,10 @@ async fn restore_handler(
             })
             .into_response()
         }
-        Err(err) => (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response(),
+        Err(err) => {
+            tracing::warn!(buddy = %node_id_str, error = %err, "restore from the dashboard failed");
+            (StatusCode::BAD_GATEWAY, format!("restore failed: {err}")).into_response()
+        }
     }
 }
 

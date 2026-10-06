@@ -227,8 +227,8 @@ pub async fn run_backup_cycle(
         anyhow::bail!(
             "your backup folder ({}) looks empty, but {} file(s) from it are backed up with this buddy — \
              not deleting them all. Is the drive with your files mounted? If you really did delete \
-             everything, set ALLOW_EMPTY_BACKUP_DIR=true in .env and restart.",
-            backup_dir.display(),
+             everything, set ALLOW_EMPTY_BACKUP_DIR=true in .env and restart (then remove it again).",
+            crate::host_dir_label(backup_dir, "BACKUP_DIR_HOST"),
             sent.len()
         );
     }
@@ -757,7 +757,7 @@ fn deletions_to_mirror<'a>(
 /// ALLOW_EMPTY_BACKUP_DIR=true lets a cycle mirror "everything was deleted"
 /// to the buddy. Off by default — see the empty-folder guard in
 /// run_backup_cycle.
-fn allow_empty_backup_dir() -> bool {
+pub fn allow_empty_backup_dir() -> bool {
     matches!(
         std::env::var("ALLOW_EMPTY_BACKUP_DIR").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
         Ok("1" | "true" | "yes")

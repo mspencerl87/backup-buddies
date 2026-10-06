@@ -1049,8 +1049,9 @@ before each push (`cargo test`, 14 tests, plus clippy).
   - [x] Live: relay up 3 s after start, first cycle right after it, no
         drop or timeout through 2 min 45 s (the drop used to come at
         ~49 s).
-- Not explained yet: testb counts 905 files from testa, testa counts 904
-  sent (reconciliation matches 904). Harmless so far.
+- testb counted 905 files from testa, testa 904: testb's card also
+  counted a deleted-but-recoverable file (kept in `.versions/`). Fixed in
+  0.7.3: the card counts live files only.
 
 ## Needs testing — client 0.6.1: pledge usage corrected from disk (2026-10-04)
 
