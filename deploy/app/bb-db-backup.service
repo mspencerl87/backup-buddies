@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up the Backup Buddies database to Backblaze B2
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/backup-buddies/deploy/app/backup-db.sh

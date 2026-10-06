@@ -950,3 +950,65 @@ docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
 `git pull` on app-1 if nothing else triggered a deploy (section 7). Without
 the version bump, nobody is told to update. See apps/client/README.md,
 "Updating, and releasing a new version".
+
+## 26. Nightly off-site database backup (Backblaze B2)
+
+Linode Backups snapshot app-1's disk, but they're deleted along with the
+Linode and depend on the same account. Since client 0.7.0 the account id
+is part of every user's encryption key, so losing the database would also
+stop users restoring onto a new machine. `deploy/app/backup-db.sh` dumps
+Postgres every night and uploads it to B2.
+
+**One-time setup in Backblaze:**
+1. Create a **private** bucket (e.g. `backup-buddies-db`). Under its
+   settings, turn on **Default Encryption** (SSE-B2).
+2. **Lifecycle Settings → custom rule:** prefix `postgres/`, hide files
+   **30** days after upload, delete **1** day after hiding. That's the
+   retention; the server never deletes anything itself.
+3. **App Keys → Add a New Application Key:** allow access to that bucket
+   only, type **Read and Write**, then note the keyID and applicationKey
+   (shown once). Read-and-write includes delete; if you create keys with
+   the B2 CLI instead, `listBuckets,listFiles,writeFiles` is enough.
+
+**One-time setup on app-1:**
+```bash
+cd /opt/backup-buddies && git pull
+cd deploy/app
+# Add to .env: B2_KEY_ID, B2_APP_KEY, B2_BUCKET (and BACKUP_PING_URL below)
+chmod +x backup-db.sh
+./backup-db.sh          # first run by hand: should print "uploaded backup_buddies-….sql.gz"
+cp bb-db-backup.service bb-db-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now bb-db-backup.timer
+systemctl list-timers bb-db-backup.timer   # shows the next run (03:30 UTC)
+```
+
+**Alert if a night is missed:** in Uptime Kuma, add a monitor of type
+**Push**, heartbeat interval 90000 seconds (25 h). Copy its push URL into
+`BACKUP_PING_URL` in `.env`. The script pings it only after a successful
+upload, so a failed or skipped backup raises an alert the next day.
+
+**Logs:** `journalctl -u bb-db-backup.service -n 50`.
+
+**Restore** (test this once now, into a scratch database, so it's known to
+work before it's needed):
+```bash
+cd /opt/backup-buddies/deploy/app
+# List backups and download one (fill in the key, id and bucket):
+docker run --rm -e RCLONE_CONFIG_B2_TYPE=b2 -e RCLONE_CONFIG_B2_ACCOUNT=<keyID> \
+  -e RCLONE_CONFIG_B2_KEY=<applicationKey> rclone/rclone:1.68.2 ls b2:<bucket>/postgres/
+docker run --rm -v /tmp:/out -e RCLONE_CONFIG_B2_TYPE=b2 -e RCLONE_CONFIG_B2_ACCOUNT=<keyID> \
+  -e RCLONE_CONFIG_B2_KEY=<applicationKey> rclone/rclone:1.68.2 \
+  copy b2:<bucket>/postgres/<file>.sql.gz /out/
+
+# Test restore into a scratch database, check it, drop it:
+docker compose exec -T postgres createdb -U backup_buddies restore_test
+gunzip -c /tmp/<file>.sql.gz | docker compose exec -T postgres psql -q -U backup_buddies -d restore_test
+docker compose exec -T postgres psql -U backup_buddies -d restore_test -c "SELECT count(*) FROM accounts;"
+docker compose exec -T postgres dropdb -U backup_buddies restore_test
+```
+
+For a real restore, stop the API (`docker compose stop api`), drop and
+recreate `backup_buddies` the same way, load the dump into it, then
+`docker compose start api`. The dump includes every migration applied at
+the time, so nothing needs re-running.

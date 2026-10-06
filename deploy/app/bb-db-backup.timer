@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly Backup Buddies database backup
+
+[Timer]
+# 03:30 UTC, a quiet hour. Persistent: if the server was off at that time,
+# run as soon as it's back.
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
