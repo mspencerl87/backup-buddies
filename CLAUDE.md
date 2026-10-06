@@ -54,8 +54,22 @@ wsl -e bash -lc 'cd /mnt/c/Users/sleblanc/Desktop/backup-buddies/apps/client && 
 
 Expect one existing clippy warning in `update_check.rs`. Run git from
 Windows, not WSL (line endings make WSL's git see every file as changed).
-There's no Node on this PC; the dashboard's JS lives in a Rust string in
-`dashboard.rs`, so the compiler doesn't check it. Read JS changes carefully.
+
+## Checking API and web changes (this Windows PC)
+
+Node 20 (same as the API image) is in WSL at `~/.local/node`. A syntax
+error in any API route stops the whole API from starting, so before pushing:
+
+```bash
+wsl -e bash -lc 'rm -rf ~/bb-api && cp -r /mnt/c/Users/sleblanc/Desktop/backup-buddies/apps/api ~/bb-api && cd ~/bb-api && npm ci --silent && for f in $(find src -name "*.js"); do node --check $f; done'
+```
+
+For new SQL, run it against PGlite (in-process Postgres: `npm i --no-save
+@electric-sql/pglite` in `~/bb-api`) with `db/init.sql` (minus its
+`CREATE EXTENSION` line) and every migration applied, by pointing
+`pool.query` at it and calling the route handler. For page scripts, pull
+the `<script>` out and `node --check` it; the client dashboard's JS lives
+in a Rust string in `dashboard.rs`, so the compiler doesn't check it either.
 
 ## Things that are easy to get wrong
 
