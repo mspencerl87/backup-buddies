@@ -5,9 +5,10 @@
 //! *every* file, so a folder of 100,000 photos cost ~40 hours of CPU before
 //! sending a byte, and restoring it cost the same again. Now the slow
 //! passphrase step runs once at startup to derive a long-term X25519 key;
-//! every file is encrypted to that key in microseconds. The passphrase alone
-//! still recovers everything (the derivation is deterministic), and files
-//! encrypted the old way still decrypt: decryption tries both identities.
+//! every file is encrypted to that key in microseconds. The passphrase (plus
+//! a device token on the same account, for the salt) still recovers
+//! everything, since the derivation is deterministic, and files encrypted by
+//! older clients still decrypt: decryption tries every key they used.
 //!
 //! Everything here streams in bounded chunks, so memory use doesn't depend
 //! on file size.
@@ -29,37 +30,53 @@ const AGE_TAG: u64 = 16;
 pub const PIPE_CHUNK: usize = 256 * 1024;
 const PIPE_DEPTH: usize = 8;
 
-// The key derivation. Fixed parameters and salt, so the same passphrase
-// always produces the same key on any machine — that's what lets a rebuilt
-// device restore with nothing but the passphrase. log_n=18, r=8 is scrypt's
-// recommended interactive strength (256 MiB of RAM, ~1s, once at startup).
-// Trade-off: with a fixed salt, an attacker holding ciphertext could
-// precompute guesses across all users rather than per file, so passphrase
-// strength matters (the client warns below 12 characters). Moving to a
-// per-account salt is on the launch checklist as later hardening.
+// The key derivation. log_n=18, r=8 is scrypt's recommended interactive
+// strength (256 MiB of RAM, ~1s, once at startup). The salt is the account
+// id, so every device on an account derives the same key from the same
+// passphrase (a rebuilt device restores with the passphrase and a device
+// token on the same account), while no two accounts share a key: an
+// attacker holding ciphertext has to guess passphrases one account at a
+// time, rather than precompute one table of guesses that works against
+// everyone.
 const KDF_LOG_N: u8 = 18;
 const KDF_R: u32 = 8;
 const KDF_P: u32 = 1;
-const KDF_SALT: &[u8] = b"backup-buddies/file-key/v1";
+const KDF_SALT_PREFIX: &str = "backup-buddies/file-key/v2/";
+/// The fixed salt clients 0.5.0–0.6.x used for everyone. Kept only to
+/// decrypt files those versions sent.
+const KDF_SALT_V1: &[u8] = b"backup-buddies/file-key/v1";
 
 pub struct Keys {
     recipient: age::x25519::Recipient,
     identity: age::x25519::Identity,
-    /// For files encrypted before this change (client ≤0.4.x).
+    /// For files encrypted with the fixed salt (clients 0.5.0–0.6.x).
+    v1: LazyIdentity,
+    /// For files encrypted straight to the passphrase (client ≤0.4.x).
     legacy: age::scrypt::Identity,
 }
 
 static KEYS: OnceLock<Keys> = OnceLock::new();
 
-/// Derives the file key from the passphrase. Call once at startup, before
-/// anything is encrypted or decrypted; later calls are no-ops.
-pub fn init(passphrase: &SecretString) -> Result<()> {
+/// Derives the file key from the passphrase and account id. Call once at
+/// startup, before anything is encrypted or decrypted; later calls are
+/// no-ops.
+pub fn init(passphrase: &SecretString, account_id: &str) -> Result<()> {
     if KEYS.get().is_some() {
         return Ok(());
     }
+    let salt = format!("{KDF_SALT_PREFIX}{account_id}");
+    let identity = derive_identity(passphrase, salt.as_bytes())?;
+    let recipient = identity.to_public();
+    let v1 = LazyIdentity { passphrase: passphrase.clone(), key: OnceLock::new() };
+    let legacy = age::scrypt::Identity::new(passphrase.clone());
+    let _ = KEYS.set(Keys { recipient, identity, v1, legacy });
+    Ok(())
+}
+
+fn derive_identity(passphrase: &SecretString, salt: &[u8]) -> Result<age::x25519::Identity> {
     let mut secret = [0u8; 32];
     let params = scrypt::Params::new(KDF_LOG_N, KDF_R, KDF_P, 32).expect("valid scrypt params");
-    scrypt::scrypt(passphrase.expose_secret().as_bytes(), KDF_SALT, &params, &mut secret)
+    scrypt::scrypt(passphrase.expose_secret().as_bytes(), salt, &params, &mut secret)
         .expect("32-byte output is valid");
 
     // age only builds an X25519 identity from its text form, so encode the
@@ -67,12 +84,33 @@ pub fn init(passphrase: &SecretString) -> Result<()> {
     let hrp = bech32::Hrp::parse("age-secret-key-").expect("valid HRP");
     let encoded = bech32::encode::<bech32::Bech32>(hrp, &secret).expect("encodable key");
     secret.fill(0);
-    let identity: age::x25519::Identity =
-        encoded.to_uppercase().parse().map_err(|e: &str| anyhow::anyhow!("deriving file key: {e}"))?;
-    let recipient = identity.to_public();
-    let legacy = age::scrypt::Identity::new(passphrase.clone());
-    let _ = KEYS.set(Keys { recipient, identity, legacy });
-    Ok(())
+    encoded.to_uppercase().parse().map_err(|e: &str| anyhow::anyhow!("deriving file key: {e}"))
+}
+
+/// The fixed-salt (v1) key, derived the first time a file isn't for the
+/// current key. Decryption tries the current key first, so this costs
+/// nothing (no second ~1s scrypt at startup) unless an old file is
+/// actually being restored.
+struct LazyIdentity {
+    passphrase: SecretString,
+    key: OnceLock<age::x25519::Identity>,
+}
+
+impl age::Identity for LazyIdentity {
+    fn unwrap_stanza(
+        &self,
+        stanza: &age_core::format::Stanza,
+    ) -> Option<Result<age_core::format::FileKey, age::DecryptError>> {
+        // Only X25519 stanzas can be for this key; don't derive it for
+        // anything else (e.g. a ≤0.4 scrypt file).
+        if stanza.tag != "X25519" {
+            return None;
+        }
+        let key = self
+            .key
+            .get_or_init(|| derive_identity(&self.passphrase, KDF_SALT_V1).expect("v1 key derivation"));
+        age::Identity::unwrap_stanza(key, stanza)
+    }
 }
 
 pub fn keys() -> &'static Keys {
@@ -199,7 +237,7 @@ pub fn decrypt_to_file(
         let input = io::BufReader::with_capacity(PIPE_CHUNK, ChannelReader { rx, cur: Vec::new(), pos: 0 });
         let decryptor = age::Decryptor::new_buffered(input).context("not a valid encrypted file")?;
         let k = keys();
-        let identities: [&dyn age::Identity; 2] = [&k.identity, &k.legacy];
+        let identities: [&dyn age::Identity; 3] = [&k.identity, &k.v1, &k.legacy];
         let mut reader = decryptor
             .decrypt(identities.into_iter())
             .context("failed to decrypt file — wrong passphrase?")?;
@@ -275,9 +313,10 @@ pub(crate) mod tests {
     // The key lives in a process-wide OnceLock and tests share a process,
     // so every test (here and in e2e_tests) uses this same passphrase.
     pub(crate) const TEST_PASSPHRASE: &str = "an end to end test passphrase";
+    pub(crate) const TEST_ACCOUNT: &str = "00000000-0000-4000-8000-000000000001";
 
     fn setup() {
-        init(&SecretString::from(TEST_PASSPHRASE.to_string())).unwrap();
+        init(&SecretString::from(TEST_PASSPHRASE.to_string()), TEST_ACCOUNT).unwrap();
     }
 
     // The size announced before sending must equal what's actually sent,
@@ -305,18 +344,24 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    fn independent_key(salt: &[u8]) -> age::x25519::Identity {
+        let mut secret = [0u8; 32];
+        let params = scrypt::Params::new(KDF_LOG_N, KDF_R, KDF_P, 32).unwrap();
+        scrypt::scrypt(TEST_PASSPHRASE.as_bytes(), salt, &params, &mut secret).unwrap();
+        let hrp = bech32::Hrp::parse("age-secret-key-").unwrap();
+        bech32::encode::<bech32::Bech32>(hrp, &secret).unwrap().to_uppercase().parse().unwrap()
+    }
+
     #[test]
-    fn same_passphrase_gives_same_key() {
+    fn same_passphrase_and_account_gives_same_key() {
         setup();
         let a = age::encrypt(&keys().recipient, b"hello").unwrap();
         // Re-derive independently and decrypt with that.
-        let mut secret = [0u8; 32];
-        let params = scrypt::Params::new(KDF_LOG_N, KDF_R, KDF_P, 32).unwrap();
-        scrypt::scrypt(TEST_PASSPHRASE.as_bytes(), KDF_SALT, &params, &mut secret).unwrap();
-        let hrp = bech32::Hrp::parse("age-secret-key-").unwrap();
-        let id: age::x25519::Identity =
-            bech32::encode::<bech32::Bech32>(hrp, &secret).unwrap().to_uppercase().parse().unwrap();
+        let id = independent_key(format!("{KDF_SALT_PREFIX}{TEST_ACCOUNT}").as_bytes());
         assert_eq!(age::decrypt(&id, &a).unwrap(), b"hello");
+        // Same passphrase on another account: a different key.
+        let other = independent_key(format!("{KDF_SALT_PREFIX}00000000-0000-4000-8000-000000000002").as_bytes());
+        assert!(age::decrypt(&other, &a).is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -342,6 +387,15 @@ pub(crate) mod tests {
         assert_eq!(total, announced);
         assert_eq!(dec.await.unwrap().unwrap(), data.len() as u64);
         assert_eq!(std::fs::read(dir.join("out.bin")).unwrap(), data);
+
+        // A file encrypted with the fixed v1 salt (client 0.5–0.6) still
+        // restores.
+        let v1 = age::encrypt(&independent_key(KDF_SALT_V1).to_public(), b"v1 file").unwrap();
+        let (tx, dec) = decrypt_to_file(dir.join("v1.bin"));
+        tx.send(Ok(v1)).await.unwrap();
+        drop(tx);
+        dec.await.unwrap().unwrap();
+        assert_eq!(std::fs::read(dir.join("v1.bin")).unwrap(), b"v1 file");
 
         // A file encrypted the old way (scrypt, client ≤0.4) still restores.
         let legacy = age::encrypt(

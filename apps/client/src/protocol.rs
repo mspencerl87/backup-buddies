@@ -133,6 +133,9 @@ impl PutRejectReason {
 
     /// Short, customer-facing explanation — shown on the dashboard next to
     /// a file that's failing to sync, not just logged.
+    /// The dashboard's DONT_FIT_REASONS matches the PledgeExceeded and
+    /// DiskFull texts to show a calm "don't fit" instead of "failed", so
+    /// change them in both places.
     pub fn message(self) -> &'static str {
         match self {
             Self::PledgeExceeded => "your buddy's pledge to you is full",

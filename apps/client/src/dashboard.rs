@@ -1761,16 +1761,33 @@ browseRestoreAll.addEventListener("click", async () => {
   }
 });
 
+// Must match protocol.rs's RejectReason::message() for PledgeExceeded and
+// DiskFull.
+const DONT_FIT_REASONS = [
+  "your buddy's pledge to you is full",
+  "your buddy doesn't have enough real disk space left",
+];
+
 function renderBuddy(b) {
   const pct = b.pledged_bytes > 0 ? Math.min(100, (b.received_bytes_counted / b.pledged_bytes) * 100) : 0;
   const cycle = b.last_cycle;
+  // Files the buddy refused only because they don't fit (pledge or disk
+  // full) aren't a broken backup: everything else synced, and nothing will
+  // change until the pledge grows or the files go. Shown as a calm amber
+  // "don't fit" instead of a red "backup failed".
+  const onlyDontFit =
+    cycle && !cycle.ok && cycle.kind === "backup" && cycle.files_failed > 0 &&
+    cycle.failed_files && cycle.failed_files.length > 0 &&
+    cycle.failed_files.every((f) => DONT_FIT_REASONS.includes(f.reason));
   let cyclePill = '<span class="pill pill-pending">no cycle yet</span>';
   let cycleDetail = "";
   if (cycle) {
     cyclePill = cycle.ok
       ? '<span class="pill pill-ok">' + cycle.kind + ' ok</span>'
-      : '<span class="pill pill-err">' + cycle.kind + ' failed</span>';
-    cycleDetail = cycle.detail + " · " + fmtAgo(cycle.at);
+      : onlyDontFit
+        ? '<span class="pill pill-warn">' + cycle.files_failed + " file(s) don't fit</span>"
+        : '<span class="pill pill-err">' + cycle.kind + ' failed</span>';
+    cycleDetail = (onlyDontFit ? "everything else is backed up" : cycle.detail) + " · " + fmtAgo(cycle.at);
     if (cycle.kind === "backup" && cycle.ok) {
       cycleDetail = "sent " + (cycle.files_sent ?? 0) + ", deleted " + (cycle.files_deleted ?? 0) + " · " + fmtAgo(cycle.at);
       const rate = fmtRate(cycle.bytes_sent, cycle.duration_ms);
@@ -1780,7 +1797,7 @@ function renderBuddy(b) {
       }
       if (cycle.connection) cycleDetail += " · " + fmtConnection(cycle.connection);
     }
-    if (cycle.consecutive_failures > 1) {
+    if (cycle.consecutive_failures > 1 && !onlyDontFit) {
       cycleDetail += " · " + cycle.consecutive_failures + " cycles in a row now";
     }
   }
@@ -1810,10 +1827,18 @@ function renderBuddy(b) {
     stalePill = ' <span class="pill pill-err">stale — last synced ' + lastOkText + '</span>';
   }
   let failedLine = "";
-  if (cycle && cycle.files_failed > 0) {
+  if (onlyDontFit) {
+    const sample = cycle.failed_files.map((f) => escapeHtml(f.path)).join(", ");
+    const more = cycle.files_failed > cycle.failed_files.length ? ", …" : "";
+    failedLine =
+      '<div class="muted" style="margin-top: 0.4rem;">' +
+      cycle.files_failed + " file(s) don't fit in what this buddy has room for. " +
+      "They'll go as soon as there's space: ask your buddy for a bigger pledge, or remove files from your backup folder." +
+      '<details style="margin-top: 0.2rem;"><summary>Which files</summary>' + sample + more + "</details></div>";
+  } else if (cycle && cycle.files_failed > 0) {
     const sample =
       cycle.failed_files && cycle.failed_files.length
-        ? ": " + cycle.failed_files.map((f) => f.path + (f.reason ? " (" + f.reason + ")" : "")).join(", ")
+        ? ": " + cycle.failed_files.map((f) => escapeHtml(f.path) + (f.reason ? " (" + f.reason + ")" : "")).join(", ")
         : "";
     failedLine =
       '<div class="muted" style="color: var(--danger); margin-top: 0.4rem;">⚠ ' +

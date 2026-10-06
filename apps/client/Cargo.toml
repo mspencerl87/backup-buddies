@@ -1,6 +1,6 @@
 [package]
 name = "backup-buddies-client"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 # Pinned to iroh 1.3.0 to match deploy/relay's iroh-relay:v1.3.0 image —
 # client and relay protocol versions should move together. Verified to
@@ -11,6 +11,9 @@ edition = "2024"
 
 [dependencies]
 age = "0.12.1"
+# Only for the Stanza/FileKey types in crypto.rs's lazily derived old key
+# (age doesn't re-export them). Same version age itself uses.
+age-core = "0.12"
 anyhow = "1.0.104"
 # Local status/restore dashboard (dashboard.rs) — plain axum, no templating
 # engine; the one page it serves is a small embedded HTML/JS string.

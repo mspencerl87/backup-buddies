@@ -28,12 +28,11 @@ Last reviewed: 2026-10-04.
       inotify/FSEvents) on top of the periodic scan, so new files go out in
       seconds without frequent full scans. Doesn't work reliably on NFS/SMB
       mounts, so the periodic scan stays as the fallback.
-- [ ] **Per-account salt for the encryption key.** 0.5.0 derives the file
-      key from the passphrase with a fixed salt, so "passphrase alone
-      restores everything" keeps working. Trade-off: an attacker holding
-      ciphertext can attack weak passphrases across all users at once.
-      Hardening: a random per-account salt (e.g. stored with the account
-      and on each buddy), keeping passphrase-only recovery.
+- [x] **Per-account salt for the encryption key — done in client 0.7.0
+      (2026-10-06).** The key is now salted with the account id (fetched
+      from `GET /devices/me`, cached in DATA_DIR), so each account's key
+      has to be attacked separately. Files sent by 0.5–0.6 (fixed salt)
+      still restore; they're only re-encrypted if they change.
 - [ ] **Files encrypted before 0.5.0 restore at the old speed** (~1.5 s
       each — scrypt per file). Fine for now; optionally re-encrypt them in
       the background later.

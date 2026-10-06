@@ -513,9 +513,23 @@ async fn main() -> Result<()> {
     // DATA_DIR, BUDDY_FILES_DIR and RESTORE_DIR were all created (and
     // proven writable) by validate() above.
 
+    // The User-Agent carries this build's version (Cargo.toml) on every API
+    // call, so the server can record which version each device runs and the
+    // web dashboard can tell the user when an update is available (see
+    // apps/api/src/routes/devices.js). Bump Cargo.toml's version whenever
+    // you ship a client change people should update to.
+    let http = reqwest::Client::builder()
+        .user_agent(concat!("backup-buddies-client/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .context("failed to build HTTP client")?;
+
+    // The encryption key is salted with this device's account id (see
+    // crypto.rs), so look that up first.
+    let account_id = load_account_id(&http, &config).await?;
+
     // Derive the file-encryption key from the passphrase (~1s, once) and
     // open the on-disk index (importing old JSON manifests on first run).
-    crypto::init(&config.passphrase).context("failed to derive encryption key from BACKUP_PASSPHRASE")?;
+    crypto::init(&config.passphrase, &account_id).context("failed to derive encryption key from BACKUP_PASSPHRASE")?;
     index::open(&config.data_dir).context("failed to open the index in DATA_DIR")?;
     receive::clear_incoming(&config.buddy_files_dir).await;
 
@@ -663,16 +677,6 @@ async fn main() -> Result<()> {
         endpoint.close().await;
         return Ok(());
     }
-
-    // The User-Agent carries this build's version (Cargo.toml) on every API
-    // call, so the server can record which version each device runs and the
-    // web dashboard can tell the user when an update is available (see
-    // apps/api/src/routes/devices.js). Bump Cargo.toml's version whenever
-    // you ship a client change people should update to.
-    let http = reqwest::Client::builder()
-        .user_agent(concat!("backup-buddies-client/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .context("failed to build HTTP client")?;
 
     register_node_id(&http, &config, &endpoint_id).await?;
 
@@ -1226,6 +1230,59 @@ async fn load_or_generate_secret_key(data_dir: &Path) -> Result<SecretKey> {
     tokio::fs::write(&key_path, key.to_bytes()).await?;
     tracing::info!("generated a new, persistent Iroh identity for this device");
     Ok(key)
+}
+
+#[derive(Deserialize)]
+struct DeviceSelf {
+    account_id: String,
+}
+
+// Which account this device belongs to, from the API (devices.js's GET
+// /devices/me). Saved in DATA_DIR, so a device that starts while the API is
+// unreachable still derives the right encryption key.
+async fn load_account_id(http: &reqwest::Client, config: &Config) -> Result<String> {
+    let saved_path = config.data_dir.join("account-id");
+    let saved = tokio::fs::read_to_string(&saved_path)
+        .await
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let fetched = async {
+        let resp: DeviceSelf = http
+            .get(format!("{}/devices/me", config.api_url))
+            .bearer_auth(&config.device_token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        anyhow::Ok(resp.account_id)
+    }
+    .await;
+
+    match (fetched, saved) {
+        (Ok(id), saved) => {
+            if saved.as_deref() != Some(id.as_str()) {
+                if let Some(old) = &saved {
+                    tracing::warn!(
+                        old_account = %old,
+                        new_account = %id,
+                        "this device's token now belongs to a different account; files it sends from now on are encrypted with that account's key"
+                    );
+                }
+                tokio::fs::write(&saved_path, &id).await.context("failed to save the account id in DATA_DIR")?;
+            }
+            Ok(id)
+        }
+        (Err(err), Some(id)) => {
+            tracing::warn!(error = %err, "couldn't reach the API to confirm this device's account; using the saved one");
+            Ok(id)
+        }
+        (Err(err), None) => Err(err.context(
+            "failed to look up this device's account from the API (needed once, to derive the encryption key) — check API_URL and DEVICE_TOKEN",
+        )),
+    }
 }
 
 async fn register_node_id(http: &reqwest::Client, config: &Config, endpoint_id: &EndpointId) -> Result<()> {

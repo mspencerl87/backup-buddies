@@ -81,7 +81,7 @@ async fn e2e_backup_restore_versions_and_compat() {
         std::fs::create_dir_all(d).unwrap();
     }
 
-    crate::crypto::init(&SecretString::from(PASS.to_string())).unwrap();
+    crate::crypto::init(&SecretString::from(PASS.to_string()), crate::crypto::tests::TEST_ACCOUNT).unwrap();
     crate::index::open(&config_a).unwrap();
     let relay: RelayUrl = "https://relay.invalid".parse().unwrap();
 

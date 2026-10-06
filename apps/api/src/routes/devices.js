@@ -111,6 +111,13 @@ devicesRouter.put('/devices/me/node-id', requireDeviceAuth, async (req, res) => 
   res.json({ ok: true });
 });
 
+// Who this device is. The client salts its file-encryption key with
+// account_id (apps/client/src/crypto.rs), so every device on one account
+// derives the same key from the same passphrase, and no two accounts do.
+devicesRouter.get('/devices/me', requireDeviceAuth, (req, res) => {
+  res.json({ device_id: req.device.id, account_id: req.device.account_id, label: req.device.label });
+});
+
 // Tells the client who its buddies' devices are, so it knows which Iroh
 // node ids to dial. Doubles as a lightweight heartbeat (updates
 // last_seen_at) even when called with no new node id to report.

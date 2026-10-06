@@ -119,7 +119,9 @@ under `<their node id>/` inside your `RESTORE_DIR_HOST` folder on the host
 (pass a container path as a third argument to send them elsewhere),
 decrypted with the `BACKUP_PASSPHRASE` in your `.env` — so this only
 works from a machine configured with the *same* passphrase that encrypted
-the data in the first place. This is a one-shot operation: the client
+the data in the first place, and a `DEVICE_TOKEN` from the same account
+(the key is salted with the account id, so a different account's token
+derives a different key). This is a one-shot operation: the client
 restores everything it's offered and exits, rather than running as part
 of the normal daemon loop.
 
