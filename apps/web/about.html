@@ -166,6 +166,14 @@
           until you need to restore it. They cannot decrypt it — they don't
           have your key.
         </li>
+        <li>
+          <strong>If your machine dies, you restore from your buddy.</strong>
+          Set up the client on a new machine, add it as a device on the
+          <em>same account</em>, and use the same backup passphrase. Your key
+          is rebuilt from the passphrase plus your account, so that's all it
+          takes. Lose the passphrase, and what your buddy holds can't be
+          decrypted by anyone, including us.
+        </li>
       </ol>
     </section>
 
@@ -211,7 +219,7 @@
       <p class="muted">For anyone who wants the specifics:</p>
       <ul class="tech-list">
         <li><strong>Transport:</strong> <a href="https://github.com/n0-computer/iroh" target="_blank" rel="noopener">Iroh</a>, a QUIC-based peer-to-peer networking library with built-in NAT hole-punching and relay fallback.</li>
-        <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
+        <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt, salted with your account ID. The same passphrase gives a different key on every account, so nobody holding encrypted files can test one list of guessed passphrases against every user at once. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
         <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file, verified on arrival. Every ~10 minutes your device also checks what your buddy actually holds against what it expects, and re-sends anything missing.</li>
         <li><strong>File names:</strong> files are stored on your buddy's device under their path within your backup folder, so your buddy can see file and folder names and sizes (never contents). Encrypting names too is on the roadmap.</li>
         <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established — it's a blind forwarder, not a storage point.</li>

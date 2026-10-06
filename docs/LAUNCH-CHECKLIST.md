@@ -6,7 +6,9 @@ short list; `TESTING-CHECKLIST.md` has the full testing history and
 here as they're done, and add new launch blockers here rather than only in
 a chat.
 
-Last reviewed: 2026-10-04.
+Last reviewed: 2026-10-06. **Launched** — everything below is done except
+the Stripe test, which only matters once people pay. New work goes in
+`POST-LAUNCH.md`.
 
 ## Must fix before launch
 
@@ -46,14 +48,14 @@ Last reviewed: 2026-10-04.
 
 - [x] Password reset last checks — confirmed working by Spencer
       (2026-10-04).
-- [ ] Client 0.5.0 live checks (`TESTING-CHECKLIST.md`, "Client 0.5.0"):
-      a folder with many small files backs up and restores; testa's log
-      shows the old JSON manifest imported once (`*.json.migrated`).
+- [x] Client 0.5.0 live checks (`TESTING-CHECKLIST.md`, "Client 0.5.0"):
+      a folder with many small files backs up and restores — confirmed by
+      Spencer with ~970 photos (reported 2026-10-06). The one-time JSON manifest
+      import wasn't separately checked in the log.
 - [x] Progress during long backups — built in client 0.5.1 (2026-10-04):
       the buddy card shows a live bar while a cycle runs (checking files,
       then sending: files and bytes done, speed, time left, current file).
-  - [ ] Confirm live: update testa/testb to 0.5.1, drop a big file into
-        testa's backup folder, watch the bar move on testa's dashboard.
+  - [x] Confirmed live by Spencer (reported 2026-10-06).
 
 ## Only if people can pay at launch
 

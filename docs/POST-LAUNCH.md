@@ -53,9 +53,9 @@ Last reviewed: 2026-10-04.
   from the dashboard link).
 - Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted).
 - Error messages show container paths (`/backup`) instead of host paths.
-- A buddy card with one permanently-stuck file (e.g. over the pledge) shows
-  a red "backup failed" pill even though everything else synced — a softer
-  "1 file can't sync" warning style would read better.
+- ~~A buddy card with one permanently-stuck file (e.g. over the pledge)
+  shows a red "backup failed" pill~~ — done in client 0.7.0: amber
+  "N file(s) don't fit" when every refusal is pledge/disk full.
 - Dashboard restores log nothing on success (only failures), which made a
   "did it run?" question harder to answer — add an info line.
 - Long-term: Syncthing-style dashboard tiers, auto-derived marketplace

@@ -1019,6 +1019,39 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Verified — clients 0.7.0–0.7.2 (2026-10-06)
+
+All three live on testa/testb (both on 0.7.2), built and tested in WSL
+before each push (`cargo test`, 14 tests, plus clippy).
+
+- **0.7.0, per-account encryption salt.** Key is now
+  scrypt(passphrase, `backup-buddies/file-key/v2/<account id>`); the
+  account id comes from the new `GET /devices/me` and is cached in
+  `config/account-id`.
+  - [x] Unit: same passphrase + account → same key; different account →
+        different key; files from 0.5–0.6 (fixed salt) and ≤0.4 (scrypt
+        per file) still decrypt.
+  - [x] Live: testa started, `config/account-id` holds the account UUID;
+        3 photos sent under the old key restored fine from testb.
+  - Files already on a buddy stay under the old key until they change.
+- **0.7.0, "don't fit" badge.** A buddy that refuses files only for
+  pledge/disk full shows an amber "N file(s) don't fit" with the list
+  collapsed, instead of a red "backup failed" and a cycle counter.
+  - [x] Live: testa's card shows "66 file(s) don't fit".
+- **0.7.1, refusals logged once.** Was 66 multi-line warnings every 30 s.
+  - [x] Unit: `each_refusal_is_logged_once_until_it_changes`.
+  - [x] Live: one line per refused file at startup, then one summary
+        line per cycle.
+- **0.7.2, wait for the relay before the first cycle.** After every
+  restart the first cycle's LAN connection hung ~45 s and timed out
+  (`failed closing path err=LastOpenPath`), because it was opened before
+  the relay was connected.
+  - [x] Live: relay up 3 s after start, first cycle right after it, no
+        drop or timeout through 2 min 45 s (the drop used to come at
+        ~49 s).
+- Not explained yet: testb counts 905 files from testa, testa counts 904
+  sent (reconciliation matches 904). Harmless so far.
+
 ## Needs testing — client 0.6.1: pledge usage corrected from disk (2026-10-04)
 
 Found live: testa → testb, 500 photos refused "your buddy's pledge to you is
@@ -1032,10 +1065,9 @@ Also: files the buddy refuses no longer count as sent in the progress bar
 (they were inflating the speed, e.g. "216.8 MB/s, ~4s left").
 
 - [x] Unit test (`usage_from_disk_counts_only_live_files`); all tests pass.
-- [ ] Live: update testb to 0.6.1, check its log for the correction line,
-      then testa's next cycle sends the photos up to the 5 GB pledge
-      (5.6 GB of photos won't all fit, so a few refusals at the end are
-      expected).
+- [x] Live (2026-10-06): with both on 0.6.1, testa sent 904 photos
+      (5.0 GB) and the remaining 66 were refused as pledge full, as
+      expected.
 
 ## Needs testing — client 0.5.1: backup progress on the dashboard (2026-10-04)
 
@@ -1052,7 +1084,7 @@ clock, not the browser's.
 - [x] Unit/e2e: tests pass; a cycle leaves no progress entry behind.
 - [x] Rendered with mock data (sending / checking / idle) — screenshot
       looked right.
-- [ ] Live: update testa/testb to 0.5.1, put a multi-GB file in testa's
+- [x] Confirmed live by Spencer (reported 2026-10-06). Was: update testa/testb to 0.5.1, put a multi-GB file in testa's
       backup folder, watch testa's dashboard: "checking files…" while it's
       hashed, then "backing up…" with the bar, speed and time left; card
       returns to the normal "backup ok" line when done.
@@ -1107,7 +1139,8 @@ Tested 2026-10-04:
 - [x] Real release binary startup: key derivation + index ≈ 0.8 s; an
       existing JSON manifest imported and renamed; leftover `.incoming`
       upload cleared, real files kept; SCAN_INTERVAL_SECS=2 rejected
-- [ ] Live on testa/testb: `docker compose pull && docker compose up -d`
+- [x] Many small files confirmed live by Spencer (reported 2026-10-06); manifest
+      import line not separately checked. Was: `docker compose pull && docker compose up -d`
       on both → logs show "imported old manifest into the index" (testa),
       no files re-sent (card stays at its file count, no new "backup
       cycle complete" with sends); `hello.txt`/`hello-b.txt` restore
