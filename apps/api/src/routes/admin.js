@@ -61,6 +61,102 @@ adminRouter.get('/admin/accounts', async (req, res) => {
   res.json({ accounts });
 });
 
+// Service-wide totals for the stats panel at the top of the admin page.
+// Computed at most twice a day (cached in memory for STATS_TTL_MS) since
+// nobody needs these to the minute; ?refresh=1 recomputes on demand. All
+// plain aggregates, a few milliseconds each at this size. Relay figures are
+// what clients report on their 30s poll (see lib/relay-billing.js), not
+// counted by the relay itself, and nothing is recorded while an account is
+// paused. Stored bytes aren't here: only clients know them.
+const STATS_TTL_MS = 12 * 60 * 60 * 1000;
+let statsCache = null;
+
+async function computeStats() {
+  const [relay, accounts, devices, versions, pairings, listings] = await Promise.all([
+    // "Paid" = accounts subscribed right now, so last month's usage from
+    // someone who has since cancelled counts as free here.
+    pool.query(
+      `SELECT COALESCE(SUM(e.bytes_relayed), 0) AS all_time,
+              COALESCE(SUM(e.bytes_relayed) FILTER (WHERE e.occurred_at >= m.start), 0) AS this_month,
+              COALESCE(SUM(e.bytes_relayed) FILTER (
+                WHERE e.occurred_at >= m.start AND a.stripe_subscription_id IS NOT NULL
+              ), 0) AS this_month_paid,
+              COUNT(DISTINCT e.account_id) FILTER (WHERE e.occurred_at >= m.start) AS accounts_this_month
+         FROM relay_usage_events e
+         LEFT JOIN accounts a ON a.id = e.account_id
+        CROSS JOIN (SELECT date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS start) m`,
+    ),
+    pool.query(
+      `SELECT count(*) AS total,
+              count(*) FILTER (WHERE email_verified) AS verified,
+              count(*) FILTER (WHERE stripe_subscription_id IS NOT NULL) AS subscribed,
+              count(*) FILTER (WHERE relay_status <> 'active') AS paused,
+              count(*) FILTER (WHERE created_at >= now() - interval '7 days') AS new_7d,
+              count(*) FILTER (WHERE created_at >= now() - interval '30 days') AS new_30d
+         FROM accounts`,
+    ),
+    pool.query(
+      `SELECT count(*) AS total,
+              count(*) FILTER (WHERE last_seen_at >= now() - interval '5 minutes') AS online_now,
+              count(*) FILTER (WHERE last_seen_at >= now() - interval '24 hours') AS seen_24h
+         FROM devices`,
+    ),
+    pool.query(
+      `SELECT COALESCE(client_version, 'unknown') AS version, count(*) AS devices
+         FROM devices
+        GROUP BY 1
+        ORDER BY 2 DESC, 1 DESC`,
+    ),
+    pool.query(
+      `SELECT count(*) AS active, COALESCE(SUM(pledged_bytes), 0) AS pledged_bytes
+         FROM buddy_pairings
+        WHERE status = 'active'`,
+    ),
+    pool.query(
+      `SELECT count(*) AS open_count FROM invites WHERE is_public AND status = 'pending'`,
+    ),
+  ]);
+
+  const n = (v) => Number(v);
+  const r = relay.rows[0];
+  const a = accounts.rows[0];
+  const d = devices.rows[0];
+  const p = pairings.rows[0];
+  return {
+    computed_at: new Date().toISOString(),
+    relay: {
+      all_time_bytes: n(r.all_time),
+      this_month_bytes: n(r.this_month),
+      this_month_paid_bytes: n(r.this_month_paid),
+      accounts_this_month: n(r.accounts_this_month),
+    },
+    accounts: {
+      total: n(a.total),
+      verified: n(a.verified),
+      subscribed: n(a.subscribed),
+      paused: n(a.paused),
+      new_7d: n(a.new_7d),
+      new_30d: n(a.new_30d),
+    },
+    devices: {
+      total: n(d.total),
+      online_now: n(d.online_now),
+      seen_24h: n(d.seen_24h),
+      versions: versions.rows.map((row) => ({ version: row.version, devices: n(row.devices) })),
+    },
+    pairings: { active: n(p.active), pledged_bytes: n(p.pledged_bytes) },
+    marketplace: { open_listings: n(listings.rows[0].open_count) },
+  };
+}
+
+adminRouter.get('/admin/stats', async (req, res) => {
+  const fresh = statsCache && Date.now() - Date.parse(statsCache.computed_at) < STATS_TTL_MS;
+  if (!fresh || req.query.refresh === '1') {
+    statsCache = await computeStats();
+  }
+  res.json(statsCache);
+});
+
 // One account's full detail — everything you'd need on a support ticket:
 // its devices (to spot a stuck/misregistered one), its buddy pairings
 // (with the other side's email, not just an id), and the invites it has

@@ -27,6 +27,21 @@
     </div>
 
     <div id="admin-content" style="display:none">
+      <div class="card" id="stats-card">
+        <div class="stats-head">
+          <h2>Service stats</h2>
+          <span class="muted" id="stats-asof"></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="stats-refresh">Refresh</button>
+        </div>
+        <p class="error" id="stats-error"></p>
+        <div class="stats-grid" id="stats-grid"></div>
+        <p class="muted stats-note">
+          Updated at most twice a day; Refresh recalculates now. Relay figures are
+          what devices report (paused accounts aren't counted). Storage is what's
+          pledged between buddies, not what's actually stored — only devices know that.
+        </p>
+      </div>
+
       <h2>All accounts</h2>
       <div class="admin-controls" id="accounts-controls" style="display:none">
         <input type="text" id="accounts-search" placeholder="Search by email or username…">
@@ -405,6 +420,57 @@
         });
       });
     }
+
+    // Bytes with a unit that fits — the stats panel spans MB to TB.
+    function formatSize(bytes) {
+      const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+      let v = Number(bytes) || 0;
+      let i = 0;
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+    }
+
+    async function loadStats(refresh = false) {
+      const grid = document.getElementById('stats-grid');
+      const errorEl = document.getElementById('stats-error');
+      const asOf = document.getElementById('stats-asof');
+      const btn = document.getElementById('stats-refresh');
+      errorEl.textContent = '';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/admin/stats' + (refresh ? '?refresh=1' : ''), { credentials: 'same-origin' });
+        const s = await parseJsonResponse(res);
+        if (!res.ok) {
+          errorEl.textContent = s.error || 'Could not load stats.';
+          return;
+        }
+        const tile = (label, value, sub) =>
+          `<div class="stat-tile"><div class="stat-label">${escapeHtml(label)}</div>` +
+          `<div class="stat-value">${escapeHtml(value)}</div>` +
+          (sub ? `<div class="stat-sub">${escapeHtml(sub)}</div>` : '') + '</div>';
+        const versions = s.devices.versions.map((v) => `${v.version}: ${v.devices}`).join(' · ') || 'none';
+        grid.innerHTML = [
+          tile('Relay this month', formatSize(s.relay.this_month_bytes),
+            `${formatSize(s.relay.this_month_paid_bytes)} from paid accounts · ${s.relay.accounts_this_month} account(s) used it`),
+          tile('Relay all time', formatSize(s.relay.all_time_bytes)),
+          tile('Storage pledged', formatSize(s.pairings.pledged_bytes),
+            `across ${s.pairings.active} active pairing(s)`),
+          tile('Accounts', String(s.accounts.total),
+            `${s.accounts.verified} verified · ${s.accounts.subscribed} subscribed · ${s.accounts.paused} paused · +${s.accounts.new_7d} in 7 days, +${s.accounts.new_30d} in 30`),
+          tile('Devices', String(s.devices.total),
+            `${s.devices.online_now} online now · ${s.devices.seen_24h} seen in 24h`),
+          tile('Client versions', versions),
+          tile('Open marketplace listings', String(s.marketplace.open_listings)),
+        ].join('');
+        asOf.textContent = 'as of ' + formatDate(s.computed_at);
+      } catch (err) {
+        errorEl.textContent = err.message || 'Could not load stats.';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    document.getElementById('stats-refresh').addEventListener('click', () => loadStats(true));
 
     async function loadAccounts() {
       const controls = document.getElementById('accounts-controls');
@@ -1189,6 +1255,7 @@
       }
 
       document.getElementById('admin-content').style.display = 'block';
+      loadStats();
       await loadAccounts();
     }
 
