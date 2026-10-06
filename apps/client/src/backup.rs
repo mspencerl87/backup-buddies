@@ -162,6 +162,23 @@ impl Drop for ProgressTracker {
     }
 }
 
+/// Files a buddy has refused, and why, so each refusal is logged once
+/// rather than every cycle. Keyed by (buddy, path); forgotten when the file
+/// goes through, so a later refusal is logged again. In memory only: a
+/// restart logs each refusal once more, which is a useful reminder.
+static REFUSALS: std::sync::LazyLock<Mutex<HashMap<(String, String), &'static str>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Records a refusal; true if it's new (or the reason changed) and so
+/// worth logging.
+fn note_refusal(buddy: &str, path: &str, reason: &'static str) -> bool {
+    REFUSALS.lock().unwrap().insert((buddy.to_string(), path.to_string()), reason) != Some(reason)
+}
+
+fn forget_refusal(buddy: &str, path: &str) {
+    REFUSALS.lock().unwrap().remove(&(buddy.to_string(), path.to_string()));
+}
+
 /// Pulls a `PutRejectReason` out of a `put_one_file` error, when the
 /// failure was the buddy's own STOP_SENDING telling us why — walks the
 /// anyhow error's source chain since `write_all`'s `WriteError::Stopped`
@@ -351,6 +368,7 @@ pub async fn run_backup_cycle(
         match result {
             Ok(ciphertext_size) => {
                 put_count += 1;
+                forget_refusal(&buddy_node_id, rel_path);
                 // Recorded per file as it lands (one row, not a rewrite of
                 // everything), so a cycle interrupted partway only re-sends
                 // the file that was in flight.
@@ -364,7 +382,19 @@ pub async fn run_backup_cycle(
             }
             Err(err) => {
                 let reason = reject_reason_from_err(&err);
-                tracing::warn!(path = %rel_path, ?err, reason, "failed to back up file — will retry next cycle");
+                match reason {
+                    // The buddy refused it (pledge full, too large, …): the
+                    // same answer comes back every cycle until something
+                    // changes, so say it once rather than every 30s.
+                    Some(reason) => {
+                        if note_refusal(&buddy_node_id, rel_path, reason) {
+                            tracing::warn!(path = %rel_path, reason, "buddy refused this file — will keep retrying quietly");
+                        } else {
+                            tracing::debug!(path = %rel_path, reason, "buddy refused this file again");
+                        }
+                    }
+                    None => tracing::warn!(path = %rel_path, ?err, "failed to back up file — will retry next cycle"),
+                }
                 files_failed += 1;
                 if failed_paths.len() < MAX_FAILED_PATHS_SHOWN {
                     failed_paths.push(FailedFile { path: rel_path.clone(), reason });
@@ -737,6 +767,16 @@ fn allow_empty_backup_dir() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_refusal_is_logged_once_until_it_changes() {
+        let (buddy, path) = ("refusal-test-buddy", "a/b.jpg");
+        assert!(note_refusal(buddy, path, "full"));
+        assert!(!note_refusal(buddy, path, "full"));
+        assert!(note_refusal(buddy, path, "too big"));
+        forget_refusal(buddy, path);
+        assert!(note_refusal(buddy, path, "too big"));
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("bb-test-{name}-{}", std::process::id()));
