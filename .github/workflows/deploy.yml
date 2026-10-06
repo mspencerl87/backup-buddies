@@ -42,7 +42,7 @@ jobs:
           # than block the deploy — an unstamped version only risks a
           # stale cached stylesheet, not a broken site.
           git push origin HEAD:main || (git pull --rebase origin main && git push origin HEAD:main) \
-            || echo "::warning::Couldn't push stamped asset versions — run scripts/stamp-asset-versions.mjs and commit by hand.
+            || echo "::warning::Couldn't push stamped asset versions — run scripts/stamp-asset-versions.mjs and commit by hand."
 
   build-and-push:
     needs: stamp-asset-versions
