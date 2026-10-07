@@ -180,8 +180,9 @@ releases: the source repo is private, and an `install.sh` build has no
 should get**, and update `Cargo.lock` in the same commit. Running
 `cargo build` once does that, or edit the `backup-buddies-client` entry by
 hand. The Dockerfile builds with `--locked`, so a stale lock fails the build.
-Without a bump, nobody is told to update. Remember that app-1 only serves
-new client code after a `git pull` there (see docs/DEPLOY.md).
+Without a bump, nobody is told to update. (For the hosted service, the
+version devices compare against is served from app.filegarden.net, which
+is updated as part of its own deploy.)
 
 ## Folders
 
@@ -314,11 +315,11 @@ Occasionally a long transfer between buddies on the same local network
 loses its connection partway through, usually minutes in, logged as
 `failed closing path err=LastOpenPath` and then `connection lost` /
 `timed out`. The next cycle carries on: big files resume (above), smaller
-ones are re-sent. Seen so far only with both clients on the same machine
-(testa/testb), where every interface address, including the Docker bridge
+ones are re-sent. Seen so far only with two test clients on the same
+machine, where every interface address, including the Docker bridge
 (`docker0`, 172.17.0.1), is offered as a route; the cause isn't confirmed.
 If you run two clients on one host and see it often, that's the likely
-reason. Details and next steps: docs/POST-LAUNCH.md.
+reason.
 
 ## Large folders and large files (0.5.0)
 
@@ -518,3 +519,22 @@ own internal "already reported" marker — so a failed poll re-reports the
 same bytes next cycle instead of losing them, and nothing is ever reported
 twice. Free-tier accounts are never billed for relay bandwidth, no matter
 how much of it they use.
+
+## License
+
+The Backup Buddies client is free software, licensed under the
+[GNU General Public License v3.0](LICENSE) (GPL-3.0-only). You can read,
+build, change and share it; if you distribute a modified version, it must
+stay under the same license with its source available.
+
+This covers the client only — the program that runs on your machine, reads
+your files and encrypts them. The hosted service it talks to (accounts,
+pairing, the relay at relay.filegarden.net) is run separately at
+filegarden.net.
+
+**Building from source:** `cargo build --release` (Rust 1.85+, edition
+2024), or `docker build .` in this folder. `install.sh` builds this same
+code from source; the published image is built from it too.
+
+**Security issues:** please report privately to support@filegarden.net
+rather than in a public issue.

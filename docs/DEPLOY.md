@@ -1012,3 +1012,25 @@ For a real restore, stop the API (`docker compose stop api`), drop and
 recreate `backup_buddies` the same way, load the dump into it, then
 `docker compose start api`. The dump includes every migration applied at
 the time, so nothing needs re-running.
+
+## 27. Open-source client mirror (GPL-3.0)
+
+The client (`apps/client`) is GPL-3.0-only and published at
+`github.com/mspencerl87/backup-buddies-client`, with its own history
+starting from one initial commit. Development stays in this private repo;
+`.github/workflows/sync-public-client.yml` copies `apps/client` over on
+every change to it, as one commit with the same subject. Nothing else from
+this repo is published.
+
+**One-time setup (deploy key):**
+```bash
+ssh-keygen -t ed25519 -N "" -C "sync from private repo" -f bb-public-sync
+gh repo deploy-key add bb-public-sync.pub --repo mspencerl87/backup-buddies-client --allow-write --title "sync from private repo"
+gh secret set PUBLIC_CLIENT_DEPLOY_KEY --repo mspencerl87/backup-buddies < bb-public-sync
+rm bb-public-sync bb-public-sync.pub
+```
+Then run the workflow once (Actions → Sync client to public repo → Run
+workflow) to confirm it pushes.
+
+Before anything new lands in `apps/client`, remember it goes public: no
+secrets, test-device details or references to private docs there.

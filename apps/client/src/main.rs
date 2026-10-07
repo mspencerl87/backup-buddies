@@ -28,10 +28,6 @@ use serde::Deserialize;
 
 use receive::{PledgeBook, PledgeState};
 
-// How often the outbound loop below polls for buddies/pledges and runs a
-// backup cycle. Not yet configurable (see docs/TESTING-CHECKLIST.md's
-// "Rescan interval/toggle display" item) — a single named constant so the
-// dashboard can at least show the real value instead of a hardcoded guess,
 // Default for SCAN_INTERVAL_SECS: how often each buddy's backup cycle runs.
 // A cycle on an unchanged folder is now a metadata-only listing (see
 // backup.rs), so this is cheap even for large folders; people with very

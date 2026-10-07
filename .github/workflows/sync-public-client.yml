@@ -1,0 +1,49 @@
+name: Sync client to public repo
+
+# The client (apps/client) is open source under GPL-3.0 and published at
+# github.com/mspencerl87/backup-buddies-client. Development stays here; this
+# copies apps/client over whenever it changes, as one commit with the same
+# subject. Nothing else from this (private) repo goes public.
+#
+# Needs a deploy key with write access on the public repo, its private half
+# stored here as the PUBLIC_CLIENT_DEPLOY_KEY secret (docs/DEPLOY.md
+# section 27).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/client/**"
+      - ".github/workflows/sync-public-client.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-public-client
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: private
+      - uses: actions/checkout@v4
+        with:
+          repository: mspencerl87/backup-buddies-client
+          ssh-key: ${{ secrets.PUBLIC_CLIENT_DEPLOY_KEY }}
+          path: public
+      - name: Copy apps/client and push
+        run: |
+          set -euo pipefail
+          rsync -a --delete --exclude .git private/apps/client/ public/
+          subject=$(git -C private log -1 --format=%s -- apps/client)
+          cd public
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Public repo already up to date."
+            exit 0
+          fi
+          git commit -m "$subject"
+          git push
