@@ -474,6 +474,13 @@ dated by when they were uploaded, so the first run after updating re-dates
 them to that day instead of removing them. Buddies on older clients keep
 copies indefinitely.
 
+**Delete permanently (0.9.0).** To free the space sooner, a deleted file
+in **Browse files** has a **Delete permanently** button. After a
+confirmation, the buddy removes the copies it's keeping of that file, so it
+can no longer be restored. Only files you've already deleted have the
+button, and the buddy refuses if the file still exists there, so it can't
+remove a current file. Both buddies need 0.9.0.
+
 ## Buddy health — staleness and per-file failures
 
 The pill next to each buddy's name shows the *last* cycle's result, but a

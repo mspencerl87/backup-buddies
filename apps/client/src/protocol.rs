@@ -10,7 +10,8 @@ pub const ALPN: &[u8] = b"backup-buddies/sync/1";
 /// This client's protocol version, reported in HelloResponse.
 /// 2 (client 0.5.0): PutStream.
 /// 3 (client 0.8.0): PutResumable.
-pub const PROTOCOL_VERSION: u32 = 3;
+/// 4 (client 0.9.0): PurgeDeleted.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Largest file sent to a buddy whose client predates PutStream: the old
 /// Put needs the whole file's hash before sending, so the encrypted file is
@@ -99,6 +100,11 @@ pub enum SyncRequest {
     /// "Send me backup slot N of this file." Same response shape as Get:
     /// a SyncAck, then on success the raw ciphertext bytes.
     GetVersion { path: String, version: u32 },
+    /// "Remove the backup copies of this file I deleted, for good" — the
+    /// dashboard's "Delete permanently". Answered with a SyncAck. Refused
+    /// while a live file still exists at `path`, so it can only ever take
+    /// away copies of something the sender already deleted.
+    PurgeDeleted { path: String },
 }
 
 /// Why a Put was rejected *before* its body was ever read (see

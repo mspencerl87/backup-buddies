@@ -958,7 +958,7 @@ async fn put_one_file(
 /// Asks the buddy which protocol version it speaks. A client older than
 /// 0.5.0 can't parse the question and drops the stream, which reads as an
 /// error here — that *is* the answer (version 1).
-async fn buddy_protocol_version(conn: &iroh::endpoint::Connection) -> u32 {
+pub(crate) async fn buddy_protocol_version(conn: &iroh::endpoint::Connection) -> u32 {
     let ask = async {
         let (mut send, mut recv) = conn.open_bi().await?;
         protocol::write_frame(&mut send, &SyncRequest::Hello).await?;

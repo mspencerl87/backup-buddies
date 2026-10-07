@@ -1019,6 +1019,24 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.9.0: Delete permanently (2026-10-07)
+
+Browse files → a deleted file → **Delete permanently** → confirmation
+pop-up → the buddy removes that file's backup copies (protocol v4
+PurgeDeleted; refused while a live file exists). Also in 0.9.0: file
+names in Browse files are HTML-escaped (they come from the buddy's list,
+so a hostile buddy could have injected script into the local dashboard),
+and the 0.8.3 retention-marker fix.
+
+- [x] e2e: a deleted photo's copies removed and gone from the list; the
+      request refused for a live file, which stays.
+- [ ] Live (both on 0.9.0): on testa's Browse files for testb, click
+      Delete permanently on the deleted ISO → pop-up → OK → it disappears;
+      testb's log shows "permanently removed backup copies", and
+      `testa`'s folder in testb's `.versions/` no longer has the .v1 file.
+- [ ] Live: with testb still on 0.8.x, the button reports that the buddy
+      needs to update.
+
 ## Needs testing — client 0.8.2: backup copies kept 30 days (2026-10-07)
 
 Copies of replaced/deleted files (`<sender>/.versions/`) are stamped with

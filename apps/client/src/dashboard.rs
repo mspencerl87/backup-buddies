@@ -408,6 +408,7 @@ pub async fn run(
         .route("/api/restore/:node_id", post(restore_handler))
         .route("/api/buddies/:node_id/restore-progress", get(restore_progress_handler))
         .route("/api/restore-version/:node_id", post(restore_version_handler))
+        .route("/api/buddies/:node_id/purge", post(purge_handler))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
@@ -623,6 +624,29 @@ async fn versions_handler(
         Err(err) => {
             (StatusCode::BAD_GATEWAY, format!("couldn't reach buddy for version history: {err}"))
                 .into_response()
+        }
+    }
+}
+
+/// "Delete permanently" on a deleted file in Browse files: asks the buddy
+/// to drop the backup copies it's keeping of it (restore::purge_deleted).
+async fn purge_handler(
+    State(state): State<AppState>,
+    AxumPath(node_id_str): AxumPath<String>,
+    Json(body): Json<PathQuery>,
+) -> impl IntoResponse {
+    let buddy_id: EndpointId = match node_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "not a valid Iroh node id" }))).into_response(),
+    };
+    match crate::restore::purge_deleted(&state.endpoint, &state.relay_url, buddy_id, &body.path).await {
+        Ok(()) => {
+            tracing::info!(buddy = %node_id_str, path = %body.path, "deleted a file's backup copies permanently");
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Err(err) => {
+            tracing::warn!(buddy = %node_id_str, path = %body.path, error = %err, "delete permanently failed");
+            (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": err.to_string() }))).into_response()
         }
     }
 }
@@ -1496,10 +1520,11 @@ function makeFileRow(item) {
   row.innerHTML = `
     ${item.deleted ? "" : '<input type="checkbox" class="file-pick">'}
     <span class="file-icon">${item.deleted ? "🗑️" : "📄"}</span>
-    <span class="path">${item.name}${item.deleted ? " (deleted — recoverable)" : ""}</span>
+    <span class="path">${escapeHtml(item.name)}${item.deleted ? " (deleted — recoverable)" : ""}</span>
     <span class="size">${fmtBytes(item.size)}</span>
     ${item.deleted ? "" : '<button class="secondary file-restore-one">Restore</button>'}
     <button class="secondary file-history-toggle">History</button>
+    ${item.deleted ? '<button class="secondary file-purge" style="color: var(--danger);">Delete permanently</button>' : ""}
   `;
   const history = document.createElement("div");
   history.className = "file-history";
@@ -1530,6 +1555,37 @@ function makeFileRow(item) {
       browseResult.style.color = "var(--danger)";
     } finally {
       btn.disabled = false;
+    }
+  });
+
+  row.querySelector(".file-purge")?.addEventListener("click", async (ev) => {
+    const ok = window.confirm(
+      "Delete permanently?\n\n" + item.path + "\n\n" +
+      "You deleted this file, but your buddy is keeping copies of it for 30 days in case you need it back. " +
+      "This removes those copies now, so it can't be restored afterwards. Nothing on this device is changed."
+    );
+    if (!ok) return;
+    const btn = ev.target;
+    btn.disabled = true;
+    browseResult.textContent = "Deleting " + item.path + " permanently…";
+    browseResult.style.color = "";
+    try {
+      const res = await fetch("/api/buddies/" + encodeURIComponent(browseState.nodeId) + "/purge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: item.path }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+      browseState.files = browseState.files.filter((f) => f.path !== item.path);
+      browseState.tree = buildFileTree(browseState.files);
+      renderBrowseView();
+      browseResult.textContent = "Deleted " + item.path + " permanently.";
+      browseResult.style.color = "var(--ok)";
+    } catch (err) {
+      btn.disabled = false;
+      browseResult.textContent = "Couldn't delete permanently: " + err.message;
+      browseResult.style.color = "var(--danger)";
     }
   });
 

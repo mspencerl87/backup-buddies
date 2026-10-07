@@ -11,7 +11,7 @@
     },
     {
       "title": "Restore, including file history",
-      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since changed or deleted (kept for 30 days) — with a live progress indicator while it runs."
+      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since changed or deleted (kept for 30 days, or remove a deleted file's copies sooner with “Delete permanently”) — with a live progress indicator while it runs."
     },
     {
       "title": "Pledge-based storage limits",

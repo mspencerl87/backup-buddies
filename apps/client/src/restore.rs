@@ -145,6 +145,28 @@ pub async fn restore_version(
     })
 }
 
+/// Asks a buddy to remove, for good, the backup copies it keeps of a file
+/// we deleted (dashboard's "Delete permanently"). Needs the buddy on 0.9.0+.
+pub async fn purge_deleted(
+    endpoint: &Endpoint,
+    relay_url: &RelayUrl,
+    buddy_id: EndpointId,
+    path: &str,
+) -> Result<()> {
+    let conn = connect(endpoint, relay_url, buddy_id).await?;
+    if crate::backup::buddy_protocol_version(&conn).await < 4 {
+        anyhow::bail!("your buddy's client is too old for this — it'll work once they update (the copies are removed after 30 days anyway)");
+    }
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    protocol::write_frame(&mut send, &SyncRequest::PurgeDeleted { path: path.to_string() }).await?;
+    send.finish().context("failed to finish send stream")?;
+    let ack: SyncAck = protocol::read_frame(&mut recv).await.context("failed to read buddy's reply")?;
+    if !ack.ok {
+        anyhow::bail!("{}", ack.error.unwrap_or_else(|| "buddy refused".to_string()));
+    }
+    Ok(())
+}
+
 async fn connect(
     endpoint: &Endpoint,
     relay_url: &RelayUrl,

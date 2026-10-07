@@ -30,10 +30,9 @@ Last reviewed: 2026-10-04.
       Copies of replaced or deleted files used to stay on the buddy forever
       without counting against the pledge. Now dated when kept and removed
       after VERSION_RETENTION_DAYS (30) by the buddy, at startup and daily.
-- [ ] **"Delete permanently" in Browse files** for deleted files' copies,
-      so space can be freed before the 30 days are up. Needs a protocol v4
-      request (buddy removes a path's copies only if there's no live file);
-      about half a day.
+- [x] **"Delete permanently" in Browse files — client 0.9.0
+      (2026-10-07).** Protocol v4 PurgeDeleted; the buddy removes a path's
+      copies only if there's no live file. Confirmation pop-up first.
 - [ ] **Dropped connections between buddies on a local network.** Seen
       twice (2026-10-06/07), testa and testb on the same host
       (`backupbuddy`, host networking, ports 11235/11236): minutes into a

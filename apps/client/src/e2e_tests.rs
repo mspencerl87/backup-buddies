@@ -263,6 +263,17 @@ async fn e2e_backup_restore_versions_and_compat() {
     crate::restore::restore_version(&ep_a, &relay, &pass, b_id, &restored, "hello.txt", 1).await.unwrap();
     assert_eq!(std::fs::read(restored.join("hello.txt.v1.bak")).unwrap(), old_hello);
 
+    // 7b. "Delete permanently": the deleted photo's copies go, and the
+    // buddy refuses for a file that still exists.
+    let listed = crate::restore::list_buddy_files(&ep_a, &relay, b_id).await.unwrap();
+    assert!(listed.iter().any(|f| f.deleted && f.path == "photos/2024/img 001.jpg"), "deleted photo listed as recoverable first");
+    crate::restore::purge_deleted(&ep_a, &relay, b_id, "photos/2024/img 001.jpg").await.unwrap();
+    let listed = crate::restore::list_buddy_files(&ep_a, &relay, b_id).await.unwrap();
+    assert!(!listed.iter().any(|f| f.path == "photos/2024/img 001.jpg"), "gone after delete permanently");
+    let refused = crate::restore::purge_deleted(&ep_a, &relay, b_id, "hello.txt").await;
+    assert!(refused.unwrap_err().to_string().contains("still exists"), "a live file is never purged");
+    assert!(stored.join("hello.txt").exists());
+
     // 8. A buddy that hasn't updated (v1 client) can still send to us.
     let lookup_c = MemoryLookup::new();
     lookup_c.add_endpoint_info(ep_b.addr());

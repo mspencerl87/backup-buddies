@@ -431,6 +431,9 @@ async fn handle_stream(
         SyncRequest::ListVersions { path } => {
             handle_list_versions(&mut send, &sender_dir, path).await?;
         }
+        SyncRequest::PurgeDeleted { path } => {
+            handle_purge_deleted(&mut send, &sender_dir, &remote_id, path).await?;
+        }
         SyncRequest::GetVersion { path, version } => {
             handle_get_version(&mut send, &sender_dir, path, version, &data_dir, &bandwidth_book, &quality)
                 .await?;
@@ -1229,6 +1232,48 @@ async fn handle_get(
         Some(sent) => crate::bandwidth::record(data_dir, bandwidth_book, quality, sent).await,
         None => protocol::write_frame(send, &SyncAck::err("not found")).await?,
     }
+    Ok(())
+}
+
+/// Removes every backup copy of a deleted file (dashboard's "Delete
+/// permanently"), then any folders under .versions/ that leaves empty.
+/// Refused while the live file exists: only copies of something the sender
+/// already deleted can go, never a file they still have.
+async fn handle_purge_deleted(
+    send: &mut iroh::endpoint::SendStream,
+    sender_dir: &Path,
+    remote_id: &str,
+    path: String,
+) -> Result<()> {
+    let Some(live) = safe_join(sender_dir, &path) else {
+        protocol::write_frame(send, &SyncAck::err("invalid path")).await?;
+        return Ok(());
+    };
+    if tokio::fs::metadata(&live).await.is_ok() {
+        protocol::write_frame(
+            send,
+            &SyncAck::err("this file still exists on your buddy's side — only deleted files can be removed permanently"),
+        )
+        .await?;
+        return Ok(());
+    }
+    let mut removed = 0u32;
+    for slot in 1..=MAX_BACKUP_VERSIONS {
+        let Some(vp) = version_path(sender_dir, &path, slot) else { break };
+        if tokio::fs::remove_file(&vp).await.is_ok() {
+            removed += 1;
+        }
+    }
+    // Tidy emptied folders up to (not including) .versions/ itself.
+    let versions = versions_root(sender_dir);
+    if let Some(mut dir) = version_path(sender_dir, &path, 1).and_then(|p| p.parent().map(Path::to_path_buf)) {
+        while dir != versions && dir.starts_with(&versions) && tokio::fs::remove_dir(&dir).await.is_ok() {
+            let Some(parent) = dir.parent() else { break };
+            dir = parent.to_path_buf();
+        }
+    }
+    tracing::info!(from = %remote_id, path = %path, copies = removed, "permanently removed backup copies at buddy's request");
+    protocol::write_frame(send, &SyncAck::ok()).await?;
     Ok(())
 }
 
