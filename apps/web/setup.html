@@ -91,7 +91,8 @@
       - BUDDY_FILES_DIR=/buddy-files
       - RESTORE_DIR=/restored
     volumes:
-      # The client's own config (identity key, bookkeeping). Small; keep it here.
+      # The client's own config (identity key, bookkeeping). Mostly small, but
+      # while a big file uploads it holds a temporary encrypted copy (see below).
       - ./config:/data
       # Your files to back up. Read-only (:ro): the client never writes here.
 <strong style="color:#4f8cff">      - /mnt/storage/my-files:/backup:ro</strong>
@@ -109,7 +110,7 @@
             <li><code>/backup</code> — <strong>your files</strong>. Mounted read-only; the client only reads them. If this machine should only <em>receive</em> (hold a buddy's files, back nothing up), use <code>./empty-backup-dir:/backup:ro</code> instead.</li>
             <li><code>/buddy-files</code> — <strong>buddy files</strong>: what your buddies store with you, encrypted (you can't read them). This is what uses the space you pledged. The client makes one subfolder per buddy inside it, so give it a folder of its own on a drive with room.</li>
             <li><code>/restored</code> — files you <strong>restore</strong> from a buddy. Separate from your files, so a restore never overwrites anything.</li>
-            <li><code>/data</code> — the client's own <strong>config</strong>: identity key and small bookkeeping files. Leave it as <code>./config</code>, next to <code>docker-compose.yml</code>.</li>
+            <li><code>/data</code> — the client's own <strong>config</strong>: identity key and small bookkeeping files. Leave it as <code>./config</code>, next to <code>docker-compose.yml</code>. While a file of 256 MB or more is uploading, it also holds a temporary encrypted copy of that file, which is what lets an interrupted upload carry on where it stopped; the copy is deleted once your buddy has it. So this folder's disk needs free space about the size of your largest file. If it doesn't have it (a small system disk, say), big files still back up, they just start over if interrupted.</li>
           </ul>
           <p class="muted" style="margin:0.5rem 0 0.25rem">Two common setups (just the three lines you change):</p>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code># A. One data drive, separate folders on it
