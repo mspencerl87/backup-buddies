@@ -250,7 +250,13 @@ pub struct DiskStatsResponse {
 pub struct VersionEntry {
     pub version: u32,
     pub size: u64,
+    /// When this became a backup copy (client 0.8.2+; before that, when it
+    /// was uploaded).
     pub modified_unix: Option<u64>,
+    /// When the buddy will remove it for good (VERSION_RETENTION_DAYS).
+    /// None from buddies older than 0.8.2, which keep copies forever.
+    #[serde(default)]
+    pub expires_unix: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

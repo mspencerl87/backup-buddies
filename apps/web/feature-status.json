@@ -3,7 +3,7 @@
   "available": [
     {
       "title": "Automatic encrypted backup",
-      "description": "Every ~30 seconds, new or changed files in your backup folder are encrypted on your device and sent to your buddy. Deleting a file locally removes it from your buddy's live copy too (older versions stay recoverable). Large files (up to 1 TB each) and large folders are handled in steady, low memory, and unchanged files are never re-read."
+      "description": "Every ~30 seconds, new or changed files in your backup folder are encrypted on your device and sent to your buddy. Deleting a file locally removes it from your buddy's live copy too (older versions stay recoverable for 30 days). Large files (up to 1 TB each) and large folders are handled in steady, low memory, and unchanged files are never re-read."
     },
     {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
@@ -11,7 +11,7 @@
     },
     {
       "title": "Restore, including file history",
-      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since deleted — with a live progress indicator while it runs."
+      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since changed or deleted (kept for 30 days) — with a live progress indicator while it runs."
     },
     {
       "title": "Pledge-based storage limits",

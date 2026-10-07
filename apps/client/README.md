@@ -462,9 +462,17 @@ keep.
 
 This is a backstop against corruption, a bad sync, or an accidental local
 delete, not full version history — only the live copy and its last 2
-predecessors are kept, and they still count toward your buddy's disk and
-(once a path has cycled through all its backup slots) their pledge to you,
-same as any other data you store with them.
+predecessors are kept.
+
+**Backup copies are kept for 30 days (0.8.2).** A copy is removed for good
+30 days after it was replaced or deleted (History shows "kept … ago,
+removed in N days"). The buddy storing it does this, at startup and once a
+day. Pledges only count live files, so without a limit, someone who backs
+up 100 GB, deletes it and backs up another 100 GB would leave 200 GB on
+their buddy's disk against a 100 GB pledge. Copies made before 0.8.2 are
+dated by when they were uploaded, so the first run after updating re-dates
+them to that day instead of removing them. Buddies on older clients keep
+copies indefinitely.
 
 ## Buddy health — staleness and per-file failures
 

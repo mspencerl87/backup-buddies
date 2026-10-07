@@ -1019,6 +1019,20 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.8.2: backup copies kept 30 days (2026-10-07)
+
+Copies of replaced/deleted files (`<sender>/.versions/`) are stamped with
+the time they were kept and removed after 30 days by the buddy storing
+them (startup + daily). First run per sender re-dates existing copies to
+now and writes `.versions/.retention-v1`, so nothing old vanishes on
+update. History shows "removed in N days" (from `expires_unix`).
+
+- [x] Unit: first run re-dates, later runs remove >30-day copies, keep
+      newer ones, remove emptied folders; a new copy is dated now.
+- [ ] Live: after updating testb, `.versions/.retention-v1` appears in
+      testa's folder on testb; delete a file on testa, open History on it
+      from testa's dashboard → "kept … ago, removed in 30 days".
+
 ## Needs testing — client 0.8.1: relay/direct accounting (2026-10-07)
 
 Found live during the 0.8.0 test: a backup cycle's bytes were all booked

@@ -100,8 +100,96 @@ async fn rotate_versions(sender_dir: &Path, rel_path: &str) {
         }
         if let Err(err) = tokio::fs::rename(&live, &slot1).await {
             tracing::warn!(path = %rel_path, ?err, "couldn't rotate previous version into a backup slot");
+            return;
         }
+        stamp_kept_now(&slot1).await;
     }
+}
+
+/// Backup copies (content a buddy replaced or deleted) are kept this long
+/// after they became copies, then removed for good. Pledges only count live
+/// files, so without a limit a buddy who backs up 100 GB, deletes it and
+/// backs up another 100 GB would leave 200 GB on this disk against a 100 GB
+/// pledge, growing for as long as the pairing lasts.
+pub const VERSION_RETENTION_DAYS: u64 = 30;
+
+/// Marks a sender's `.versions/` as dated by "when kept" (see
+/// expire_versions); its absence means copies still carry their upload
+/// time from before retention existed.
+const RETENTION_MARKER: &str = ".retention-v1";
+
+fn retention() -> std::time::Duration {
+    std::time::Duration::from_secs(VERSION_RETENTION_DAYS * 24 * 60 * 60)
+}
+
+/// Stamps a just-made backup copy with the current time: a rename keeps
+/// the file's original (upload) time, but retention and the dashboard's
+/// "kept … ago" count from when it became a copy.
+async fn stamp_kept_now(path: &Path) {
+    let path = path.to_path_buf();
+    let _ = tokio::task::spawn_blocking(move || {
+        std::fs::File::options().write(true).open(&path).and_then(|f| f.set_modified(std::time::SystemTime::now()))
+    })
+    .await;
+}
+
+/// When a backup copy will be removed, for the dashboard's History.
+fn expires_unix(kept: std::time::SystemTime) -> Option<u64> {
+    (kept + retention()).duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs())
+}
+
+/// Removes backup copies older than VERSION_RETENTION_DAYS from every
+/// sender's `.versions/`, and the folders that leaves empty. Returns how
+/// many files and bytes went. Run at startup and daily (main.rs).
+///
+/// Copies made before retention existed are dated by their upload time,
+/// not when they were kept, so the first run for a sender only re-dates
+/// them to now (and writes RETENTION_MARKER): a file deleted yesterday but
+/// uploaded months ago must not disappear the moment this ships.
+pub async fn expire_versions(buddy_files_dir: &Path) -> (usize, u64) {
+    let root = buddy_files_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut removed = (0usize, 0u64);
+        let Ok(senders) = std::fs::read_dir(&root) else { return removed };
+        let now = std::time::SystemTime::now();
+        for sender in senders.flatten() {
+            let versions = sender.path().join(".versions");
+            if !versions.is_dir() {
+                continue;
+            }
+            let marker = versions.join(RETENTION_MARKER);
+            let first_run = !marker.exists();
+            for entry in walkdir::WalkDir::new(&versions).contents_first(true).into_iter().flatten() {
+                let path = entry.path();
+                if entry.file_type().is_dir() {
+                    if path != versions {
+                        // Only succeeds when empty.
+                        let _ = std::fs::remove_dir(path);
+                    }
+                    continue;
+                }
+                if path == marker {
+                    continue;
+                }
+                if first_run {
+                    let _ = std::fs::File::options().write(true).open(path).and_then(|f| f.set_modified(now));
+                    continue;
+                }
+                let Ok(meta) = entry.metadata() else { continue };
+                let old = meta.modified().ok().and_then(|t| now.duration_since(t).ok()).is_some_and(|age| age > retention());
+                if old && std::fs::remove_file(path).is_ok() {
+                    removed.0 += 1;
+                    removed.1 += meta.len();
+                }
+            }
+            if first_run {
+                let _ = std::fs::write(&marker, b"backup copies here are dated by when they were kept\n");
+            }
+        }
+        removed
+    })
+    .await
+    .unwrap_or_default()
 }
 
 // How much of a buddy's pledge we've used (received_bytes) against how
@@ -1142,12 +1230,11 @@ async fn handle_list_versions(
     for slot in 1..=MAX_BACKUP_VERSIONS {
         let Some(vp) = version_path(sender_dir, &path, slot) else { break };
         if let Ok(meta) = tokio::fs::metadata(&vp).await {
-            let modified_unix = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
-            versions.push(VersionEntry { version: slot, size: meta.len(), modified_unix });
+            let kept = meta.modified().ok();
+            let modified_unix =
+                kept.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+            let expires_unix = kept.and_then(expires_unix);
+            versions.push(VersionEntry { version: slot, size: meta.len(), modified_unix, expires_unix });
         }
     }
     protocol::write_frame(send, &ListVersionsResponse { versions }).await?;
@@ -1178,6 +1265,64 @@ async fn handle_get_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_age_days(path: &Path, days: u64) {
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 60 * 60);
+        std::fs::File::options().write(true).open(path).unwrap().set_modified(t).unwrap();
+    }
+
+    fn age_secs(path: &Path) -> u64 {
+        std::fs::metadata(path).unwrap().modified().unwrap().elapsed().map(|d| d.as_secs()).unwrap_or(0)
+    }
+
+    // Copies older than the retention period go; recent ones stay. The
+    // first run only re-dates copies made before retention existed.
+    #[tokio::test]
+    async fn backup_copies_expire_after_retention() {
+        let root = std::env::temp_dir().join(format!("bb-retention-test-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        let versions = root.join("some-buddy").join(".versions");
+        std::fs::create_dir_all(versions.join("photos/old-trip")).unwrap();
+        let old = versions.join("photos/a.jpg.v1");
+        let recent = versions.join("photos/b.jpg.v1");
+        let nested = versions.join("photos/old-trip/c.jpg.v2");
+        for f in [&old, &recent, &nested] {
+            std::fs::write(f, vec![1u8; 100]).unwrap();
+        }
+        set_age_days(&old, 40);
+        set_age_days(&nested, 40);
+
+        // First run: nothing removed, old copies re-dated to now.
+        assert_eq!(expire_versions(&root).await, (0, 0));
+        assert!(old.exists() && age_secs(&old) < 60, "pre-retention copy re-dated, not removed");
+        assert!(versions.join(RETENTION_MARKER).exists());
+
+        // From then on, age counts.
+        set_age_days(&old, VERSION_RETENTION_DAYS + 1);
+        set_age_days(&nested, VERSION_RETENTION_DAYS + 1);
+        set_age_days(&recent, VERSION_RETENTION_DAYS - 1);
+        assert_eq!(expire_versions(&root).await, (2, 200));
+        assert!(!old.exists() && !nested.exists());
+        assert!(recent.exists(), "a copy inside the retention period stays");
+        assert!(!versions.join("photos/old-trip").exists(), "emptied folder removed");
+        assert!(versions.join(RETENTION_MARKER).exists());
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
+
+    // A new backup copy is dated when it was kept, not when it was uploaded.
+    #[tokio::test]
+    async fn a_new_backup_copy_is_dated_now() {
+        let root = std::env::temp_dir().join(format!("bb-rotate-date-test-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let live = root.join("docs/report.pdf");
+        std::fs::write(&live, b"uploaded long ago").unwrap();
+        set_age_days(&live, 200);
+        rotate_versions(&root, "docs/report.pdf").await;
+        let slot = version_path(&root, "docs/report.pdf", 1).unwrap();
+        assert!(slot.exists() && age_secs(&slot) < 60);
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
 
     // A restart clears half-finished ordinary uploads, but keeps resumable
     // partials for the sender to finish.

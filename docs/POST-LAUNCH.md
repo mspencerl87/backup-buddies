@@ -26,6 +26,14 @@ Last reviewed: 2026-10-04.
       it's sending and continues from the buddy's partial (protocol v3,
       PutResumable). Restores still restart from zero; chunking above
       would cover both.
+- [x] **Backup copies kept for 30 days — client 0.8.2 (2026-10-07).**
+      Copies of replaced or deleted files used to stay on the buddy forever
+      without counting against the pledge. Now dated when kept and removed
+      after VERSION_RETENTION_DAYS (30) by the buddy, at startup and daily.
+- [ ] **"Delete permanently" in Browse files** for deleted files' copies,
+      so space can be freed before the 30 days are up. Needs a protocol v4
+      request (buddy removes a path's copies only if there's no live file);
+      about half a day.
 - [ ] **Dropped connections between buddies on a local network.** Seen
       twice (2026-10-06/07), testa and testb on the same host
       (`backupbuddy`, host networking, ports 11235/11236): minutes into a

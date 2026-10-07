@@ -1571,7 +1571,12 @@ function renderVersionHistory(container, path, versions) {
   }
   container.innerHTML = "";
   for (const v of versions) {
-    const when = v.modified_unix ? fmtAgo(v.modified_unix) : "at an unknown time";
+    let when = v.modified_unix ? fmtAgo(v.modified_unix) : "at an unknown time";
+    // Buddies on 0.8.2+ remove copies after 30 days and say when.
+    if (v.expires_unix) {
+      const days = Math.max(0, Math.ceil((v.expires_unix - Date.now() / 1000) / 86400));
+      when += days > 0 ? ", removed in " + days + " day" + (days === 1 ? "" : "s") : ", removed soon";
+    }
     const row = document.createElement("div");
     row.className = "version-row";
     row.innerHTML = `

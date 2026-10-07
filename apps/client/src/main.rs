@@ -561,6 +561,26 @@ async fn main() -> Result<()> {
     receive::clear_incoming(&config.buddy_files_dir).await;
     backup::init_spool(&config.data_dir).await;
 
+    // Remove buddies' backup copies (replaced or deleted content) once
+    // they're VERSION_RETENTION_DAYS old: now, then daily.
+    {
+        let buddy_files_dir = config.buddy_files_dir.clone();
+        tokio::spawn(async move {
+            loop {
+                let (files, bytes) = receive::expire_versions(&buddy_files_dir).await;
+                if files > 0 {
+                    tracing::info!(
+                        files,
+                        bytes,
+                        days = receive::VERSION_RETENTION_DAYS,
+                        "removed buddies' backup copies past the retention period"
+                    );
+                }
+                tokio::time::sleep(Duration::from_secs(24 * 60 * 60)).await;
+            }
+        });
+    }
+
     let secret_key = load_or_generate_secret_key(&config.data_dir).await?;
     let endpoint_id = secret_key.public();
 
