@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::bandwidth::BandwidthBook;
@@ -283,6 +284,23 @@ async fn handle_stream(
             )
             .await?;
         }
+        SyncRequest::PutResumable { path, upload_id, ciphertext_len } => {
+            handle_put_resumable(
+                &mut send,
+                &mut recv,
+                &sender_dir,
+                &remote_id,
+                &pledge_book,
+                &data_dir,
+                &buddy_files_dir,
+                &bandwidth_book,
+                &quality,
+                path,
+                upload_id,
+                ciphertext_len,
+            )
+            .await?;
+        }
         SyncRequest::Delete { path } => {
             handle_delete(&mut send, &sender_dir, &remote_id, &pledge_book, &data_dir, path).await?;
         }
@@ -340,29 +358,32 @@ pub(crate) fn safe_join(base: &Path, rel: &str) -> Option<PathBuf> {
     Some(base.join(rel_path))
 }
 
+/// Where an admitted upload goes, and what it replaces (for undoing the
+/// pledge reservation if it doesn't complete).
+struct Admitted {
+    dest: PathBuf,
+    previous_size: u64,
+}
+
+/// The checks every upload passes before a byte of it is read: size, path,
+/// real disk space, then the pledge, which it also reserves (give it back
+/// with `release_pledge` if the upload doesn't complete). `already_have` is
+/// what a resumed upload already holds on disk, so only the rest needs room.
 #[allow(clippy::too_many_arguments)]
-async fn handle_put(
-    send: &mut iroh::endpoint::SendStream,
-    recv: &mut iroh::endpoint::RecvStream,
+async fn admit_put(
     sender_dir: &Path,
     remote_id: &str,
     pledge_book: &PledgeBook,
-    data_dir: &Path,
     buddy_files_dir: &Path,
-    bandwidth_book: &BandwidthBook,
-    quality: &ConnectionQuality,
-    path: String,
+    path: &str,
     ciphertext_len: u64,
-    expected_sha256: Option<String>,
-) -> Result<()> {
+    already_have: u64,
+) -> std::result::Result<Admitted, PutRejectReason> {
     if ciphertext_len > protocol::MAX_FILE_BYTES {
-        reject_without_reading_body(recv, send, PutRejectReason::TooLarge).await?;
-        return Ok(());
+        return Err(PutRejectReason::TooLarge);
     }
-
-    let Some(dest) = safe_join(sender_dir, &path) else {
-        reject_without_reading_body(recv, send, PutRejectReason::InvalidPath).await?;
-        return Ok(());
+    let Some(dest) = safe_join(sender_dir, path) else {
+        return Err(PutRejectReason::InvalidPath);
     };
 
     // If we already have a file at this path, only the *delta* against its
@@ -378,7 +399,7 @@ async fn handle_put(
     // floor just below is what actually prevents the disk from filling —
     // this delta is only ever used to decide whether a pledge is exceeded.
     let previous_size = tokio::fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
-    let incoming_delta = ciphertext_len.saturating_sub(previous_size);
+    let incoming_delta = ciphertext_len.saturating_sub(previous_size).saturating_sub(already_have);
 
     // The real disk guard, ahead of the pledge check below: a pledge is
     // just a number this host agreed to over the API, so a buddy honoring
@@ -393,114 +414,390 @@ async fn handle_put(
             attempted_bytes = ciphertext_len,
             "rejected file — not enough real disk space left on this host"
         );
-        reject_without_reading_body(recv, send, PutRejectReason::DiskFull).await?;
-        return Ok(());
+        return Err(PutRejectReason::DiskFull);
     }
 
-    let decision = {
-        let mut book = pledge_book.lock().unwrap();
-        let state = book.entry(remote_id.to_string()).or_default();
-        let projected =
-            state.received_bytes.saturating_sub(previous_size).saturating_add(ciphertext_len);
-        if projected > state.pledged_bytes {
-            Err((state.pledged_bytes, state.received_bytes))
-        } else {
-            state.received_bytes = projected;
-            Ok(())
+    let mut book = pledge_book.lock().unwrap();
+    let state = book.entry(remote_id.to_string()).or_default();
+    let projected = state.received_bytes.saturating_sub(previous_size).saturating_add(ciphertext_len);
+    if projected > state.pledged_bytes {
+        tracing::warn!(
+            from = %remote_id,
+            path = %path,
+            attempted_bytes = ciphertext_len,
+            pledged_bytes = state.pledged_bytes,
+            received_bytes = state.received_bytes,
+            "rejected file — would exceed this buddy's pledge"
+        );
+        return Err(PutRejectReason::PledgeExceeded);
+    }
+    state.received_bytes = projected;
+    Ok(Admitted { dest, previous_size })
+}
+
+/// Undoes admit_put's pledge reservation for an upload that didn't land.
+fn release_pledge(pledge_book: &PledgeBook, remote_id: &str, ciphertext_len: u64, previous_size: u64) {
+    let mut book = pledge_book.lock().unwrap();
+    if let Some(state) = book.get_mut(remote_id) {
+        state.received_bytes = state.received_bytes.saturating_sub(ciphertext_len).saturating_add(previous_size);
+    }
+}
+
+/// Moves a fully received, hash-checked upload from `tmp` into place
+/// (keeping what it replaces as a backup version) and records it. On
+/// error nothing is acked; the caller releases the pledge.
+#[allow(clippy::too_many_arguments)]
+async fn commit_upload(
+    tmp: &Path,
+    dest: &Path,
+    sender_dir: &Path,
+    path: &str,
+    data_dir: &Path,
+    pledge_book: &PledgeBook,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
+    bytes_received: u64,
+) -> Result<()> {
+    // Protect whatever was there before this overwrite — a buddy's
+    // backup cycle only Puts a path when their local copy actually
+    // changed, so any existing `dest` here is genuinely being replaced,
+    // not just re-sent unchanged.
+    rotate_versions(sender_dir, path).await;
+
+    if let Some(parent) = dest.parent() {
+        tokio::fs::create_dir_all(parent).await.context("failed to create directory for incoming file")?;
+    }
+    tokio::fs::rename(tmp, dest).await.context("failed to store incoming file")?;
+
+    if let Err(err) = save_usage_ledger(data_dir, pledge_book).await {
+        // Don't fail the exchange over a ledger write hiccup — worst
+        // case we under-persist by one file's worth and a restart
+        // re-allows it, which is the safe direction to err in.
+        tracing::warn!(?err, "failed to persist usage ledger");
+    }
+    crate::bandwidth::record(data_dir, bandwidth_book, quality, bytes_received).await;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_put(
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+    sender_dir: &Path,
+    remote_id: &str,
+    pledge_book: &PledgeBook,
+    data_dir: &Path,
+    buddy_files_dir: &Path,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
+    path: String,
+    ciphertext_len: u64,
+    expected_sha256: Option<String>,
+) -> Result<()> {
+    let admitted =
+        match admit_put(sender_dir, remote_id, pledge_book, buddy_files_dir, &path, ciphertext_len, 0).await {
+            Ok(a) => a,
+            Err(reason) => {
+                reject_without_reading_body(recv, send, reason).await?;
+                return Ok(());
+            }
+        };
+    let rollback = || release_pledge(pledge_book, remote_id, ciphertext_len, admitted.previous_size);
+
+    // Stream the body into a temp file in this buddy's own folder (same
+    // filesystem, so the final move is an atomic rename), hashing as it
+    // arrives. Memory use is one buffer, whatever the file size — this
+    // used to read the whole file into RAM.
+    let tmp = match incoming_tmp_path(sender_dir).await {
+        Ok(tmp) => tmp,
+        Err(err) => {
+            rollback();
+            return Err(err);
+        }
+    };
+    let received = receive_body(recv, &tmp, ciphertext_len).await;
+    let actual_hash = match received {
+        Ok(hash) => hash,
+        Err(err) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            rollback();
+            return Err(err).context("failed to read file bytes");
         }
     };
 
-    let Err((pledged_bytes, received_bytes)) = decision else {
-        let rollback = || {
-            let mut book = pledge_book.lock().unwrap();
-            if let Some(state) = book.get_mut(remote_id) {
-                state.received_bytes =
-                    state.received_bytes.saturating_sub(ciphertext_len).saturating_add(previous_size);
-            }
-        };
-
-        // Stream the body into a temp file in this buddy's own folder (same
-        // filesystem, so the final move is an atomic rename), hashing as it
-        // arrives. Memory use is one buffer, whatever the file size — this
-        // used to read the whole file into RAM.
-        let tmp = match incoming_tmp_path(sender_dir).await {
-            Ok(tmp) => tmp,
-            Err(err) => {
-                rollback();
-                return Err(err);
-            }
-        };
-        let received = receive_body(recv, &tmp, ciphertext_len).await;
-        let actual_hash = match received {
-            Ok(hash) => hash,
+    // v2 (PutStream): the hash follows the bytes.
+    let expected = match expected_sha256 {
+        Some(hash) => hash,
+        None => match protocol::read_frame::<protocol::PutTrailer>(recv).await {
+            Ok(t) => t.ciphertext_sha256,
             Err(err) => {
                 let _ = tokio::fs::remove_file(&tmp).await;
                 rollback();
-                return Err(err).context("failed to read file bytes");
+                return Err(err).context("failed to read upload trailer");
             }
+        },
+    };
+    if actual_hash != expected {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        rollback();
+        protocol::write_frame(send, &SyncAck::err("hash mismatch")).await?;
+        return Ok(());
+    }
+
+    if let Err(err) = commit_upload(
+        &tmp,
+        &admitted.dest,
+        sender_dir,
+        &path,
+        data_dir,
+        pledge_book,
+        bandwidth_book,
+        quality,
+        ciphertext_len,
+    )
+    .await
+    {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        rollback();
+        return Err(err);
+    }
+
+    protocol::write_frame(send, &SyncAck::ok()).await?;
+    tracing::info!(from = %remote_id, path = %path, bytes = ciphertext_len, "stored file from buddy");
+    Ok(())
+}
+
+// Partial resumable uploads (PutResumable) live under .incoming/resume/,
+// one pair of files per path: `<key>.part` (the bytes so far) and
+// `<key>.json` (which upload they belong to). Unlike ordinary staging files
+// they survive a restart, since surviving interruptions is their point;
+// clear_incoming drops them once they're RESUME_KEEP_DAYS old.
+const RESUME_DIR: &str = "resume";
+const RESUME_KEEP_DAYS: u64 = 7;
+
+#[derive(Serialize, Deserialize, PartialEq)]
+struct PartialUpload {
+    path: String,
+    upload_id: String,
+    ciphertext_len: u64,
+}
+
+fn resume_paths(sender_dir: &Path, path: &str) -> (PathBuf, PathBuf) {
+    // Keyed by a hash of the path: flat, fixed-length names, whatever the
+    // path looks like.
+    let key = &hex::encode(Sha256::digest(path.as_bytes()))[..32];
+    let dir = sender_dir.join(INCOMING_DIR).join(RESUME_DIR);
+    (dir.join(format!("{key}.part")), dir.join(format!("{key}.json")))
+}
+
+/// Partials being written right now. A dropped connection's handler can
+/// sit in a read for up to the idle timeout before it notices; if the
+/// sender reconnects sooner, a second handler appending to the same
+/// partial would interleave bytes (caught by the hash, but the upload would
+/// be wasted). So one upload per path at a time; a second is told to retry.
+static RESUMABLE_IN_PROGRESS: std::sync::LazyLock<Mutex<std::collections::HashSet<PathBuf>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+struct InProgress(PathBuf);
+
+impl InProgress {
+    fn claim(part: &Path) -> Option<Self> {
+        RESUMABLE_IN_PROGRESS.lock().unwrap().insert(part.to_path_buf()).then(|| Self(part.to_path_buf()))
+    }
+}
+
+impl Drop for InProgress {
+    fn drop(&mut self) {
+        RESUMABLE_IN_PROGRESS.lock().unwrap().remove(&self.0);
+    }
+}
+
+/// How many bytes of this exact upload are already here. A partial from a
+/// different upload of the same path (the sender re-encrypted, so its
+/// bytes no longer line up) is thrown away.
+async fn partial_bytes(sender_dir: &Path, wanted: &PartialUpload) -> u64 {
+    let (part, meta) = resume_paths(sender_dir, &wanted.path);
+    let current = tokio::fs::read(&meta).await.ok().and_then(|b| serde_json::from_slice::<PartialUpload>(&b).ok());
+    let size = tokio::fs::metadata(&part).await.map(|m| m.len()).ok();
+    match (current, size) {
+        (Some(current), Some(size)) if current == *wanted && size <= wanted.ciphertext_len => size,
+        _ => {
+            let _ = tokio::fs::remove_file(&part).await;
+            let _ = tokio::fs::remove_file(&meta).await;
+            0
+        }
+    }
+}
+
+/// A refusal of a PutResumable: the same STOP_SENDING code as other
+/// refusals, plus a PutResumeReply (the sender is waiting for one before
+/// it sends any bytes, so it does get to read this).
+async fn reject_resumable(
+    recv: &mut iroh::endpoint::RecvStream,
+    send: &mut iroh::endpoint::SendStream,
+    reason: PutRejectReason,
+) -> Result<()> {
+    recv.stop(iroh::endpoint::VarInt::from_u32(reason.code())).ok();
+    let reply = protocol::PutResumeReply {
+        offset: None,
+        error: Some(reason.message().to_string()),
+        reject_code: Some(reason.code() as u64),
+    };
+    protocol::write_frame(send, &reply).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_put_resumable(
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+    sender_dir: &Path,
+    remote_id: &str,
+    pledge_book: &PledgeBook,
+    data_dir: &Path,
+    buddy_files_dir: &Path,
+    bandwidth_book: &BandwidthBook,
+    quality: &ConnectionQuality,
+    path: String,
+    upload_id: String,
+    ciphertext_len: u64,
+) -> Result<()> {
+    if safe_join(sender_dir, &path).is_none() {
+        reject_resumable(recv, send, PutRejectReason::InvalidPath).await?;
+        return Ok(());
+    }
+    let (part, meta) = resume_paths(sender_dir, &path);
+    let Some(_claim) = InProgress::claim(&part) else {
+        // Not a refusal (no reject_code): the sender keeps its copy and
+        // tries again next cycle.
+        let reply = protocol::PutResumeReply {
+            offset: None,
+            error: Some("an earlier upload of this file is still finishing here — will retry".to_string()),
+            reject_code: None,
         };
-
-        // v2 (PutStream): the hash follows the bytes.
-        let expected = match expected_sha256 {
-            Some(hash) => hash,
-            None => match protocol::read_frame::<protocol::PutTrailer>(recv).await {
-                Ok(t) => t.ciphertext_sha256,
-                Err(err) => {
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    rollback();
-                    return Err(err).context("failed to read upload trailer");
-                }
-            },
-        };
-        if actual_hash != expected {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            rollback();
-            protocol::write_frame(send, &SyncAck::err("hash mismatch")).await?;
-            return Ok(());
-        }
-
-        // Protect whatever was there before this overwrite — a buddy's
-        // backup cycle only Puts a path when their local copy actually
-        // changed, so any existing `dest` here is genuinely being replaced,
-        // not just re-sent unchanged.
-        rotate_versions(sender_dir, &path).await;
-
-        if let Some(parent) = dest.parent()
-            && let Err(err) = tokio::fs::create_dir_all(parent).await
-        {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            rollback();
-            return Err(err).context("failed to create directory for incoming file");
-        }
-        if let Err(err) = tokio::fs::rename(&tmp, &dest).await {
-            let _ = tokio::fs::remove_file(&tmp).await;
-            rollback();
-            return Err(err).context("failed to store incoming file");
-        }
-
-        if let Err(err) = save_usage_ledger(data_dir, pledge_book).await {
-            // Don't fail the exchange over a ledger write hiccup — worst
-            // case we under-persist by one file's worth and a restart
-            // re-allows it, which is the safe direction to err in.
-            tracing::warn!(?err, "failed to persist usage ledger");
-        }
-        crate::bandwidth::record(data_dir, bandwidth_book, quality, ciphertext_len).await;
-
-        protocol::write_frame(send, &SyncAck::ok()).await?;
-        tracing::info!(from = %remote_id, path = %path, bytes = ciphertext_len, "stored file from buddy");
+        recv.stop(iroh::endpoint::VarInt::from_u32(0)).ok();
+        protocol::write_frame(send, &reply).await?;
         return Ok(());
     };
+    let wanted = PartialUpload { path: path.clone(), upload_id, ciphertext_len };
+    let offset = partial_bytes(sender_dir, &wanted).await;
 
-    tracing::warn!(
-        from = %remote_id,
-        path = %path,
-        attempted_bytes = ciphertext_len,
-        pledged_bytes,
-        received_bytes,
-        "rejected file — would exceed this buddy's pledge"
-    );
-    reject_without_reading_body(recv, send, PutRejectReason::PledgeExceeded).await?;
+    let admitted =
+        match admit_put(sender_dir, remote_id, pledge_book, buddy_files_dir, &path, ciphertext_len, offset).await {
+            Ok(a) => a,
+            Err(reason) => {
+                reject_resumable(recv, send, reason).await?;
+                return Ok(());
+            }
+        };
+    let rollback = || release_pledge(pledge_book, remote_id, ciphertext_len, admitted.previous_size);
+
+    let prepared = async {
+        if let Some(dir) = part.parent() {
+            tokio::fs::create_dir_all(dir).await.context("failed to create upload staging folder")?;
+        }
+        tokio::fs::write(&meta, serde_json::to_vec(&wanted)?).await.context("failed to record upload")?;
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(err) = prepared {
+        rollback();
+        return Err(err);
+    }
+
+    protocol::write_frame(send, &protocol::PutResumeReply { offset: Some(offset), ..Default::default() }).await?;
+    if offset > 0 {
+        tracing::info!(from = %remote_id, path = %path, offset, total = ciphertext_len, "resuming upload from buddy");
+    }
+
+    // The hash covers the whole file: what's already here, then the rest
+    // as it arrives. A dropped connection keeps the partial for next time.
+    let actual_hash = match append_body(recv, &part, offset, ciphertext_len - offset).await {
+        Ok(hash) => hash,
+        Err(err) => {
+            rollback();
+            return Err(err).context("failed to read file bytes (kept what arrived, to resume)");
+        }
+    };
+    let expected = match protocol::read_frame::<protocol::PutTrailer>(recv).await {
+        Ok(t) => t.ciphertext_sha256,
+        Err(err) => {
+            rollback();
+            return Err(err).context("failed to read upload trailer");
+        }
+    };
+    if actual_hash != expected {
+        let _ = tokio::fs::remove_file(&part).await;
+        let _ = tokio::fs::remove_file(&meta).await;
+        rollback();
+        protocol::write_frame(send, &SyncAck::err("hash mismatch")).await?;
+        return Ok(());
+    }
+
+    if let Err(err) = commit_upload(
+        &part,
+        &admitted.dest,
+        sender_dir,
+        &path,
+        data_dir,
+        pledge_book,
+        bandwidth_book,
+        quality,
+        ciphertext_len - offset,
+    )
+    .await
+    {
+        rollback();
+        return Err(err);
+    }
+    let _ = tokio::fs::remove_file(&meta).await;
+
+    protocol::write_frame(send, &SyncAck::ok()).await?;
+    tracing::info!(from = %remote_id, path = %path, bytes = ciphertext_len, resumed_from = offset, "stored file from buddy");
     Ok(())
+}
+
+/// Hashes the first `have` bytes already in `part`, then appends `len` more
+/// from `recv`, returning the SHA-256 of the whole. Flushed before
+/// returning; on error, whatever arrived is kept (flushed) for a resume.
+async fn append_body(recv: &mut iroh::endpoint::RecvStream, part: &Path, have: u64, len: u64) -> Result<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; IO_CHUNK];
+    if have > 0 {
+        let mut existing = tokio::fs::File::open(part).await.context("failed to open partial upload")?;
+        let mut left = have;
+        while left > 0 {
+            let n = existing.read(&mut buf[..left.min(IO_CHUNK as u64) as usize]).await?;
+            if n == 0 {
+                anyhow::bail!("partial upload is shorter than recorded");
+            }
+            hasher.update(&buf[..n]);
+            left -= n as u64;
+        }
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(part)
+        .await
+        .context("failed to open partial upload for writing")?;
+    let mut remaining = len;
+    let result = async {
+        while remaining > 0 {
+            let n = remaining.min(IO_CHUNK as u64) as usize;
+            recv.read_exact(&mut buf[..n]).await.context("connection ended mid-file")?;
+            hasher.update(&buf[..n]);
+            file.write_all(&buf[..n]).await.context("failed to write incoming file")?;
+            remaining -= n as u64;
+        }
+        anyhow::Ok(())
+    }
+    .await;
+    // Flush either way: on success before acking, on failure so the next
+    // resume's offset (the file's length) only counts bytes really stored.
+    file.sync_all().await.context("failed to flush incoming file")?;
+    result?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 // Every early-rejection branch above decides *before* reading the
@@ -564,13 +861,40 @@ async fn receive_body(recv: &mut iroh::endpoint::RecvStream, path: &Path, len: u
     Ok(hex::encode(hasher.finalize()))
 }
 
-/// Removes leftovers of uploads interrupted by a restart or crash.
+/// Removes leftovers of uploads interrupted by a restart or crash, except
+/// resumable partials (`.incoming/resume/`), which are kept for the sender
+/// to finish unless they're RESUME_KEEP_DAYS old.
 pub async fn clear_incoming(buddy_files_dir: &Path) {
     let Ok(mut entries) = tokio::fs::read_dir(buddy_files_dir).await else { return };
     while let Ok(Some(entry)) = entries.next_entry().await {
         let staging = entry.path().join(INCOMING_DIR);
-        if tokio::fs::metadata(&staging).await.is_ok() {
-            let _ = tokio::fs::remove_dir_all(&staging).await;
+        let Ok(mut items) = tokio::fs::read_dir(&staging).await else { continue };
+        while let Ok(Some(item)) = items.next_entry().await {
+            if item.file_name() == RESUME_DIR {
+                remove_older_than(&item.path(), RESUME_KEEP_DAYS).await;
+            } else if item.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+                let _ = tokio::fs::remove_dir_all(item.path()).await;
+            } else {
+                let _ = tokio::fs::remove_file(item.path()).await;
+            }
+        }
+    }
+}
+
+/// Deletes files directly in `dir` not modified for `days` days.
+pub async fn remove_older_than(dir: &Path, days: u64) {
+    let Ok(mut items) = tokio::fs::read_dir(dir).await else { return };
+    let max_age = std::time::Duration::from_secs(days * 24 * 60 * 60);
+    while let Ok(Some(item)) = items.next_entry().await {
+        let old = item
+            .metadata()
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > max_age);
+        if old {
+            let _ = tokio::fs::remove_file(item.path()).await;
         }
     }
 }
@@ -854,6 +1178,26 @@ async fn handle_get_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A restart clears half-finished ordinary uploads, but keeps resumable
+    // partials for the sender to finish.
+    #[tokio::test]
+    async fn clear_incoming_keeps_resumable_partials() {
+        let root = std::env::temp_dir().join(format!("bb-clear-incoming-test-{}", std::process::id()));
+        let _ = tokio::fs::remove_dir_all(&root).await;
+        let staging = root.join("some-buddy").join(INCOMING_DIR);
+        tokio::fs::create_dir_all(staging.join(RESUME_DIR)).await.unwrap();
+        tokio::fs::write(staging.join("123-0.part"), b"ordinary leftover").await.unwrap();
+        tokio::fs::write(staging.join(RESUME_DIR).join("abc.part"), b"resumable").await.unwrap();
+        tokio::fs::write(staging.join(RESUME_DIR).join("abc.json"), b"{}").await.unwrap();
+
+        clear_incoming(&root).await;
+
+        assert!(!staging.join("123-0.part").exists(), "ordinary staging is cleared");
+        assert!(staging.join(RESUME_DIR).join("abc.part").exists(), "a fresh resumable partial is kept");
+        assert!(staging.join(RESUME_DIR).join("abc.json").exists());
+        let _ = tokio::fs::remove_dir_all(&root).await;
+    }
 
     // The startup correction for a drifted usage ledger: only live files
     // count — not backup-version slots, half-received uploads, or the

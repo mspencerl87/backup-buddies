@@ -1019,6 +1019,31 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.8.0: resumable uploads (2026-10-07)
+
+Files ≥ 256 MB upload resumably (protocol v3, PutResumable): the sender
+keeps the encrypted copy in `DATA_DIR/outgoing/`, the buddy keeps the
+partial in `<sender>/.incoming/resume/`, and a cut-off upload continues
+from the buddy's partial on the next cycle. Details in the client README,
+"Interrupted uploads resume".
+
+- [x] e2e (1 MiB threshold in tests): an upload cut at ~2 MB of 5 MB
+      resumed from byte 1,835,008, restored byte-identical; no copies left
+      on either side afterwards.
+- [x] e2e: cut, then the file changes before the retry → both stale
+      copies dropped, new content sent whole (no resume).
+- [x] Unit: a restart clears ordinary staging but keeps resumable partials.
+- [x] Older buddies: uploads use PutStream / Put as before (e2e compat
+      section unchanged and passing).
+- [ ] Live: both testa and testb on 0.8.0. Free room in testb's pledge
+      (it's full), put a ≥ 1 GB file in testa's folder, and while it's
+      sending run `docker compose restart` on **testb**. testb's log should
+      show "resuming upload from buddy" with an offset, testa's "resuming
+      upload", and the file should restore byte-identical (sha256).
+- [ ] Live: same, but restart **testa** after its log says "connection
+      dropped mid-file — finishing the local copy" (or after the copy is
+      done); it should resume after the restart too.
+
 ## Verified — clients 0.7.0–0.7.2 (2026-10-06)
 
 All three live on testa/testb (both on 0.7.2), built and tested in WSL

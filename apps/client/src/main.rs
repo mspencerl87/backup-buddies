@@ -559,6 +559,7 @@ async fn main() -> Result<()> {
     crypto::init(&config.passphrase, &account_id).context("failed to derive encryption key from BACKUP_PASSPHRASE")?;
     index::open(&config.data_dir).context("failed to open the index in DATA_DIR")?;
     receive::clear_incoming(&config.buddy_files_dir).await;
+    backup::init_spool(&config.data_dir).await;
 
     let secret_key = load_or_generate_secret_key(&config.data_dir).await?;
     let endpoint_id = secret_key.public();

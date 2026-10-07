@@ -179,18 +179,21 @@ fn forget_refusal(buddy: &str, path: &str) {
     REFUSALS.lock().unwrap().remove(&(buddy.to_string(), path.to_string()));
 }
 
-/// Pulls a `PutRejectReason` out of a `put_one_file` error, when the
-/// failure was the buddy's own STOP_SENDING telling us why — walks the
-/// anyhow error's source chain since `write_all`'s `WriteError::Stopped`
-/// gets wrapped in `.context(...)` on the way out.
+/// Pulls a `PutRejectReason` out of an upload error, when the failure was
+/// the buddy refusing the file: its STOP_SENDING code (walking the anyhow
+/// error's source chain, since `write_all`'s `WriteError::Stopped` gets
+/// wrapped in `.context(...)` on the way out), or a resumable upload's
+/// up-front `Refused`.
 fn reject_reason_from_err(err: &anyhow::Error) -> Option<&'static str> {
     err.chain()
-        .find_map(|cause| cause.downcast_ref::<iroh::endpoint::WriteError>())
-        .and_then(|werr| match werr {
-            iroh::endpoint::WriteError::Stopped(code) => {
-                PutRejectReason::from_code(code.into_inner())
+        .find_map(|cause| {
+            if let Some(Refused(reason)) = cause.downcast_ref::<Refused>() {
+                return Some(*reason);
             }
-            _ => None,
+            match cause.downcast_ref::<iroh::endpoint::WriteError>()? {
+                iroh::endpoint::WriteError::Stopped(code) => PutRejectReason::from_code(code.into_inner()),
+                _ => None,
+            }
         })
         .map(PutRejectReason::message)
 }
@@ -317,7 +320,11 @@ pub async fn run_backup_cycle(
 
     // Streaming uploads need the buddy on client 0.5.0+; older buddies get
     // the old whole-file upload (size-limited, see LEGACY_PUT_MAX_BYTES).
-    let streaming = to_put.is_empty() || buddy_protocol_version(&conn).await >= 2;
+    // Resumable uploads of big files need 0.8.0+.
+    let buddy_version =
+        if to_put.is_empty() { protocol::PROTOCOL_VERSION } else { buddy_protocol_version(&conn).await };
+    let streaming = buddy_version >= 2;
+    let resumable = buddy_version >= 3;
     if !streaming {
         tracing::info!("buddy runs an older client — using the old upload format until they update");
     }
@@ -347,7 +354,10 @@ pub async fn run_backup_cycle(
             });
             continue;
         }
-        let result = if streaming {
+        let result = if resumable && *size >= RESUMABLE_MIN_BYTES {
+            put_one_file_resumable(&conn, &buddy_node_id, rel_path, abs_path, *size, sha256, Some(&tracker.counter))
+                .await
+        } else if streaming {
             put_one_file(&conn, rel_path, abs_path, *size, Some(&tracker.counter)).await
         } else {
             put_one_file_legacy(&conn, rel_path, abs_path, *size).await
@@ -524,6 +534,336 @@ pub async fn reconcile_with_buddy(
         .collect();
 
     Ok(ReconcileStats { checked, missing_on_buddy, unexpected_on_buddy })
+}
+
+// ---- Resumable uploads (protocol v3) ---------------------------------------
+//
+// age encrypts every file with a fresh random key, so re-encrypting a file
+// after a dropped connection gives different bytes, and the buddy's partial
+// copy would be useless. For big files the sender therefore keeps the exact
+// ciphertext it's sending in DATA_DIR/outgoing/ (encrypted, like everything
+// that leaves this machine): a cut-off upload continues from that copy on
+// the next cycle, sending only what the buddy doesn't have yet. The copy is
+// deleted once the buddy confirms the file.
+
+/// Files at least this big are sent resumably. Below it, a restart from
+/// zero is cheap and writing a local copy first isn't worth it.
+#[cfg(not(test))]
+const RESUMABLE_MIN_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(test)]
+const RESUMABLE_MIN_BYTES: u64 = 1024 * 1024;
+
+/// Free space to leave on DATA_DIR's disk beyond the copy itself; without
+/// it, a file is sent the old way (no resume) rather than filling the disk.
+const SPOOL_FREE_RESERVE_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// A copy nobody resumed for this long (the file was deleted, or the buddy
+/// was unpaired) is cleared at startup.
+const SPOOL_KEEP_DAYS: u64 = 7;
+
+static SPOOL_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Test hooks: cut a first-attempt upload once this many bytes are sent
+/// (0 = off), and record where the last resume started.
+#[cfg(test)]
+pub(crate) static TEST_CUT_AFTER_BYTES: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+pub(crate) static TEST_LAST_RESUME_OFFSET: AtomicU64 = AtomicU64::new(0);
+
+/// Sets up DATA_DIR/outgoing/ for resumable uploads, clearing stale copies.
+/// Without this (or if it fails), every file is sent the old way.
+pub async fn init_spool(data_dir: &Path) {
+    let dir = data_dir.join("outgoing");
+    if let Err(err) = tokio::fs::create_dir_all(&dir).await {
+        tracing::warn!(?err, "can't create DATA_DIR/outgoing — big files won't resume after an interruption");
+        return;
+    }
+    crate::receive::remove_older_than(&dir, SPOOL_KEEP_DAYS).await;
+    let _ = SPOOL_DIR.set(dir);
+}
+
+/// What a copy in DATA_DIR/outgoing/ holds. `ciphertext_sha256` is set
+/// once the copy is complete; only then can it be resumed from.
+#[derive(Serialize, serde::Deserialize)]
+struct SpoolMeta {
+    path: String,
+    plaintext_sha256: String,
+    plaintext_len: u64,
+    upload_id: String,
+    ciphertext_len: u64,
+    ciphertext_sha256: Option<String>,
+}
+
+/// A buddy refused an upload before any bytes were sent (the resumable
+/// handshake answers first), carrying the same reasons as STOP_SENDING.
+#[derive(Debug)]
+struct Refused(PutRejectReason);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.message())
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn spool_paths(dir: &Path, buddy: &str, rel_path: &str) -> (PathBuf, PathBuf) {
+    let key = &hex::encode(Sha256::digest(format!("{buddy}\n{rel_path}").as_bytes()))[..32];
+    (dir.join(format!("{key}.ct")), dir.join(format!("{key}.json")))
+}
+
+async fn remove_spool(ct: &Path, meta: &Path) {
+    let _ = tokio::fs::remove_file(ct).await;
+    let _ = tokio::fs::remove_file(meta).await;
+}
+
+/// Unique per encryption; not secret, just never reused.
+fn new_upload_id(rel_path: &str) -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let seed = format!("{rel_path}\n{}\n{nanos}\n{n}", std::process::id());
+    hex::encode(Sha256::digest(seed.as_bytes()))[..32].to_string()
+}
+
+async fn spool_has_room(dir: &Path, bytes: u64) -> bool {
+    let dir = dir.to_path_buf();
+    match tokio::task::spawn_blocking(move || fs4::statvfs(&dir)).await {
+        Ok(Ok(stats)) => stats.available_space() >= bytes.saturating_add(SPOOL_FREE_RESERVE_BYTES),
+        _ => false,
+    }
+}
+
+/// Sends a PutResumable header and returns how many bytes the buddy
+/// already has. A refusal comes back as `Refused`.
+async fn start_resumable(
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+    rel_path: &str,
+    upload_id: &str,
+    ciphertext_len: u64,
+) -> Result<u64> {
+    protocol::write_frame(
+        send,
+        &SyncRequest::PutResumable { path: rel_path.to_string(), upload_id: upload_id.to_string(), ciphertext_len },
+    )
+    .await?;
+    let reply: protocol::PutResumeReply =
+        protocol::read_frame(recv).await.context("failed to read buddy's reply to the upload")?;
+    if let Some(offset) = reply.offset
+        && offset <= ciphertext_len
+    {
+        return Ok(offset);
+    }
+    if let Some(reason) = reply.reject_code.and_then(PutRejectReason::from_code) {
+        return Err(Refused(reason).into());
+    }
+    anyhow::bail!("buddy refused the upload: {}", reply.error.unwrap_or_default())
+}
+
+/// Trailer, end of stream, buddy's ack.
+async fn finish_put(
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+    ciphertext_sha256: String,
+) -> Result<()> {
+    protocol::write_frame(send, &protocol::PutTrailer { ciphertext_sha256 }).await?;
+    send.finish().context("failed to finish send stream")?;
+    let ack: SyncAck = protocol::read_frame(recv).await.context("failed to read ack")?;
+    if !ack.ok {
+        anyhow::bail!("buddy rejected file: {}", ack.error.unwrap_or_default());
+    }
+    Ok(())
+}
+
+/// Uploads one big file so that an interruption can be resumed (protocol
+/// v3), falling back to an ordinary upload when there's no room for the
+/// local copy. Returns the encrypted size, like put_one_file.
+#[allow(clippy::too_many_arguments)]
+async fn put_one_file_resumable(
+    conn: &iroh::endpoint::Connection,
+    buddy: &str,
+    rel_path: &str,
+    abs_path: &Path,
+    plaintext_len: u64,
+    plaintext_sha256: &str,
+    bytes_sent: Option<&Arc<AtomicU64>>,
+) -> Result<u64> {
+    let Some(dir) = SPOOL_DIR.get() else {
+        return put_one_file(conn, rel_path, abs_path, plaintext_len, bytes_sent).await;
+    };
+    let (ct_path, meta_path) = spool_paths(dir, buddy, rel_path);
+
+    // A finished copy of exactly this content: carry on from it.
+    let existing = tokio::fs::read(&meta_path).await.ok().and_then(|b| serde_json::from_slice::<SpoolMeta>(&b).ok());
+    if let Some(meta) = existing {
+        let ct_len = tokio::fs::metadata(&ct_path).await.map(|m| m.len()).ok();
+        if meta.path == rel_path
+            && meta.plaintext_sha256 == plaintext_sha256
+            && meta.plaintext_len == plaintext_len
+            && meta.ciphertext_sha256.is_some()
+            && ct_len == Some(meta.ciphertext_len)
+        {
+            let result = send_from_spool(conn, &meta, &ct_path, bytes_sent).await;
+            if result.is_ok() || drop_spool_after(result.as_ref().err()) {
+                remove_spool(&ct_path, &meta_path).await;
+            }
+            return result.map(|_| meta.ciphertext_len);
+        }
+    }
+    remove_spool(&ct_path, &meta_path).await;
+
+    if !spool_has_room(dir, plaintext_len).await {
+        tracing::info!(path = %rel_path, "not enough free space in DATA_DIR for a resumable copy — sending without one");
+        return put_one_file(conn, rel_path, abs_path, plaintext_len, bytes_sent).await;
+    }
+    let result = spool_and_send(conn, rel_path, abs_path, plaintext_len, plaintext_sha256, &ct_path, &meta_path, bytes_sent).await;
+    if result.is_ok() || drop_spool_after(result.as_ref().err()) {
+        remove_spool(&ct_path, &meta_path).await;
+    }
+    result
+}
+
+/// Whether a failed upload's local copy is worth keeping: yes after a
+/// dropped connection (that's what it's for), no when the buddy refused
+/// the file or the bytes didn't check out.
+fn drop_spool_after(err: Option<&anyhow::Error>) -> bool {
+    let Some(err) = err else { return false };
+    reject_reason_from_err(err).is_some() || format!("{err:#}").contains("hash mismatch")
+}
+
+/// Resumes from a complete local copy: asks the buddy how much it has and
+/// sends the rest.
+async fn send_from_spool(
+    conn: &iroh::endpoint::Connection,
+    meta: &SpoolMeta,
+    ct_path: &Path,
+    bytes_sent: Option<&Arc<AtomicU64>>,
+) -> Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    let offset = start_resumable(&mut send, &mut recv, &meta.path, &meta.upload_id, meta.ciphertext_len).await?;
+    if offset > 0 {
+        tracing::info!(path = %meta.path, offset, total = meta.ciphertext_len, "resuming upload");
+    }
+    #[cfg(test)]
+    TEST_LAST_RESUME_OFFSET.store(offset, Ordering::Relaxed);
+    // The bytes the buddy already holds count as done on the progress bar.
+    if let Some(counter) = bytes_sent {
+        counter.fetch_add(offset, Ordering::Relaxed);
+    }
+    let mut file = tokio::fs::File::open(ct_path).await.context("failed to open the resumable copy")?;
+    file.seek(std::io::SeekFrom::Start(offset)).await?;
+    let mut buf = vec![0u8; crate::crypto::PIPE_CHUNK];
+    let mut left = meta.ciphertext_len - offset;
+    while left > 0 {
+        let want = left.min(buf.len() as u64) as usize;
+        let n = file.read(&mut buf[..want]).await?;
+        if n == 0 {
+            anyhow::bail!("the resumable copy is shorter than recorded");
+        }
+        send.write_all(&buf[..n]).await.context("failed to send file bytes")?;
+        if let Some(counter) = bytes_sent {
+            counter.fetch_add(n as u64, Ordering::Relaxed);
+        }
+        left -= n as u64;
+    }
+    let hash = meta.ciphertext_sha256.clone().unwrap_or_default();
+    finish_put(&mut send, &mut recv, hash).await
+}
+
+/// First attempt: encrypts once, writing every byte to the local copy and
+/// to the buddy. If the connection drops partway, encryption carries on
+/// into the copy, so the next cycle can resume from it.
+#[allow(clippy::too_many_arguments)]
+async fn spool_and_send(
+    conn: &iroh::endpoint::Connection,
+    rel_path: &str,
+    abs_path: &Path,
+    plaintext_len: u64,
+    plaintext_sha256: &str,
+    ct_path: &Path,
+    meta_path: &Path,
+    bytes_sent: Option<&Arc<AtomicU64>>,
+) -> Result<u64> {
+    use tokio::io::AsyncWriteExt;
+    let mut enc = crate::crypto::encrypt_file(abs_path.to_path_buf(), plaintext_len);
+    let ciphertext_len = match (&mut enc.ciphertext_len).await {
+        Ok(len) => len,
+        Err(_) => {
+            return Err(enc.done.await.context("encryption task failed")?.err().unwrap_or_else(|| {
+                anyhow::anyhow!("encryption stopped unexpectedly")
+            }));
+        }
+    };
+
+    let upload_id = new_upload_id(rel_path);
+    let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
+    // Refused (pledge full…) before a byte is encrypted to disk.
+    let offset = start_resumable(&mut send, &mut recv, rel_path, &upload_id, ciphertext_len).await?;
+
+    let mut meta = SpoolMeta {
+        path: rel_path.to_string(),
+        plaintext_sha256: plaintext_sha256.to_string(),
+        plaintext_len,
+        upload_id,
+        ciphertext_len,
+        ciphertext_sha256: None,
+    };
+    tokio::fs::write(meta_path, serde_json::to_vec(&meta)?).await.context("failed to write the resumable copy")?;
+    let mut spool = tokio::fs::File::create(ct_path).await.context("failed to create the resumable copy")?;
+
+    let mut hasher = Sha256::new();
+    let mut written = 0u64;
+    let mut network_err: Option<anyhow::Error> = None;
+    while let Some(chunk) = enc.chunks.recv().await {
+        spool.write_all(&chunk).await.context("failed to write the resumable copy")?;
+        hasher.update(&chunk);
+        let start = written;
+        written += chunk.len() as u64;
+        if network_err.is_none() && written > offset {
+            let skip = offset.saturating_sub(start) as usize;
+            match send.write_all(&chunk[skip..]).await {
+                Ok(()) => {
+                    if let Some(counter) = bytes_sent {
+                        counter.fetch_add((chunk.len() - skip) as u64, Ordering::Relaxed);
+                    }
+                    #[cfg(test)]
+                    {
+                        let cut = TEST_CUT_AFTER_BYTES.load(Ordering::Relaxed);
+                        if cut > 0 && written >= cut {
+                            send.reset(iroh::endpoint::VarInt::from_u32(0)).ok();
+                            network_err = Some(anyhow::anyhow!("simulated connection drop"));
+                        }
+                    }
+                }
+                Err(err) => {
+                    let err = anyhow::Error::from(err).context("failed to send file bytes");
+                    // Refused partway (e.g. the buddy's disk filled up):
+                    // nothing to resume.
+                    if reject_reason_from_err(&err).is_some() {
+                        return Err(err);
+                    }
+                    tracing::info!(path = %rel_path, sent = start, total = ciphertext_len, "connection dropped mid-file — finishing the local copy so it can resume next cycle");
+                    network_err = Some(err);
+                }
+            }
+        }
+    }
+    enc.done.await.context("encryption task failed")??;
+    spool.sync_all().await.context("failed to flush the resumable copy")?;
+    if written != ciphertext_len {
+        anyhow::bail!("encrypted {written} bytes but announced {ciphertext_len} — aborting this file");
+    }
+    let hash = hex::encode(hasher.finalize());
+    meta.ciphertext_sha256 = Some(hash.clone());
+    tokio::fs::write(meta_path, serde_json::to_vec(&meta)?).await.context("failed to write the resumable copy")?;
+
+    if let Some(err) = network_err {
+        return Err(err);
+    }
+    finish_put(&mut send, &mut recv, hash).await?;
+    Ok(ciphertext_len)
 }
 
 /// Encrypts and uploads one file as a stream (protocol v2 PutStream), in

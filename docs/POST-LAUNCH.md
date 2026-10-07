@@ -21,9 +21,11 @@ Last reviewed: 2026-10-04.
       and pledge accounting all change. Alternative to evaluate first:
       `rustic_core` (Rust library behind rustic, a restic reimplementation)
       as the engine, with the buddy as its storage backend.
-- [ ] **Resume interrupted transfers.** A dropped connection mid-file
-      restarts that file from zero — painful for 100 GB files over a relay.
-      Falls out of chunking above (already-sent chunks don't re-send).
+- [x] **Resume interrupted transfers — done in client 0.8.0 (2026-10-07)**
+      for uploads of files ≥ 256 MB: the sender keeps the encrypted copy
+      it's sending and continues from the buddy's partial (protocol v3,
+      PutResumable). Restores still restart from zero; chunking above
+      would cover both.
 - [ ] **Instant change pickup.** Live change notifications (`notify` crate:
       inotify/FSEvents) on top of the periodic scan, so new files go out in
       seconds without frequent full scans. Doesn't work reliably on NFS/SMB

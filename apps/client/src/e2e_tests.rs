@@ -83,6 +83,7 @@ async fn e2e_backup_restore_versions_and_compat() {
 
     crate::crypto::init(&SecretString::from(PASS.to_string()), crate::crypto::tests::TEST_ACCOUNT).unwrap();
     crate::index::open(&config_a).unwrap();
+    crate::backup::init_spool(&config_a).await;
     let relay: RelayUrl = "https://relay.invalid".parse().unwrap();
 
     // Two endpoints that know each other's local address.
@@ -151,7 +152,54 @@ async fn e2e_backup_restore_versions_and_compat() {
         .map(|e| e.metadata().unwrap().len())
         .sum();
     assert_eq!(on_disk, sent_bytes, "index records exactly what the buddy stores");
-    assert!(!stored.join(".incoming").exists() || std::fs::read_dir(stored.join(".incoming")).unwrap().next().is_none());
+    let staged_files = walkdir::WalkDir::new(stored.join(".incoming")).into_iter().flatten().filter(|e| e.file_type().is_file()).count();
+    assert_eq!(staged_files, 0, "nothing left in upload staging");
+
+    // 1b. A big file whose upload is cut partway resumes where it stopped.
+    // (Files over RESUMABLE_MIN_BYTES — 1 MiB in tests — go resumably;
+    // medium.bin above already went that way without a cut.)
+    let resumable_data = pattern(5_000_000, 9);
+    write(&mine, "video/clip.mov", &resumable_data);
+    expected.insert("video/clip.mov".into(), resumable_data);
+    crate::backup::TEST_CUT_AFTER_BYTES.store(2_000_000, std::sync::atomic::Ordering::Relaxed);
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
+    crate::backup::TEST_CUT_AFTER_BYTES.store(0, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!((stats.files_sent, stats.files_failed), (0, 1), "cut upload: {stats:?}");
+    let spooled = std::fs::read_dir(config_a.join("outgoing")).unwrap().count();
+    assert_eq!(spooled, 2, "the local copy (.ct + .json) is kept to resume from");
+    // Give the receiver a moment to notice the reset and flush its partial.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
+    assert_eq!((stats.files_sent, stats.files_failed), (1, 0), "resumed upload: {stats:?}");
+    let resumed_from = crate::backup::TEST_LAST_RESUME_OFFSET.load(std::sync::atomic::Ordering::Relaxed);
+    assert!((1_000_000..5_000_000).contains(&resumed_from), "resumed partway, not from zero: {resumed_from}");
+    assert_eq!(std::fs::read_dir(config_a.join("outgoing")).unwrap().count(), 0, "local copy removed once stored");
+    let staged_files = walkdir::WalkDir::new(stored.join(".incoming")).into_iter().flatten().filter(|e| e.file_type().is_file()).count();
+    assert_eq!(staged_files, 0, "partial moved into place, nothing left staged");
+    eprintln!("cut upload resumed from byte {resumed_from}");
+
+    // 1c. Cut again, but the file changes before the retry: the stale
+    // copies on both sides are dropped and the new content goes in whole.
+    write(&mine, "video/clip.mov", &pattern(4_000_000, 10));
+    crate::backup::TEST_CUT_AFTER_BYTES.store(1_500_000, std::sync::atomic::Ordering::Relaxed);
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
+    crate::backup::TEST_CUT_AFTER_BYTES.store(0, std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(stats.files_failed, 1, "{stats:?}");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let changed = pattern(4_500_000, 11);
+    write(&mine, "video/clip.mov", &changed);
+    expected.insert("video/clip.mov".into(), changed);
+    crate::backup::TEST_LAST_RESUME_OFFSET.store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+    let stats = crate::backup::run_backup_cycle(&ep_a, &relay, &mine, b_id, None).await.unwrap();
+    assert_eq!((stats.files_sent, stats.files_failed), (1, 0), "changed file: {stats:?}");
+    assert_eq!(
+        crate::backup::TEST_LAST_RESUME_OFFSET.load(std::sync::atomic::Ordering::Relaxed),
+        u64::MAX,
+        "a changed file must not resume from the old copy"
+    );
+    assert_eq!(std::fs::read_dir(config_a.join("outgoing")).unwrap().count(), 0);
+    let staged_files = walkdir::WalkDir::new(stored.join(".incoming")).into_iter().flatten().filter(|e| e.file_type().is_file()).count();
+    assert_eq!(staged_files, 0, "the old partial was discarded");
 
     // 2. Nothing changed: nothing sent, no connection needed.
     let t = std::time::Instant::now();

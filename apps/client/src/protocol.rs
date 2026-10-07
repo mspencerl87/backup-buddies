@@ -9,7 +9,8 @@ pub const ALPN: &[u8] = b"backup-buddies/sync/1";
 
 /// This client's protocol version, reported in HelloResponse.
 /// 2 (client 0.5.0): PutStream.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3 (client 0.8.0): PutResumable.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Largest file sent to a buddy whose client predates PutStream: the old
 /// Put needs the whole file's hash before sending, so the encrypted file is
@@ -51,6 +52,16 @@ pub enum SyncRequest {
     /// the file has been encrypted and sent, so it follows the
     /// `ciphertext_len` raw bytes as a framed `PutTrailer`.
     PutStream { path: String, ciphertext_len: u64 },
+    /// Protocol v3's upload for big files: like PutStream, but an upload
+    /// cut off partway can carry on where it stopped. The receiver keeps
+    /// the partial bytes under `upload_id` and answers with a
+    /// PutResumeReply saying how many it already has; the sender then sends
+    /// only the rest, followed by a PutTrailer for the *whole* file, and
+    /// gets a SyncAck. Resuming only works because the sender kept the
+    /// exact ciphertext it started with (age encrypts with a fresh random
+    /// key each time, so re-encrypting would give different bytes) — a new
+    /// encryption always gets a new `upload_id`.
+    PutResumable { path: String, upload_id: String, ciphertext_len: u64 },
     /// Protocol v2's List: the same file list, sent as a series of
     /// ListChunk frames (LIST_CHUNK_ENTRIES each, last one `done: true`)
     /// instead of one frame — a single frame caps out around 10,000 files
@@ -157,6 +168,20 @@ pub struct ListChunk {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HelloResponse {
     pub protocol_version: u32,
+}
+
+/// The receiver's answer to PutResumable, before any file bytes: `offset`
+/// is how many bytes of this upload it already holds (0 for a new one).
+/// On a refusal `offset` is None and `reject_code` is the PutRejectReason
+/// code, also sent as STOP_SENDING like any other refusal.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct PutResumeReply {
+    #[serde(default)]
+    pub offset: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub reject_code: Option<u64>,
 }
 
 /// Sent after a PutStream's bytes.

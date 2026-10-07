@@ -284,6 +284,30 @@ time left, current file). It disappears when the cycle ends and the normal
 last-cycle line takes over. Served as `in_progress` on each buddy in
 `/api/status`.
 
+## Interrupted uploads resume (0.8.0)
+
+A big file (256 MB or more) whose upload is cut off partway — a dropped
+connection, a restart on either side — carries on from where it stopped on
+a later cycle instead of starting again from zero.
+
+Because every encryption uses a fresh random key, re-encrypting the file
+would give different bytes, so the sender keeps the exact encrypted copy
+it's sending in `DATA_DIR/outgoing/` and resumes from that. The copy is
+encrypted like everything that leaves this machine, and is deleted as
+soon as the buddy confirms the file. The buddy keeps the partial upload
+under `<sender>/.incoming/resume/`, and only stores the file once the
+hash of the whole thing checks out.
+
+- Needs both buddies on 0.8.0. With an older buddy, uploads work as before.
+- The copy needs free space on DATA_DIR's disk about the size of the file
+  (plus 1 GB to spare). Without it, the file is sent the old way, with no
+  resume.
+- If the file changes before the upload finishes, both copies are
+  discarded and the new version is sent whole.
+- If the sender's client is stopped while it's still encrypting, that copy
+  can't be resumed from and the file starts over (once). Copies and
+  partials nobody comes back for are deleted after 7 days.
+
 ## Large folders and large files (0.5.0)
 
 - **Change detection:** see `index.sqlite` above — an unchanged file is
