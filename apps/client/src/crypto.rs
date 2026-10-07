@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 //! Encryption keys and streaming encrypt/decrypt.
 //!
 //! Files used to be encrypted straight to the passphrase (age's scrypt

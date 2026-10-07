@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 // "Is this build current?" — the same question the web dashboard's Devices
 // card answers (see apps/web/dashboard.html), asked from inside the client
 // so its local dashboard can say so too.

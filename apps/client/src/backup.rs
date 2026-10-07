@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},

@@ -3,6 +3,7 @@ name = "backup-buddies-client"
 version = "0.9.0"
 edition = "2024"
 license = "GPL-3.0-only"
+authors = ["Spencer LeBlanc"]
 repository = "https://github.com/mspencerl87/backup-buddies-client"
 description = "Backup Buddies client: encrypted peer-to-peer backups to a buddy's device"
 # Pinned to iroh 1.3.0 to match deploy/relay's iroh-relay:v1.3.0 image —

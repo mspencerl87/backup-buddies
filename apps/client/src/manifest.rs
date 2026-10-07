@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 //! The old per-buddy JSON manifest format (`manifest-<buddy>.json`), kept
 //! only so `index.rs` can import it once when upgrading from client ≤0.4.x.
 //! Everything live is in the SQLite index now.

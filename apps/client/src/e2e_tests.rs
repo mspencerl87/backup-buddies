@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 //! End-to-end test of the transfer code: two real iroh endpoints on
 //! localhost, the real send / receive / reconcile / restore paths, no
 //! mocks in between. Only the control-plane API (which would normally tell

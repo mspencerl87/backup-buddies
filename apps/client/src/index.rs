@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Spencer LeBlanc
+
 //! The client's on-disk index (SQLite, `DATA_DIR/index.sqlite`).
 //!
 //! Replaces the per-buddy `manifest-<buddy>.json` files, which were loaded

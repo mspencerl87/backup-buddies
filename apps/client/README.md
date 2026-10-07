@@ -522,6 +522,8 @@ how much of it they use.
 
 ## License
 
+Copyright (C) 2026 Spencer LeBlanc.
+
 The Backup Buddies client is free software, licensed under the
 [GNU General Public License v3.0](LICENSE) (GPL-3.0-only). You can read,
 build, change and share it; if you distribute a modified version, it must
