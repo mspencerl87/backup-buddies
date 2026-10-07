@@ -1030,12 +1030,11 @@ and the 0.8.3 retention-marker fix.
 
 - [x] e2e: a deleted photo's copies removed and gone from the list; the
       request refused for a live file, which stays.
-- [ ] Live (both on 0.9.0): on testa's Browse files for testb, click
-      Delete permanently on the deleted ISO → pop-up → OK → it disappears;
-      testb's log shows "permanently removed backup copies", and
-      `testa`'s folder in testb's `.versions/` no longer has the .v1 file.
-- [ ] Live: with testb still on 0.8.x, the button reports that the buddy
-      needs to update.
+- [x] Live (2026-10-07): testa on 0.9.0, testb on 0.8.2 → "your buddy's
+      client is too old for this — it'll work once they update", nothing
+      removed.
+- [x] Live (2026-10-07): both on 0.9.0 → pop-up → OK → "Deleted
+      17763….iso permanently." and the entry left the list.
 
 ## Needs testing — client 0.8.2: backup copies kept 30 days (2026-10-07)
 
