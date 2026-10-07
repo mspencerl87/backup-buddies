@@ -140,6 +140,10 @@ async fn e2e_backup_restore_versions_and_compat() {
     let expected_files = expected.len() + usize::from(big_mb > 0);
     assert_eq!(stats.files_sent, expected_files, "first cycle: {stats:?}");
     assert_eq!(stats.files_failed, 0, "{stats:?}");
+    // Relay is off in this test, so every byte is booked as direct.
+    let traffic = stats.traffic.expect("a cycle that connected reports its traffic");
+    assert_eq!(traffic.relay, 0, "{traffic:?}");
+    assert!(traffic.direct >= stats.bytes_sent && stats.bytes_sent > 0, "{traffic:?} vs {}", stats.bytes_sent);
     eprintln!("first cycle: {} files in {:.1}s, peak RSS so far {} MB", stats.files_sent, t.elapsed().as_secs_f64(), peak_rss_mb());
 
     let stored = buddy_files_b.join(a_id.to_string());

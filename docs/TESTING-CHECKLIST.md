@@ -1019,6 +1019,28 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.8.1: relay/direct accounting (2026-10-07)
+
+Found live during the 0.8.0 test: a backup cycle's bytes were all booked
+under the path selected at the *end* of the cycle. The LAN path closed as
+the connection dropped, leaving only the relay path, so 4.9 GB of LAN
+traffic was counted as relay on testa (and reported to the API as relay
+usage, which is what's billed and what the free 10 GB cap counts).
+Now `netinfo::PathMeter` splits each backup cycle's and restore's bytes by
+the paths that actually carried them (closed paths' final stats from
+`PathEvent::Closed`, open ones at the end; relay = measured on relay
+paths, the rest direct, so an error can only under-count relay). The
+buddy's side still books per stored file with the path seen when the
+connection opened.
+
+Also: after a resume, the progress line's speed/time left no longer
+counts the bytes the buddy already had.
+
+- [x] e2e: with the relay off, a cycle's traffic is all direct.
+- [ ] Live: after a LAN backup (even one that drops), testa's Bandwidth
+      card should show it as Direct, and no new relay usage should reach
+      the API for it.
+
 ## Needs testing — client 0.8.0: resumable uploads (2026-10-07)
 
 Files ≥ 256 MB upload resumably (protocol v3, PutResumable): the sender
@@ -1035,11 +1057,11 @@ from the buddy's partial on the next cycle. Details in the client README,
 - [x] Unit: a restart clears ordinary staging but keeps resumable partials.
 - [x] Older buddies: uploads use PutStream / Put as before (e2e compat
       section unchanged and passing).
-- [ ] Live: both testa and testb on 0.8.0. Free room in testb's pledge
-      (it's full), put a ≥ 1 GB file in testa's folder, and while it's
-      sending run `docker compose restart` on **testb**. testb's log should
-      show "resuming upload from buddy" with an offset, testa's "resuming
-      upload", and the file should restore byte-identical (sha256).
+- [x] **Live (2026-10-07), testa → testb on 0.8.0:** a 5.65 GB ISO's
+      connection dropped after 5.14 GB (the LAN-path drop below, not a
+      restart); the next cycle resumed at offset 5,139,857,408 and sent
+      only 525 MB. Restored copy's sha256 matches the original
+      (`6dae072e…`).
 - [ ] Live: same, but restart **testa** after its log says "connection
       dropped mid-file — finishing the local copy" (or after the copy is
       done); it should resume after the restart too.

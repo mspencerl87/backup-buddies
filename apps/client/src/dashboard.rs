@@ -671,9 +671,8 @@ async fn restore_version_handler(
                 dir = %format!("{}/{}", state.restore_dir_display, node_id_str),
                 "restore from the dashboard complete"
             );
-            if let Some(connection) = &stats.connection {
-                crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
-                    .await;
+            if let Some(traffic) = stats.traffic {
+                crate::bandwidth::record_split(&state.data_dir, &state.bandwidth_book, traffic).await;
             }
             Json(RestoreResponse {
                 restored_files: stats.files_restored,
@@ -774,9 +773,8 @@ async fn restore_handler(
                 dir = %format!("{}/{}", state.restore_dir_display, node_id_str),
                 "restore from the dashboard complete"
             );
-            if let Some(connection) = &stats.connection {
-                crate::bandwidth::record(&state.data_dir, &state.bandwidth_book, connection, stats.bytes_restored)
-                    .await;
+            if let Some(traffic) = stats.traffic {
+                crate::bandwidth::record_split(&state.data_dir, &state.bandwidth_book, traffic).await;
             }
             Json(RestoreResponse {
                 restored_files: stats.files_restored,
@@ -1195,8 +1193,11 @@ function describeCycleProgress(p) {
     line += " — " + fmtBytes(done) + " of " + fmtBytes(p.bytes_to_send) + " (" + Math.floor(frac * 100) + "%)";
     const elapsed = p.sending_started_unix ? p.now_unix - p.sending_started_unix : 0;
     const remaining = p.bytes_to_send - done;
-    if (elapsed >= 5 && done > 0 && remaining > 0) {
-      const rate = done / elapsed;
+    // Bytes a resumed upload found already on the buddy weren't sent
+    // this cycle; leave them out of the speed.
+    const sentNow = done - (p.bytes_skipped || 0);
+    if (elapsed >= 5 && sentNow > 0 && remaining > 0) {
+      const rate = sentNow / elapsed;
       line += " — ~" + fmtEta(remaining / rate) + " left at " + fmtBytes(rate) + "/s";
     }
   }

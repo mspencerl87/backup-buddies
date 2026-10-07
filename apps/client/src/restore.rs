@@ -50,6 +50,8 @@ pub struct RestoreStats {
     pub bytes_restored: u64,
     pub duration_ms: u64,
     pub connection: Option<ConnectionQuality>,
+    // Bytes received, split by path (see netinfo::PathMeter).
+    pub traffic: Option<netinfo::ByteSplit>,
 }
 
 /// Connects to a buddy and asks what they're holding for us — no
@@ -118,6 +120,7 @@ pub async fn restore_version(
 ) -> Result<RestoreStats> {
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let meter = netinfo::PathMeter::start(&conn, netinfo::Direction::Received);
 
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
     protocol::write_frame(&mut send, &SyncRequest::GetVersion { path: path.to_string(), version }).await?;
@@ -138,6 +141,7 @@ pub async fn restore_version(
         bytes_restored: ciphertext_len,
         duration_ms: started.elapsed().as_millis() as u64,
         connection: Some(netinfo::connection_quality(&conn)),
+        traffic: Some(meter.finish(&conn)),
     })
 }
 
@@ -242,6 +246,7 @@ pub async fn run_restore(
 ) -> Result<RestoreStats> {
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let meter = netinfo::PathMeter::start(&conn, netinfo::Direction::Received);
     let files = list_on(&conn).await?;
     tracing::info!(count = files.len(), "buddy reports this many files on restore");
 
@@ -253,6 +258,7 @@ pub async fn run_restore(
         bytes_restored,
         duration_ms: started.elapsed().as_millis() as u64,
         connection: Some(netinfo::connection_quality(&conn)),
+        traffic: Some(meter.finish(&conn)),
     })
 }
 
@@ -278,6 +284,7 @@ pub async fn restore_selected(
 ) -> Result<RestoreStats> {
     let started = std::time::Instant::now();
     let conn = connect(endpoint, relay_url, buddy_id).await?;
+    let meter = netinfo::PathMeter::start(&conn, netinfo::Direction::Received);
     let (files_restored, bytes_restored) =
         restore_paths_on(&conn, _passphrase, restore_dir, paths, progress.as_ref()).await?;
     Ok(RestoreStats {
@@ -285,6 +292,7 @@ pub async fn restore_selected(
         bytes_restored,
         duration_ms: started.elapsed().as_millis() as u64,
         connection: Some(netinfo::connection_quality(&conn)),
+        traffic: Some(meter.finish(&conn)),
     })
 }
 

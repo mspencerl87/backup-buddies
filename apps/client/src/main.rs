@@ -960,15 +960,9 @@ async fn main() -> Result<()> {
                                 )
                                 .await;
                                 if let Ok(stats) = &result
-                                    && let Some(connection) = &stats.connection
+                                    && let Some(traffic) = stats.traffic
                                 {
-                                    bandwidth::record(
-                                        &config.data_dir,
-                                        &bandwidth_book,
-                                        connection,
-                                        stats.bytes_sent,
-                                    )
-                                    .await;
+                                    bandwidth::record_split(&config.data_dir, &bandwidth_book, traffic).await;
                                 }
                                 let record = match &result {
                                     Ok(stats)

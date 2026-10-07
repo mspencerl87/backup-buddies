@@ -43,6 +43,9 @@ pub struct BackupCycleStats {
     pub bytes_sent: u64,
     pub duration_ms: u64,
     pub connection: Option<ConnectionQuality>,
+    // bytes_sent split by the paths that actually carried it, for the
+    // relay/direct totals (and relay billing). None when nothing connected.
+    pub traffic: Option<netinfo::ByteSplit>,
     // How many put/delete calls failed this cycle — not fatal (the cycle
     // itself still ran, and anything that failed just stays in next
     // cycle's diff and gets retried), but worth the dashboard calling out:
@@ -86,8 +89,14 @@ pub struct CycleProgress {
     /// This device's clock when the snapshot was taken, so the browser
     /// measures elapsed time against the same clock (no skew).
     pub now_unix: u64,
+    /// Bytes of resumed uploads the buddy already had: they move the bar
+    /// but weren't sent this cycle, so the speed leaves them out (after a
+    /// resume it read "144 MB/s, ~3s left").
+    pub bytes_skipped: u64,
     #[serde(skip)]
     current_counter: Arc<AtomicU64>,
+    #[serde(skip)]
+    skipped_counter: Arc<AtomicU64>,
 }
 
 impl CycleProgress {
@@ -96,6 +105,7 @@ impl CycleProgress {
         let mut copy = self.clone();
         copy.current_done = self.current_counter.load(Ordering::Relaxed).min(self.current_size);
         copy.now_unix = crate::dashboard::unix_now();
+        copy.bytes_skipped = self.skipped_counter.load(Ordering::Relaxed);
         copy
     }
 }
@@ -109,11 +119,13 @@ struct ProgressTracker {
     book: Option<CycleProgressBook>,
     node_id: String,
     counter: Arc<AtomicU64>,
+    skipped: Arc<AtomicU64>,
 }
 
 impl ProgressTracker {
     fn new(book: Option<&CycleProgressBook>, node_id: &str) -> Self {
         let counter = Arc::new(AtomicU64::new(0));
+        let skipped = Arc::new(AtomicU64::new(0));
         if let Some(book) = book {
             book.lock().unwrap().insert(
                 node_id.to_string(),
@@ -121,11 +133,12 @@ impl ProgressTracker {
                     phase: "checking",
                     started_unix: crate::dashboard::unix_now(),
                     current_counter: counter.clone(),
+                    skipped_counter: skipped.clone(),
                     ..Default::default()
                 },
             );
         }
-        Self { book: book.cloned(), node_id: node_id.to_string(), counter }
+        Self { book: book.cloned(), node_id: node_id.to_string(), counter, skipped }
     }
 
     fn update(&self, f: impl FnOnce(&mut CycleProgress)) {
@@ -317,6 +330,7 @@ pub async fn run_backup_cycle(
     let cycle_started = std::time::Instant::now();
     let addr = EndpointAddr::new(buddy_id).with_relay_url(relay_url.clone());
     let conn = endpoint.connect(addr, protocol::ALPN).await.map_err(protocol::explain_connect_error)?;
+    let meter = netinfo::PathMeter::start(&conn, netinfo::Direction::Sent);
 
     // Streaming uploads need the buddy on client 0.5.0+; older buddies get
     // the old whole-file upload (size-limited, see LEGACY_PUT_MAX_BYTES).
@@ -355,8 +369,17 @@ pub async fn run_backup_cycle(
             continue;
         }
         let result = if resumable && *size >= RESUMABLE_MIN_BYTES {
-            put_one_file_resumable(&conn, &buddy_node_id, rel_path, abs_path, *size, sha256, Some(&tracker.counter))
-                .await
+            put_one_file_resumable(
+                &conn,
+                &buddy_node_id,
+                rel_path,
+                abs_path,
+                *size,
+                sha256,
+                Some(&tracker.counter),
+                Some(&tracker.skipped),
+            )
+            .await
         } else if streaming {
             put_one_file(&conn, rel_path, abs_path, *size, Some(&tracker.counter)).await
         } else {
@@ -446,6 +469,7 @@ pub async fn run_backup_cycle(
         bytes_sent: conn.stats().udp_tx.bytes,
         duration_ms: cycle_started.elapsed().as_millis() as u64,
         connection: Some(netinfo::connection_quality(&conn)),
+        traffic: Some(meter.finish(&conn)),
         files_failed,
         failed_paths,
     };
@@ -688,6 +712,7 @@ async fn put_one_file_resumable(
     plaintext_len: u64,
     plaintext_sha256: &str,
     bytes_sent: Option<&Arc<AtomicU64>>,
+    bytes_skipped: Option<&Arc<AtomicU64>>,
 ) -> Result<u64> {
     let Some(dir) = SPOOL_DIR.get() else {
         return put_one_file(conn, rel_path, abs_path, plaintext_len, bytes_sent).await;
@@ -704,7 +729,7 @@ async fn put_one_file_resumable(
             && meta.ciphertext_sha256.is_some()
             && ct_len == Some(meta.ciphertext_len)
         {
-            let result = send_from_spool(conn, &meta, &ct_path, bytes_sent).await;
+            let result = send_from_spool(conn, &meta, &ct_path, bytes_sent, bytes_skipped).await;
             if result.is_ok() || drop_spool_after(result.as_ref().err()) {
                 remove_spool(&ct_path, &meta_path).await;
             }
@@ -739,6 +764,7 @@ async fn send_from_spool(
     meta: &SpoolMeta,
     ct_path: &Path,
     bytes_sent: Option<&Arc<AtomicU64>>,
+    bytes_skipped: Option<&Arc<AtomicU64>>,
 ) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
     let (mut send, mut recv) = conn.open_bi().await.context("failed to open stream")?;
@@ -751,6 +777,9 @@ async fn send_from_spool(
     // The bytes the buddy already holds count as done on the progress bar.
     if let Some(counter) = bytes_sent {
         counter.fetch_add(offset, Ordering::Relaxed);
+    }
+    if let Some(skipped) = bytes_skipped {
+        skipped.fetch_add(offset, Ordering::Relaxed);
     }
     let mut file = tokio::fs::File::open(ct_path).await.context("failed to open the resumable copy")?;
     file.seek(std::io::SeekFrom::Start(offset)).await?;

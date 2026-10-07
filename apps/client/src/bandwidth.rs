@@ -69,6 +69,22 @@ pub async fn record(data_dir: &Path, book: &BandwidthBook, quality: &ConnectionQ
     }
 }
 
+/// Adds a connection's relay/direct split (see netinfo::PathMeter) and
+/// persists the new totals.
+pub async fn record_split(data_dir: &Path, book: &BandwidthBook, split: crate::netinfo::ByteSplit) {
+    if split.relay == 0 && split.direct == 0 {
+        return;
+    }
+    {
+        let mut totals = book.lock().unwrap();
+        totals.relay_bytes += split.relay;
+        totals.direct_bytes += split.direct;
+    }
+    if let Err(err) = save(data_dir, book).await {
+        tracing::warn!(?err, "failed to persist bandwidth totals");
+    }
+}
+
 const BYTES_PER_MB: u64 = 1024 * 1024;
 
 /// Whole megabytes of relay traffic accumulated since the last successful
