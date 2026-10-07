@@ -308,6 +308,18 @@ hash of the whole thing checks out.
   can't be resumed from and the file starts over (once). Copies and
   partials nobody comes back for are deleted after 7 days.
 
+## Known issue: dropped connections on a local network
+
+Occasionally a long transfer between buddies on the same local network
+loses its connection partway through, usually minutes in, logged as
+`failed closing path err=LastOpenPath` and then `connection lost` /
+`timed out`. The next cycle carries on: big files resume (above), smaller
+ones are re-sent. Seen so far only with both clients on the same machine
+(testa/testb), where every interface address, including the Docker bridge
+(`docker0`, 172.17.0.1), is offered as a route; the cause isn't confirmed.
+If you run two clients on one host and see it often, that's the likely
+reason. Details and next steps: docs/POST-LAUNCH.md.
+
 ## Large folders and large files (0.5.0)
 
 - **Change detection:** see `index.sqlite` above — an unchanged file is

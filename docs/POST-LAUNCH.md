@@ -26,6 +26,26 @@ Last reviewed: 2026-10-04.
       it's sending and continues from the buddy's partial (protocol v3,
       PutResumable). Restores still restart from zero; chunking above
       would cover both.
+- [ ] **Dropped connections between buddies on a local network.** Seen
+      twice (2026-10-06/07), testa and testb on the same host
+      (`backupbuddy`, host networking, ports 11235/11236): minutes into a
+      multi-GB upload, noq's per-path idle timer fires on the only open IP
+      path (`failed closing path err=LastOpenPath`, from
+      `PathTimer::PathIdle`), and the connection times out ~11 s later.
+      Both times shortly after testb's mDNS record was re-sighted. In a
+      clean run with `RUST_LOG=…,iroh::_events=debug,iroh::socket::remote_map=debug`
+      the selected path was the Docker bridge (`172.17.0.1→172.17.0.1`),
+      IP paths were opened and closed (code 62) every few seconds, and a
+      relay path did exist. With the socket on 0.0.0.0, iroh offers every
+      interface address as a candidate, including `docker0` even when
+      DOWN; every Docker host has 172.17.0.1 and every client the same
+      default port, so a remote buddy's 172.17.0.1:11235 candidate points
+      at your own client. Not fixed: binding to specific addresses would
+      stop that but break direct connections if the address changes.
+      Since 0.8.0 a drop costs one cycle plus a resume; since 0.8.1 it's no
+      longer booked as relay. Next: catch a drop with the debug logging on,
+      and try two clients on separate machines. Documented as a known
+      limitation (status page, setup troubleshooting, client README).
 - [ ] **Instant change pickup.** Live change notifications (`notify` crate:
       inotify/FSEvents) on top of the periodic scan, so new files go out in
       seconds without frequent full scans. Doesn't work reliably on NFS/SMB
