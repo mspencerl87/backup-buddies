@@ -91,6 +91,16 @@ async fn rotate_versions(sender_dir: &Path, rel_path: &str) {
             let _ = tokio::fs::rename(&from, &to).await;
         }
     }
+    // A .versions/ created now can only ever hold copies dated "when
+    // kept", so it gets the retention marker straight away; otherwise the
+    // first daily sweep would treat its copies as pre-retention and
+    // re-date them (pushing their removal back by up to a day).
+    let versions = versions_root(sender_dir);
+    if tokio::fs::metadata(&versions).await.is_err()
+        && tokio::fs::create_dir_all(&versions).await.is_ok()
+    {
+        let _ = tokio::fs::write(versions.join(RETENTION_MARKER), RETENTION_MARKER_TEXT).await;
+    }
     if let Some(slot1) = version_path(sender_dir, rel_path, 1) {
         if let Some(parent) = slot1.parent()
             && let Err(err) = tokio::fs::create_dir_all(parent).await
@@ -117,6 +127,7 @@ pub const VERSION_RETENTION_DAYS: u64 = 30;
 /// expire_versions); its absence means copies still carry their upload
 /// time from before retention existed.
 const RETENTION_MARKER: &str = ".retention-v1";
+const RETENTION_MARKER_TEXT: &[u8] = b"backup copies here are dated by when they were kept\n";
 
 fn retention() -> std::time::Duration {
     std::time::Duration::from_secs(VERSION_RETENTION_DAYS * 24 * 60 * 60)
@@ -183,7 +194,7 @@ pub async fn expire_versions(buddy_files_dir: &Path) -> (usize, u64) {
                 }
             }
             if first_run {
-                let _ = std::fs::write(&marker, b"backup copies here are dated by when they were kept\n");
+                let _ = std::fs::write(&marker, RETENTION_MARKER_TEXT);
             }
         }
         removed
@@ -1321,6 +1332,7 @@ mod tests {
         rotate_versions(&root, "docs/report.pdf").await;
         let slot = version_path(&root, "docs/report.pdf", 1).unwrap();
         assert!(slot.exists() && age_secs(&slot) < 60);
+        assert!(versions_root(&root).join(RETENTION_MARKER).exists(), "a fresh .versions/ is marked right away");
         let _ = tokio::fs::remove_dir_all(&root).await;
     }
 

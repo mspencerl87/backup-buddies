@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "backup-buddies-client"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "age",
  "age-core",

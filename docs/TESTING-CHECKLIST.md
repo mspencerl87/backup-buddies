@@ -1029,9 +1029,14 @@ update. History shows "removed in N days" (from `expires_unix`).
 
 - [x] Unit: first run re-dates, later runs remove >30-day copies, keep
       newer ones, remove emptied folders; a new copy is dated now.
-- [ ] Live: after updating testb, `.versions/.retention-v1` appears in
-      testa's folder on testb; delete a file on testa, open History on it
-      from testa's dashboard → "kept … ago, removed in 30 days".
+- [x] Live (2026-10-07, 0.8.2): deleted the 5.3 GB ISO on testa; History
+      showed "Version 1 — 5.3 GB, kept 1m ago, removed in 30 days", copy
+      on testb dated at the delete.
+- Found then: the marker wasn't written, because `.versions/` didn't
+  exist yet at startup's sweep, so the first daily sweep would re-date the
+  copy once (removal pushed back by up to a day). 0.8.3 writes the marker
+  whenever `rotate_versions` creates `.versions/`. Folders created under
+  0.8.2 still get the one-time re-date.
 
 ## Needs testing — client 0.8.1: relay/direct accounting (2026-10-07)
 
