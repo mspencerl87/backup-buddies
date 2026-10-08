@@ -5,7 +5,7 @@ import { requireAdmin } from '../middleware/require-admin.js';
 import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
 import { isAdminEmail } from '../lib/admin.js';
 import { stripe } from '../lib/stripe.js';
-import { FREE_RELAY_GB_PER_MONTH } from '../lib/relay-billing.js';
+import { FREE_RELAY_GB_PER_MONTH, FREE_RELAY_CAP_REASON } from '../lib/relay-billing.js';
 import { sendVerificationEmail } from '../lib/email-verification.js';
 import { createPasswordResetLink } from '../lib/password-reset.js';
 import { isMailConfigured } from '../lib/mailer.js';
@@ -29,7 +29,7 @@ adminRouter.get('/admin/accounts', async (req, res) => {
   const result = await pool.query(
     `SELECT accounts.id, accounts.email, accounts.nickname, accounts.tier,
             accounts.relay_status, accounts.relay_paused_at, accounts.relay_paused_reason,
-            accounts.created_at,
+            accounts.created_at, accounts.billing_exempt,
             (accounts.stripe_subscription_id IS NOT NULL) AS has_subscription,
             (SELECT count(*) FROM devices
               WHERE devices.account_id = accounts.id) AS device_count,
@@ -177,7 +177,7 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
   ] = await Promise.all([
     pool.query(
       `SELECT id, email, nickname, tier, relay_status, relay_paused_at, relay_paused_reason,
-              created_at, terms_accepted_at,
+              created_at, terms_accepted_at, billing_exempt,
               stripe_customer_id, stripe_subscription_id, stripe_subscription_item_id,
               (password_hash IS NOT NULL AND password_hash <> '') AS has_password,
               (google_sub IS NOT NULL) AS has_google,
@@ -425,6 +425,38 @@ adminRouter.post('/admin/accounts/:id/relay', async (req, res) => {
   }
   logAdminAction(req, `relay-${action}`);
   res.json({ ok: true });
+});
+
+// Complimentary account: never needs a card. Skips the free-allowance 402s
+// in invites.js, and relay usage is never billed or capped
+// (lib/relay-billing.js). Manual only; ADMIN_EMAILS doesn't imply it.
+// Doesn't touch Stripe: a live subscription keeps billing for storage
+// until it's cancelled (Stripe section below).
+//
+// Granting it also lifts a free-allowance pause, since that cap no longer
+// applies; any other pause (payment_failed, admin) is left alone. Revoking
+// it doesn't re-pause anything: the next relay report re-applies the cap.
+adminRouter.post('/admin/accounts/:id/billing-exempt', async (req, res) => {
+  const { exempt } = req.body ?? {};
+  if (typeof exempt !== 'boolean') {
+    return res.status(400).json({ error: 'exempt must be true or false' });
+  }
+
+  const result = await pool.query(
+    `UPDATE accounts
+        SET billing_exempt = $2,
+            relay_status = CASE WHEN $2 AND relay_paused_reason = $3 THEN 'active' ELSE relay_status END,
+            relay_paused_at = CASE WHEN $2 AND relay_paused_reason = $3 THEN NULL ELSE relay_paused_at END,
+            relay_paused_reason = CASE WHEN $2 AND relay_paused_reason = $3 THEN NULL ELSE relay_paused_reason END
+      WHERE id = $1
+      RETURNING id`,
+    [req.params.id, exempt, FREE_RELAY_CAP_REASON],
+  );
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'account not found' });
+  }
+  logAdminAction(req, 'billing-exempt', `exempt=${exempt}`);
+  res.json({ ok: true, billing_exempt: exempt });
 });
 
 // --- Stripe ---

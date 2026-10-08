@@ -225,6 +225,10 @@
       // replacement, since an admin account can also have a real
       // subscription.
       const adminBadge = a.is_admin ? '<span class="tier-badge admin">admin</span>' : '';
+      // billing_exempt: a complimentary account (set from its detail view)
+      // that never needs a card. Also separate from admin, which doesn't
+      // imply it.
+      const compBadge = a.billing_exempt ? '<span class="tier-badge comp">comp</span>' : '';
       // has_subscription (stripe_subscription_id IS NOT NULL, from
       // routes/admin.js) is the real signal — accounts.tier is set once at
       // signup and nothing ever updates it afterward, so it can't be used
@@ -247,7 +251,7 @@
       return `
         <tr${rowClass}>
           <td>${a.nickname ? `${escapeHtml(a.nickname)} <span class="muted">(${escapeHtml(a.email)})</span>` : escapeHtml(a.email)}</td>
-          <td><span style="display:inline-flex; gap:0.35rem; flex-wrap:wrap">${adminBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span></td>
+          <td><span style="display:inline-flex; gap:0.35rem; flex-wrap:wrap">${adminBadge}${compBadge}${pausedBadge}<span class="tier-badge${isPaid ? ' paid' : ''}">${isPaid ? 'subscribed' : 'free'}</span></span></td>
           <td>${a.device_count}</td>
           <td>${a.buddies.length}</td>
           <td>${formatDate(a.created_at)}</td>
@@ -656,14 +660,18 @@
         ['Terms accepted', escapeHtml(formatDate(account.terms_accepted_at))],
         ['Joined', escapeHtml(formatDate(account.created_at))],
         ['Relay', relayStatus],
+        ['Complimentary', account.billing_exempt
+          ? '<span class="tier-badge comp">comp</span> <span class="muted">no card needed: pledges past the free allowance, relay never billed or capped</span>'
+          : 'no'],
         ['Pledged storage', `${pledge.pledged_gb} GB across active pairings` +
           ` <span class="muted">(${pledge.free_allowance_gb} GB free, ${pledge.billable_gb} GB billable)</span>`],
         ['Relay usage', `${formatBytes(relay.last_30d_bytes)} last 30 days · ${formatBytes(relay.total_bytes)} total` +
           (relay.last_event_at ? ` <span class="muted">(last ${escapeHtml(formatDate(relay.last_event_at))})</span>` : '') +
           unsynced],
         // Free accounts only: the monthly relay allowance that pauses them
-        // when used up (lib/relay-billing.js). Paid accounts aren't capped.
-        !account.stripe_subscription_id
+        // when used up (lib/relay-billing.js). Paid and comp accounts
+        // aren't capped.
+        !account.stripe_subscription_id && !account.billing_exempt
           ? ['Free relay this month', (() => {
               const usedGb = relay.this_month_bytes / (1024 ** 3);
               const over = usedGb >= relay.free_allowance_gb;
@@ -828,6 +836,35 @@
             showActionResult('detail-action-result', 'Relay resumed.');
           }
         }));
+      }
+
+      if (account.billing_exempt) {
+        wrap.appendChild(actionButton('Remove complimentary', async (btn) => {
+          if (!confirm(
+            `Make ${account.email} a regular account again? Existing pairings stay, but new pledges past the ` +
+            `free allowance will need a subscription, and free accounts' monthly relay cap applies from their next relay report.`
+          )) return;
+          const data = await runAdminAction(btn, '/billing-exempt', { exempt: false }, 'detail-action-result');
+          if (data) {
+            await Promise.all([loadAccountDetail(account.id, { scroll: false }), loadAccounts()]);
+            showActionResult('detail-action-result', 'No longer complimentary.');
+          }
+        }, { title: 'Back to normal free/paid billing' }));
+      } else {
+        wrap.appendChild(actionButton('Make complimentary', async (btn) => {
+          const subNote = account.stripe_subscription_id
+            ? '\n\nThey have a Stripe subscription: this stops relay billing, but storage keeps billing until you cancel it (Stripe section).'
+            : '';
+          if (!confirm(
+            `Make ${account.email} a complimentary account? They can pledge past the free allowance without a card, ` +
+            `and relay is never billed or capped (a free-allowance pause is lifted).${subNote}`
+          )) return;
+          const data = await runAdminAction(btn, '/billing-exempt', { exempt: true }, 'detail-action-result');
+          if (data) {
+            await Promise.all([loadAccountDetail(account.id, { scroll: false }), loadAccounts()]);
+            showActionResult('detail-action-result', 'Account is now complimentary.');
+          }
+        }, { title: 'Billing-exempt: for test and friend accounts' }));
       }
     }
 

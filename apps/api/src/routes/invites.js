@@ -102,9 +102,15 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
   // only becomes a real pledge once someone redeems it — see the same
   // check, done for real, in redeemInvite below), but there's no reason to
   // let someone generate a code for storage they can't legally accept.
+  // Complimentary (billing_exempt, set by an admin) accounts never need a
+  // card, so they skip this.
   const newPledgeGB = pledgedBytes / GB;
   const currentPledgeGB = await pledgedGBForAccount(req.account.id);
-  if (currentPledgeGB + newPledgeGB > FREE_GB && !req.account.stripe_subscription_id) {
+  if (
+    currentPledgeGB + newPledgeGB > FREE_GB &&
+    !req.account.stripe_subscription_id &&
+    !req.account.billing_exempt
+  ) {
     return res.status(402).json({
       error: `Creating this invite would bring your pledged total to ${currentPledgeGB + newPledgeGB}GB, over the ${FREE_GB}GB free allowance. Subscribe first (Billing, on your dashboard), then create the invite.`,
       requires_subscription: true,
@@ -244,21 +250,23 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
     // and lock as the insert below, rather than relying on the
     // best-effort check in POST /invites, which can't see pairings
     // created since the invite was issued or a subscription that's since
-    // lapsed.
+    // lapsed. A complimentary (billing_exempt) account counts as able to
+    // pay — each side is checked on its own, so pairing a comp account
+    // with a free one still holds the free side to its allowance.
     const newPledgeGB = Math.ceil(Number(invite.pledged_bytes) / GB);
     const inviterCurrentGB = await pledgedGBForAccountTx(client, invite.inviter_account_id);
     const redeemerCurrentGB = await pledgedGBForAccountTx(client, redeemerAccountId);
     const subsResult = await client.query(
-      `SELECT id, stripe_subscription_id FROM accounts WHERE id = ANY($1::uuid[])`,
+      `SELECT id, stripe_subscription_id, billing_exempt FROM accounts WHERE id = ANY($1::uuid[])`,
       [[invite.inviter_account_id, redeemerAccountId]],
     );
-    const hasSubscription = new Map(
-      subsResult.rows.map((row) => [row.id, Boolean(row.stripe_subscription_id)]),
+    const canPayPastFree = new Map(
+      subsResult.rows.map((row) => [row.id, Boolean(row.stripe_subscription_id) || row.billing_exempt]),
     );
 
     if (
       inviterCurrentGB + newPledgeGB > FREE_GB &&
-      !hasSubscription.get(invite.inviter_account_id)
+      !canPayPastFree.get(invite.inviter_account_id)
     ) {
       await client.query('ROLLBACK');
       return {
@@ -269,7 +277,7 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
         },
       };
     }
-    if (redeemerCurrentGB + newPledgeGB > FREE_GB && !hasSubscription.get(redeemerAccountId)) {
+    if (redeemerCurrentGB + newPledgeGB > FREE_GB && !canPayPastFree.get(redeemerAccountId)) {
       await client.query('ROLLBACK');
       return {
         status: 402,

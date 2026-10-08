@@ -83,6 +83,9 @@ billingRouter.get('/billing/summary', requireAuth, async (req, res) => {
     // is the actual source of truth for what gets charged.
     estimated_monthly_usd: Number(((billableGB * USD_PER_TB_MONTH) / 1024).toFixed(2)),
     has_subscription: Boolean(req.account.stripe_subscription_id),
+    // Complimentary account (set by an admin, see routes/admin.js): no
+    // card needed, so the dashboard shows that instead of Subscribe.
+    billing_exempt: Boolean(req.account.billing_exempt),
     relay_status: req.account.relay_status,
     // Relay-bandwidth billing is paid-tier only (bundled into the same
     // checkout/subscription as storage below) — these let the dashboard

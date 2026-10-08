@@ -1,0 +1,12 @@
+-- Complimentary ("comp") accounts: set by an admin (POST
+-- /admin/accounts/:id/billing-exempt) for test and friend accounts that
+-- should never need a card. An exempt account can pledge past FREE_GB
+-- without a subscription (routes/invites.js), and its relay usage is
+-- recorded like a free account's (never sent to Stripe) but never capped
+-- or paused (lib/relay-billing.js).
+--
+-- Manual only: ADMIN_EMAILS accounts are not exempt automatically.
+--
+-- Unlike 015, the API reads this column directly, so apply it on app-1
+-- BEFORE pushing the code that uses it (docs/DEPLOY.md, section 28).
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS billing_exempt BOOLEAN NOT NULL DEFAULT false;

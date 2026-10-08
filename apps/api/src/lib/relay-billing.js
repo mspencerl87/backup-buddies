@@ -9,7 +9,8 @@ import { sendMail, SUPPORT_EMAIL } from './mailer.js';
 // bandwidth. They do get a monthly allowance instead (FREE_RELAY_GB below):
 // their usage is recorded but never sent to Stripe, and crossing the
 // allowance pauses the account's buddy syncing until the 1st of next month
-// (jobs/reset-free-relay-cap.js) or until it subscribes.
+// (jobs/reset-free-relay-cap.js) or until it subscribes. Complimentary
+// (billing_exempt) accounts are neither billed nor capped.
 
 // Must match the event_name used when creating the Stripe Billing Meter —
 // see scripts/create-stripe-relay-meter-and-price.mjs. Stripe's meter-events
@@ -71,32 +72,38 @@ export async function relayBytesThisMonth(accountId) {
 // to Stripe (and never billed retroactively if the account subscribes
 // later) — they're recorded only to enforce FREE_RELAY_GB_PER_MONTH and to
 // show usage on the dashboard and admin page.
+//
+// Complimentary accounts (billing_exempt, set by an admin): recorded like
+// free ones, so never billed, even if they also have a subscription, but
+// never capped or paused either.
 export async function recordRelayUsage(accountId, relayMb) {
   if (!Number.isInteger(relayMb) || relayMb <= 0) return;
   const clampedMb = Math.min(relayMb, MAX_RELAY_MB_PER_REPORT);
 
   const account = await pool.query(
-    `SELECT email, stripe_subscription_id, relay_status FROM accounts WHERE id = $1`,
+    `SELECT email, stripe_subscription_id, relay_status, billing_exempt FROM accounts WHERE id = $1`,
     [accountId],
   );
   const row = account.rows[0];
   if (!row || row.relay_status !== 'active') return;
 
   const isFree = !row.stripe_subscription_id;
+  const neverBilled = isFree || row.billing_exempt;
   const bytes = BigInt(clampedMb) * 1024n * 1024n;
   await pool.query(
     `INSERT INTO relay_usage_events (account_id, bytes_relayed, occurred_at, synced_to_stripe)
      VALUES ($1, $2, now(), $3)`,
-    [accountId, bytes.toString(), isFree],
+    [accountId, bytes.toString(), neverBilled],
   );
 
-  if (isFree) await enforceFreeRelayCap(accountId, row.email);
+  if (isFree && !row.billing_exempt) await enforceFreeRelayCap(accountId, row.email);
 }
 
 // Pauses a free account once this month's relay usage passes the
 // allowance, and tells them why. The UPDATE only matches an account that
-// is still active and still unsubscribed, so a duplicate call (or one that
-// races a just-completed checkout) is a no-op and never re-sends the email.
+// is still active, still unsubscribed and still not exempt, so a duplicate
+// call (or one that races a just-completed checkout or an admin marking it
+// complimentary) is a no-op and never re-sends the email.
 async function enforceFreeRelayCap(accountId, email) {
   const usedBytes = await relayBytesThisMonth(accountId);
   if (usedBytes < FREE_RELAY_GB_PER_MONTH * BYTES_PER_GB) return;
@@ -107,6 +114,7 @@ async function enforceFreeRelayCap(accountId, email) {
             relay_paused_at = now(),
             relay_paused_reason = $2
       WHERE id = $1 AND relay_status = 'active' AND stripe_subscription_id IS NULL
+        AND NOT billing_exempt
       RETURNING id`,
     [accountId, FREE_RELAY_CAP_REASON],
   );

@@ -1034,3 +1034,33 @@ workflow) to confirm it pushes.
 
 Before anything new lands in `apps/client`, remember it goes public: no
 secrets, test-device details or references to private docs there.
+
+## 28. Complimentary (billing-exempt) accounts
+
+`accounts.billing_exempt`, toggled from an account's detail view in the
+admin page ("Make complimentary" / "Remove complimentary", logged as
+`[admin] … billing-exempt`). For test and friend accounts that should never
+need a card:
+- Pledges past the 50GB free allowance don't need a subscription (both when
+  creating an invite and when a pairing is accepted). The other side of a
+  pairing is still checked on its own.
+- Relay usage is recorded but never sent to Stripe, and the free monthly
+  relay cap never pauses them. Granting it lifts a `free_relay_cap` pause;
+  other pauses (payment failed, admin) stay.
+- The dashboard's Billing card says "Complimentary account — no billing"
+  instead of Subscribe.
+
+Manual only: being in `ADMIN_EMAILS` does not make an account exempt. It
+doesn't touch Stripe either; an existing subscription keeps billing for
+storage until it's cancelled from the admin Stripe section.
+
+**Migration** (apply on app-1 **before** pushing the code; the API reads
+the column directly, so invites, relay reports and the admin page fail
+until it exists):
+```bash
+cd /opt/backup-buddies/deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
+  < ../../db/migrations/016_billing_exempt.sql
+```
+The file isn't on app-1 until the push, so copy it over first (or paste the
+one `ALTER TABLE` line into `psql`).

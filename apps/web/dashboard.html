@@ -353,6 +353,17 @@
       summaryEl.textContent =
         `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.${relayNote}`;
 
+      // Complimentary accounts (billing_exempt, set by an admin) never need
+      // a card: no allowance to show, no Subscribe button. One that still
+      // has a subscription keeps the normal view, so Manage billing stays
+      // reachable (it bills for storage until cancelled).
+      if (data.billing_exempt && !data.has_subscription) {
+        summaryEl.textContent = `Complimentary account — no billing. ${data.pledged_gb}GB pledged across your buddy pairings.`;
+        document.getElementById('billing-relay-allowance').style.display = 'none';
+        btnEl.style.display = 'none';
+        return;
+      }
+
       // Free accounts get a monthly relay allowance instead of relay billing.
       // Direct connections never count toward it, so most people only ever
       // see a small number here.
