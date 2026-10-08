@@ -58,6 +58,14 @@ you don't want to discover mid-production.
 See `docs/DEPLOY.md` for the step-by-step: provisioning the two Linodes,
 DNS records, environment variables, and the first `docker-compose up`.
 
+## Reference
+
+- `docs/API.md`: every API route, who can call it, what it takes and does.
+- `docs/OPERATIONS.md`: servers, outside services, every setting,
+  background jobs, scripts, CI, and routine commands.
+- `apps/client/README.md`, "Commands and settings": the client's commands,
+  `.env` settings, local dashboard endpoints and buddy protocol.
+
 ## Environment variables
 
 Copy `.env.example` to `.env` on `app-1` and fill in real values. **Never

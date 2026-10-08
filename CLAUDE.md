@@ -16,7 +16,10 @@ device over iroh (direct, or through our relay). Live at filegarden.net
 - `deploy/app`, `deploy/relay`: compose files for app-1 and relay-1.
 - `docs/`: `LAUNCH-CHECKLIST.md`, `POST-LAUNCH.md` (backlog),
   `TESTING-CHECKLIST.md` (test history), `DEPLOY.md` (numbered sections
-  per feature: add one when a change needs deploy steps).
+  per feature: add one when a change needs deploy steps), `API.md` (every
+  route) and `OPERATIONS.md` (settings, jobs, scripts, CI, commands).
+  Update those two, and the client README's "Commands and settings", when
+  a route, env var, job, script or client setting changes.
 
 ## Rules
 
