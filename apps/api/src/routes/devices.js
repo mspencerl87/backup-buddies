@@ -80,9 +80,10 @@ async function recordClientVersion(req) {
   }
 }
 
-// The client calls this on every startup (and periodically) once it has
-// generated or loaded its persistent Iroh keypair, so the server always
-// has an up-to-date node id to hand to its buddy's client.
+// The client calls this once per startup, after generating or loading its
+// persistent Iroh keypair (main.rs's register_node_id), so the server has
+// its node id to hand to its buddies' clients. Not repeated while running:
+// the keypair, and so the node id, can't change without a restart.
 devicesRouter.put('/devices/me/node-id', requireDeviceAuth, async (req, res) => {
   const { iroh_node_id } = req.body ?? {};
   if (typeof iroh_node_id !== 'string' || iroh_node_id.length === 0) {

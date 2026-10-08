@@ -870,12 +870,13 @@ adminRouter.post('/admin/accounts/:id/stripe/cancel', async (req, res) => {
 // device id can't accidentally reach across accounts.
 adminRouter.delete('/admin/accounts/:id/devices/:deviceId', async (req, res) => {
   const result = await pool.query(
-    `DELETE FROM devices WHERE id = $1 AND account_id = $2 RETURNING id`,
+    `DELETE FROM devices WHERE id = $1 AND account_id = $2 RETURNING id, label`,
     [req.params.deviceId, req.params.id],
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'device not found' });
   }
+  logAdminAction(req, 'delete-device', `device=${req.params.deviceId} label=${JSON.stringify(result.rows[0].label)}`);
   res.status(204).end();
 });
 
@@ -892,14 +893,20 @@ adminRouter.delete('/admin/accounts/:id/pairings/:pairingId', async (req, res) =
   const result = await pool.query(
     `DELETE FROM buddy_pairings
       WHERE id = $1 AND (account_a_id = $2 OR account_b_id = $2)
-      RETURNING id, account_a_id, account_b_id`,
+      RETURNING id, account_a_id, account_b_id, pledged_bytes, status`,
     [req.params.pairingId, req.params.id],
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'pairing not found' });
   }
 
-  const { account_a_id, account_b_id } = result.rows[0];
+  const { account_a_id, account_b_id, pledged_bytes, status } = result.rows[0];
+  logAdminAction(
+    req,
+    'delete-pairing',
+    `pairing=${req.params.pairingId} between=${account_a_id},${account_b_id} ` +
+      `pledged_bytes=${pledged_bytes} status=${status}`,
+  );
   await Promise.all([
     syncSubscriptionQuantity(account_a_id),
     syncSubscriptionQuantity(account_b_id),
@@ -912,12 +919,14 @@ adminRouter.delete('/admin/accounts/:id/pairings/:pairingId', async (req, res) =
 // else — that's the inviter's to remove).
 adminRouter.delete('/admin/accounts/:id/invites/:inviteId', async (req, res) => {
   const result = await pool.query(
-    `DELETE FROM invites WHERE id = $1 AND inviter_account_id = $2 RETURNING id`,
+    `DELETE FROM invites WHERE id = $1 AND inviter_account_id = $2 RETURNING id, code, status`,
     [req.params.inviteId, req.params.id],
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'invite not found' });
   }
+  const invite = result.rows[0];
+  logAdminAction(req, 'delete-invite', `invite=${invite.id} code=${invite.code} status=${invite.status}`);
   res.status(204).end();
 });
 
@@ -952,12 +961,20 @@ adminRouter.delete('/admin/accounts/:id', async (req, res) => {
   );
 
   const result = await pool.query(
-    `DELETE FROM accounts WHERE id = $1 RETURNING id, stripe_subscription_id`,
+    `DELETE FROM accounts WHERE id = $1 RETURNING id, email, stripe_subscription_id`,
     [req.params.id],
   );
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'account not found' });
   }
+  // The row is gone after this, so the log line is the only record of whose
+  // account it was.
+  logAdminAction(
+    req,
+    'delete-account',
+    `email=${result.rows[0].email} subscription=${result.rows[0].stripe_subscription_id ?? 'none'} ` +
+      `ended_pairings=${activePairings.rows.length}`,
+  );
 
   await Promise.all(
     activePairings.rows.map((row) => syncSubscriptionQuantity(row.other_account_id)),

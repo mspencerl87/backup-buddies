@@ -460,8 +460,10 @@ only reach back to the last time the container was recreated (every deploy).
 
 ### Deletes
 
-None of these are logged. All return `204` (except the account delete)
-or `404` if not found under that account.
+All are logged (`delete-device`, `delete-pairing`, `delete-invite`,
+`delete-account`; the account line includes the deleted email, since the
+row is gone afterwards). All return `204` (except the account delete) or
+`404` if not found under that account.
 
 | Route | Does |
 |---|---|
