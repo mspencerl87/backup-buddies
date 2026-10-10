@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-05",
+  "updated": "2026-10-10",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -48,6 +48,10 @@
     {
       "title": "Password reset and account support",
       "description": "Forgot your password? Use “Forgot password?” on the login page to get a reset link by email. For account, login, billing, or backup questions, use “Contact support” on your dashboard (it sends your account details along, so there's less back-and-forth), or email support@filegarden.net from your account's email address if you can't log in. Resetting your website password never affects your backups: files are encrypted with the passphrase on your own device, which is separate from your account password. That also means nobody, including us, can recover that passphrase if it's lost, so keep it somewhere safe."
+    },
+    {
+      "title": "Exclude files and folders",
+      "description": "Client 0.10.0 skips poor fits by default (Outlook PST/OST, live database files, virtual machine disks, temp files and OS clutter), and you can exclude anything else with Syncthing-style patterns in excludes.txt in the client's config folder. Edits apply on the next check, no restart needed."
     }
   ],
   "limitations": [
@@ -65,11 +69,6 @@
       "title": "Marketplace listing filters",
       "status": "in_progress",
       "description": "You can now filter “Find a buddy” by country. Upload speed, “usually online”, and “relay-only” are still shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
-    },
-    {
-      "title": "No file filtering yet",
-      "status": "limitation",
-      "description": "Everything in your configured backup folder is backed up — there's no way yet to exclude specific files or folders. (How often it checks is now adjustable with SCAN_INTERVAL_SECS, and unchanged files are never re-read, so large folders are fine.)"
     },
     {
       "title": "One buddy per pledge",

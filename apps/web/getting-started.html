@@ -166,8 +166,9 @@
           originals.</li>
       </ul>
       <p class="muted">
-        The client backs up everything in the folder you point it at; there's no exclude list yet. Keep what
-        you don't want backed up outside that folder. And remember your buddy can see file <em>names, paths
+        The client skips the worst of these by default (Outlook PST/OST, live database files, VM disks, temp
+        files), and you can exclude anything else with Syncthing-style patterns in <code>excludes.txt</code> in
+        its config folder; the client's README has the details. And remember your buddy can see file <em>names, paths
         and sizes</em> (never their contents), so don't put anything private in a file or folder name.
       </p>
     </section>

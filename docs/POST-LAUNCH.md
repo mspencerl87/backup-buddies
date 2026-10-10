@@ -8,14 +8,13 @@ Last reviewed: 2026-10-04.
 
 ## Real gaps (do first)
 
-- [ ] **Exclude patterns.** The client backs up everything in
-      BACKUP_DIR_HOST; there's no way to skip files. Add an `.env` setting
-      or a `.bbignore` in the backup folder, with defaults for files that
-      shouldn't go to a buddy (`*.vmdk *.qcow2 *.vhdx *.vdi *-wal *.tmp`).
-      Small, self-contained client change. Decided 2026-10-10 to do this
-      before chunking: the service is meant for an off-site copy of files
-      that rarely change, and the site now says so (getting-started.html
-      "What to back up (and what not to)", client README).
+- [x] **Exclude patterns.** Client 0.10.0: Syncthing-style
+      `DATA_DIR/excludes.txt` (re-read every cycle) plus a built-in list of
+      poor fits (PST/OST, live DBs, VM disks, temp/OS clutter);
+      `DEFAULT_EXCLUDES=off` drops it. Built on `globset` rather than the
+      `ignore` crate: Syncthing's first-match-wins order (so `!*.pst` can
+      override a default) isn't gitignore's last-match-wins. Not done yet:
+      editing the list from the dashboard, which has no login.
 - [ ] **Warn about big files that keep re-sending.** Local dashboard: "vm.qcow2
       (20 GB) re-sent 4 times this week, 80 GB total", suggesting an
       exclude or backing up an export instead. Protects users from surprise
@@ -87,10 +86,6 @@ Last reviewed: 2026-10-04.
 - [ ] **File lists are built whole in memory** on both sides (chunked on
       the wire). Fine to roughly a million files; past that, page through
       the index instead.
-- [ ] **Exclude patterns.** No way to skip files/folders today (listed under
-      "intentional limits" in TESTING-CHECKLIST.md). The `ignore` crate
-      (ripgrep's walker) gives `.gitignore`-style excludes and a faster,
-      parallel folder walk in one go.
 
 ## Polish / nice to have
 

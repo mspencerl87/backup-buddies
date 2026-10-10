@@ -1346,7 +1346,8 @@ other migration there).
 
 - ~~Backup cycle is a fixed ~30s, not configurable~~ — configurable since
   0.5.0 (`SCAN_INTERVAL_SECS`)
-- No per-file/pattern exclude list for what gets backed up
+- ~~No per-file/pattern exclude list for what gets backed up~~ — since
+  0.10.0 (`excludes.txt` plus built-in defaults)
 - Local status dashboard has no login of its own
 
 ## Flagged, not yet scoped
