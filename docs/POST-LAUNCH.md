@@ -8,8 +8,27 @@ Last reviewed: 2026-10-04.
 
 ## Real gaps (do first)
 
-- [ ] **Chunked, rsync-like transfers.** Today any change to a file re-sends
-      the whole file — a 20 GB VM image with one changed block costs 20 GB
+- [ ] **Exclude patterns.** The client backs up everything in
+      BACKUP_DIR_HOST; there's no way to skip files. Add an `.env` setting
+      or a `.bbignore` in the backup folder, with defaults for files that
+      shouldn't go to a buddy (`*.vmdk *.qcow2 *.vhdx *.vdi *-wal *.tmp`).
+      Small, self-contained client change. Decided 2026-10-10 to do this
+      before chunking: the service is meant for an off-site copy of files
+      that rarely change, and the site now says so (getting-started.html
+      "What to back up (and what not to)", client README).
+- [ ] **Warn about big files that keep re-sending.** Local dashboard: "vm.qcow2
+      (20 GB) re-sent 4 times this week, 80 GB total", suggesting an
+      exclude or backing up an export instead. Protects users from surprise
+      relay usage (free cap pause, or per-GB fees on paid plans).
+- [ ] **Chunked, rsync-like transfers. Revisit only if usage shows it's
+      needed** (decided 2026-10-10): typical files for an off-site backup
+      (photos, documents, exports) are written once, so whole-file sends
+      are close to optimal for them, and running VM disks and live
+      databases shouldn't be backed up this way anyway (the copy can be
+      inconsistent). Signal to watch: a few accounts making up most of the
+      monthly relay bytes in admin stats, or users asking. If it comes up,
+      start with a rustic_core spike on a branch (end of this entry).
+      Today any change to a file re-sends the whole file — a 20 GB VM image with one changed block costs 20 GB
       (billed when it goes over the relay). Classic rsync can't work here:
       the buddy only holds ciphertext and can't read it, and re-encrypting
       changes every byte. The encrypted equivalent (restic/borg/duplicacy):

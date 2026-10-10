@@ -222,6 +222,7 @@ cd backup-buddies-client</code></pre>
           <ul>
             <li>Checks for changes on a schedule (every 30 seconds by default; set <code>SCAN_INTERVAL_SECS</code> in <code>.env</code> to change it) rather than instantly</li>
             <li>Backs up the whole folder you point it at — no per-file or pattern-based exclude list yet</li>
+            <li>Made for an off-site copy of files that don't change constantly — not running VM disks, live databases or huge files that change every day (each change re-sends the whole file). See <a href="/getting-started.html#what-to-back-up">what to back up (and what not to)</a></li>
             <li>The local status dashboard has no login of its own — see its section below before exposing that port beyond your own network</li>
           </ul>
         </div>

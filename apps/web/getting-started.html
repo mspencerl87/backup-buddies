@@ -90,6 +90,7 @@
         <li>Add a device under <a href="/dashboard.html#devices">Devices</a> on your dashboard — this gives you a token.</li>
         <li>Follow the full walkthrough on the <a href="/setup.html">Client setup</a> page to install and run it with that token.</li>
         <li>Do this on every machine you want backed up. Your buddy needs to do the same on theirs — both sides have to be running the client for anything to happen.</li>
+        <li>Before you pick a folder to back up, read <a href="#what-to-back-up">what to back up (and what not to)</a> below.</li>
       </ul>
       <div class="callout-warning">
           <strong>Save your backup passphrase in a password manager.</strong>
@@ -127,6 +128,47 @@
         <a href="/setup.html">Client setup</a> page's "What this version
         actually does" section for the full rundown, including its current
         limits.
+      </p>
+    </section>
+
+    <section class="about-section" id="what-to-back-up">
+      <h2>What to back up (and what not to)</h2>
+      <p class="muted">
+        Backup Buddies is built for one job: keeping an <strong>off-site copy</strong> of files you'd hate to
+        lose, on a buddy's machine in another place, so a dead disk, a stolen laptop or a house fire doesn't
+        take your only copy with it. It works best with files that are written once or change now and then.
+      </p>
+      <h3>Good fits</h3>
+      <ul class="tech-list">
+        <li>Photos and videos, music, scanned documents, paperwork</li>
+        <li>Documents and finished projects</li>
+        <li>Exports and backups made by other tools: VM backup files, database dumps, phone or app backups.
+          Each export is a new, finished file, which is exactly what this handles well.</li>
+      </ul>
+      <h3>Poor fits, and why</h3>
+      <ul class="tech-list">
+        <li><strong>Running virtual machine disks and live databases.</strong> They change while they're being
+          copied, so the copy your buddy holds may not open or boot when you restore it. Back up the VM's or
+          database's own export or snapshot instead.</li>
+        <li><strong>Big files that change all the time</strong> (mail stores like Outlook PST files, photo
+          catalogs, encrypted containers). They work, but any change re-sends the <em>whole file</em>: a
+          20&nbsp;GB file that changes daily is around 600&nbsp;GB a month over your and your buddy's
+          internet connections. If that traffic goes through our relay, it uses up the free monthly relay
+          allowance (then syncing pauses until the 1st) or, on a paid plan, is billed per GB. Fine if they
+          change rarely.</li>
+        <li><strong>Things you can get back anyway:</strong> caches, temp files, downloads, games, operating
+          system and program folders. They just use up the space your buddy pledged.</li>
+        <li><strong>Keeping your own devices in sync.</strong> This is a one-way backup to someone else's
+          machine, checked every 30 seconds, and restoring is something you do on purpose. For live syncing
+          between your own devices, use a sync tool like Syncthing.</li>
+        <li><strong>Your only copy of something.</strong> This is the off-site <em>second</em> copy. Your
+          buddy's machine can be off, their disk can fail, and they can stop being your buddy. Keep the
+          originals.</li>
+      </ul>
+      <p class="muted">
+        The client backs up everything in the folder you point it at; there's no exclude list yet. Keep what
+        you don't want backed up outside that folder. And remember your buddy can see file <em>names, paths
+        and sizes</em> (never their contents), so don't put anything private in a file or folder name.
       </p>
     </section>
   </main>
