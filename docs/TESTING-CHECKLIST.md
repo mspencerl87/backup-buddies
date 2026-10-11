@@ -1019,6 +1019,43 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Verified — clients 0.10.0–0.11.1: exclude list and dashboard login (2026-10-10)
+
+Spencer reported all of it working live on testa/testb (both on 0.11.1).
+Each version passed `cargo test` (36 tests by 0.11.1, including the login
+over real HTTP and the password change) plus clippy before the push. The
+individual checks below are the ones suggested for each round; Spencer's
+report covered them as a whole rather than item by item.
+
+- **0.10.0, exclude list.** `DATA_DIR/excludes.txt` with Syncthing rules
+  (first match wins, `!`, `(?i)`, leading `/`), re-read every cycle, plus
+  a built-in list (PST/OST, live DBs, VM disks, temp files, OS/NAS clutter
+  including `.zfs`, `@eaDir`, `#recycle`). `DEFAULT_EXCLUDES=off` drops it.
+  - [x] Template created on first start; a `.PST`, `Thumbs.db` and `.vhdx`
+        aren't sent; dashboard shows "N excluded".
+  - [x] `!(?i)*.pst` brings a PST back on the next cycle without a
+        restart; removing it again removes the file from the buddy (kept
+        30 days in History) and logs how many files that hit.
+  - [x] A bad line stops the cycle with the line number; `*` gets the
+        exclude-list refusal, not the missing-drive one.
+- **0.10.1, built-in list shown in `excludes.txt`.** Comments-only
+  section under a marker, rewritten from the code at every start; lines
+  above it untouched.
+- **0.11.0 → 0.11.1, dashboard login.** 0.11.0's localhost-only mode
+  (no password) was dropped in 0.11.1 at Spencer's request: headless
+  boxes couldn't use it. Now every page needs the login from any
+  address: first `DASHBOARD_PASSWORD` from `.env`, then **Change password**
+  stores a scrypt hash in `DATA_DIR/dashboard-login`, which wins over
+  `.env`; deleting it is the reset. No password at all: locked page.
+  - [x] Log in with the `.env` password; change it; old one refused, new
+        one works, including after a restart; deleting `dashboard-login`
+        brings the `.env` one back.
+  - [x] testa (:8080) and testb (:8081) logged in side by side (cookie
+        named per port).
+- **0.11.0, Exclusions card.** Edits the part of `excludes.txt` above the
+  marker, shows the built-in list, refuses a bad line with its number and
+  leaves the file unchanged.
+
 ## Needs testing — client 0.9.0: Delete permanently (2026-10-07)
 
 Browse files → a deleted file → **Delete permanently** → confirmation
