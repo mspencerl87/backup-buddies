@@ -1019,6 +1019,31 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.13.0: Activity card (2026-10-11)
+
+Plain-language event list under the buddy cards (`activity.rs`, stored in
+the index's `activity` table, 30 days / 1,000 rows) plus a Raw log tab (last
+300 log lines in memory). `cargo test` (42 tests: trimming, filters, raw log
+ring, incoming tally) and clippy clean; the card, chips, expandable file
+lists and Raw log were checked in a browser with mocked events. Not yet live.
+
+- [ ] testa restart: "Started, version 0.13.0".
+- [ ] Change a file: "testb · Sent 1 file (…) · direct · …"; click it for
+      the path. On testb's dashboard: "testa · Stored 1 file (…) with you"
+      (logged ~2 s after testa disconnects).
+- [ ] Delete a file / exclude one: "Removed 1 file (deleted here)" /
+      "(now excluded)".
+- [ ] Stop testb: one problem line on testa (not one per cycle); start it
+      again: "Working again (direct)".
+- [ ] Restore from testb: "Restored N files (…) to …"; testb shows
+      "testa · Restored N files (…) from what you hold for them".
+- [ ] Wrong password, then right one: "Wrong password from <ip>",
+      "Logged in from <ip>"; Security chip shows only those (and settings).
+- [ ] Save the exclude list on the dashboard: "Exclude list saved on the
+      dashboard" (once, not also "excludes.txt changed"); edit the file by
+      hand: "excludes.txt changed".
+- [ ] Raw log tab matches `docker compose logs`, without colour codes.
+
 ## Verified — clients 0.12.0–0.12.2: big files that keep re-sending (2026-10-11)
 
 `cargo test` (38 tests) and clippy clean; the e2e test checks a changed
