@@ -1019,23 +1019,29 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
-## Needs testing — client 0.12.0: big files that keep re-sending (2026-10-11)
+## Verified — clients 0.12.0–0.12.2: big files that keep re-sending (2026-10-11)
 
-`cargo test` (38 tests) and clippy clean, the e2e test checks a changed
-file is logged as a re-send and a first upload isn't, and the card was
-checked in a browser with mocked data. Not yet live.
+`cargo test` (38 tests) and clippy clean; the e2e test checks a changed
+file is logged as a re-send and a first upload isn't. Live on testa →
+testb (0.12.2) with three throwaway scripts that create and rewrite a
+400 MB `resend-test.bin` and wait on the client's "backup cycle complete"
+log lines (each upload ~9–10 s, direct). They read the folders from the
+container's mounts (`docker inspect`), since testa's compose file sets
+them directly rather than through `BACKUP_DIR_HOST` in `.env`.
 
-- [ ] Put a ~400 MB file in testa's backup folder; after its first upload
-      the card stays hidden (first uploads don't count).
-- [ ] Change it three times (e.g. `dd if=/dev/urandom of=big.bin bs=1M
-      count=400`, one cycle apart). After the third re-send (1.2 GB) it
-      shows: "re-sent 3 times this week".
-- [ ] **Exclude** → confirm: `/big.bin` appears near the top of
-      `config/excludes.txt` and in the Exclusions card; the card hides it;
-      next cycle removes it from testb (History keeps a copy).
-- [ ] Remove the line again: backed up on the next cycle.
-- [ ] Delete the file: the card drops it (0.12.2; 0.12.0 kept listing a
-      deleted or moved file for the rest of the week).
+- [x] First upload: card stays hidden.
+- [x] Three changes, one cycle apart (1.17 GB): card shows
+      "400.0 MB, re-sent 3 times this week, 1.2 GB in all".
+- [x] **Exclude** → confirm: "Excluded resend-test.bin"; the comment and
+      `/resend-test.bin` landed in `config/excludes.txt` (lines 24–25);
+      next cycle `files_deleted=1` to testb, and the log said the
+      backed-up file is now excluded.
+- [x] Line removed by hand: backed up again on the next cycle
+      (`files_sent=1`, 429 MB).
+- [x] File deleted: `files_deleted=1` to testb.
+- [ ] Not reported yet: the card hiding the entry right after Exclude
+      and after the delete (0.12.2), and testb's History copy in Browse
+      files.
 
 ## Verified — clients 0.10.0–0.11.1: exclude list and dashboard login (2026-10-10)
 
