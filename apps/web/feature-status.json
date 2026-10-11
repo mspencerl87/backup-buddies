@@ -51,7 +51,11 @@
     },
     {
       "title": "Exclude files and folders",
-      "description": "Client 0.10.0 skips poor fits by default (Outlook PST/OST, live database files, virtual machine disks, temp files and OS clutter), and you can exclude anything else with Syncthing-style patterns in excludes.txt in the client's config folder. Edits apply on the next check, no restart needed."
+      "description": "Client 0.10.0 skips poor fits by default (Outlook PST/OST, live database files, virtual machine disks, temp files and OS clutter), and you can exclude anything else with Syncthing-style patterns in excludes.txt in the client's config folder, or from the Exclusions card on the local dashboard. Edits apply on the next check, no restart needed."
+    },
+    {
+      "title": "Local dashboard login",
+      "description": "Client 0.11.0 puts the local status dashboard behind a login: set DASHBOARD_PASSWORD in the client's .env to open it from your other devices. Without a password it only opens on the machine running the client."
     }
   ],
   "limitations": [

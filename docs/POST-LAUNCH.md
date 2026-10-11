@@ -13,8 +13,8 @@ Last reviewed: 2026-10-04.
       poor fits (PST/OST, live DBs, VM disks, temp/OS clutter);
       `DEFAULT_EXCLUDES=off` drops it. Built on `globset` rather than the
       `ignore` crate: Syncthing's first-match-wins order (so `!(?i)*.pst` can
-      override a default) isn't gitignore's last-match-wins. Not done yet:
-      editing the list from the dashboard, which has no login.
+      override a default) isn't gitignore's last-match-wins. 0.11.0 added
+      the dashboard editor, behind the new dashboard login.
 - [ ] **Warn about big files that keep re-sending.** Local dashboard: "vm.qcow2
       (20 GB) re-sent 4 times this week, 80 GB total", suggesting an
       exclude or backing up an export instead. Protects users from surprise

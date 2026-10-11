@@ -1348,7 +1348,8 @@ other migration there).
   0.5.0 (`SCAN_INTERVAL_SECS`)
 - ~~No per-file/pattern exclude list for what gets backed up~~ — since
   0.10.0 (`excludes.txt` plus built-in defaults)
-- Local status dashboard has no login of its own
+- ~~Local status dashboard has no login of its own~~ — since 0.11.0:
+  `DASHBOARD_PASSWORD` login; without one it answers this machine only
 
 ## Flagged, not yet scoped
 
