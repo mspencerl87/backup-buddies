@@ -206,11 +206,12 @@
       <h2>What your buddy can see</h2>
       <p class="muted">
         Your buddy's device stores your files encrypted, so it can never read
-        what's inside them. It does see each file's name, its folder path
-        inside your backup folder, and its size, because that's how the files
-        are stored on their disk. If file names themselves are sensitive,
-        keep that in mind when choosing a buddy and what to back up.
-        Encrypting names as well is planned.
+        what's inside them. Since client 0.14.0 the names of your files and
+        folders are encrypted too. What it can still see is each file's
+        size, how many files you have, how your folders nest and how many
+        entries each holds, and when things change. Like rclone, a name
+        that appears in two folders is encrypted the same way in both, so a
+        buddy could tell the two match without knowing what the name is.
       </p>
     </section>
 
@@ -221,7 +222,7 @@
         <li><strong>Transport:</strong> <a href="https://github.com/n0-computer/iroh" target="_blank" rel="noopener">Iroh</a>, a QUIC-based peer-to-peer networking library with built-in NAT hole-punching and relay fallback.</li>
         <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt, salted with your account ID. The same passphrase gives a different key on every account, so nobody holding encrypted files can test one list of guessed passphrases against every user at once. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
         <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file, verified on arrival. Every ~10 minutes your device also checks what your buddy actually holds against what it expects, and re-sends anything missing.</li>
-        <li><strong>File names:</strong> files are stored on your buddy's device under their path within your backup folder, so your buddy can see file and folder names and sizes (never contents). Encrypting names too is on the roadmap.</li>
+        <li><strong>File names:</strong> each file and folder name is encrypted on its own with AES-SIV (deterministic, authenticated), padded to 16-byte steps and base32-encoded, in the style of rclone's crypt remote, with a key derived from the same passphrase. Your buddy sees encrypted names, sizes and folder layout, never real names or contents.</li>
         <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established — it's a blind forwarder, not a storage point.</li>
         <li><strong>Client source:</strong> the program that runs on your machine (scanning, encryption, transfers) is open source under GPL-3.0, so you can read exactly what it does with your files: <a href="https://github.com/mspencerl87/backup-buddies-client" target="_blank" rel="noopener">github.com/mspencerl87/backup-buddies-client</a>.</li>
         <li><strong>Server:</strong> a small Node/Express API and Postgres database, holding only accounts, device identities (public node IDs, not keys), buddy pairings, and invite codes.</li>

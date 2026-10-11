@@ -1019,6 +1019,45 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.14.0: encrypted file and folder names (2026-10-11)
+
+Every path component is encrypted on its own, rclone-crypt style:
+AES-SIV, padded to 16 bytes, base32hex, under `n1/` on the buddy
+(`names.rs`). Name key = SHA-512 of a label and the same scrypt output as
+the file key. Names over 127 bytes are refused with a reason, not
+truncated. No protocol change: a buddy stores names as opaque strings, so
+any buddy version works. Files sent before 0.14.0 (index rows with
+`name_scheme` 0) are re-sent once under the new name, then the plaintext
+copy is deleted (queued in the index's `old_names` table, so a failed
+delete is retried without another re-send). The receiver now removes
+folders a delete leaves empty, and its daily sweep removes ones older
+clients left. `cargo test` (53, including an e2e that walks the buddy's
+whole folder for plaintext names, restores a folder and a version,
+deletes permanently, and migrates a 0.13-style backup) and clippy clean.
+
+- [ ] Update testb first, then testa. testa's first cycle re-sends
+      everything: progress line says "(N to hide their names)", Activity
+      says "Sent N files (…), N of them already backed up, sent again to
+      hide their names". Nothing in the "keeps re-sending" warning.
+- [ ] On the buddy, `ls -R` testa's folder under testb's buddy-files
+      (TrueNAS SMB mount): only `n1/` with long lowercase names, plus
+      `.versions/` (old plaintext names stay there until they expire in
+      30 days, as documented) and `.incoming/`. No empty plaintext
+      folders left behind.
+- [ ] Browse files on testa: real names, each file once, folders
+      collapse as before. Restore all; restore one folder; History on a
+      file changed after the update and on one from before (finds the old
+      copies under the plaintext name); Delete permanently on a deleted
+      file.
+- [ ] Reconcile (~10 min): "✓ reconciled", nothing missing/unexpected.
+- [ ] Create a file with a 130-character name: failed-file line and one
+      Activity problem, "too long to back up with hidden names". Not
+      repeated every cycle in Activity.
+- [ ] testb's own dashboard and logs show encrypted names for what it
+      stores ("deleted file for buddy path=n1/…"). Expected.
+- [ ] Rebuild check: a fresh testa config with the same passphrase and
+      account restores with real names.
+
 ## Verified — client 0.13.0: Activity card (2026-10-11)
 
 Spencer reported it looking good live on testa/testb (overall, not item by

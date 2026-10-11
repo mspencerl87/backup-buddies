@@ -87,7 +87,13 @@ in a Rust string in `dashboard.rs`, so the compiler doesn't check it either.
 - Encryption key = scrypt(passphrase, `"backup-buddies/file-key/v2/" +
   account_id`) since client 0.7.0. Changing the KDF or salt orphans every
   backup unless old keys stay in the decrypt list (see `crypto.rs`).
-- Buddies can see file names, paths and sizes, not contents. Don't claim
-  otherwise in site copy.
+- Since client 0.14.0, buddies can't see file or folder names (each
+  component is encrypted, `names.rs`), but they still see sizes, folder
+  depth, how many entries each folder has, file counts, and when things
+  change. Don't claim more than that in site copy.
+- The name key is derived from the same scrypt output as the file key
+  (`crypto.rs`). Changing the name key label, the KDF/salt, the padding,
+  the encoding or the cipher orphans every remote name, just like changing
+  the content key orphans the contents.
 - Test devices: testa / testb on Spencer's `backupbuddy` box (TrueNAS SMB
   and NFS mounts), dashboards on :8080 / :8081.

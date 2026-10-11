@@ -168,8 +168,9 @@
       <p class="muted">
         The client skips the worst of these by default (Outlook PST/OST, live database files, VM disks, temp
         files), and you can exclude anything else with Syncthing-style patterns in <code>excludes.txt</code> in
-        its config folder; the client's README has the details. And remember your buddy can see file <em>names, paths
-        and sizes</em> (never their contents), so don't put anything private in a file or folder name.
+        its config folder; the client's README has the details. Your buddy can't see your files' contents or
+        (since client 0.14.0) their names, but does see their <em>sizes</em> and how many files and folders
+        there are.
       </p>
     </section>
   </main>
