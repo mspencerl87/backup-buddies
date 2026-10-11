@@ -1019,13 +1019,17 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
-## Needs testing — client 0.13.0: Activity card (2026-10-11)
+## Verified — client 0.13.0: Activity card (2026-10-11)
+
+Spencer reported it looking good live on testa/testb (overall, not item by
+item; the boxes below are the suggested checks, left as a list of what to
+look at if something seems off later).
 
 Plain-language event list under the buddy cards (`activity.rs`, stored in
 the index's `activity` table, 30 days / 1,000 rows) plus a Raw log tab (last
 300 log lines in memory). `cargo test` (42 tests: trimming, filters, raw log
 ring, incoming tally) and clippy clean; the card, chips, expandable file
-lists and Raw log were checked in a browser with mocked events. Not yet live.
+lists and Raw log were checked in a browser with mocked events.
 
 - [ ] testa restart: "Started, version 0.13.0".
 - [ ] Change a file: "testb · Sent 1 file (…) · direct · …"; click it for
