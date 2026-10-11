@@ -1034,6 +1034,8 @@ checked in a browser with mocked data. Not yet live.
       `config/excludes.txt` and in the Exclusions card; the card hides it;
       next cycle removes it from testb (History keeps a copy).
 - [ ] Remove the line again: backed up on the next cycle.
+- [ ] Delete the file: the card drops it (0.12.2; 0.12.0 kept listing a
+      deleted or moved file for the rest of the week).
 
 ## Verified — clients 0.10.0–0.11.1: exclude list and dashboard login (2026-10-10)
 
