@@ -1039,9 +1039,9 @@ them directly rather than through `BACKUP_DIR_HOST` in `.env`.
 - [x] Line removed by hand: backed up again on the next cycle
       (`files_sent=1`, 429 MB).
 - [x] File deleted: `files_deleted=1` to testb.
-- [ ] Not reported yet: the card hiding the entry right after Exclude
-      and after the delete (0.12.2), and testb's History copy in Browse
-      files.
+- [x] Card gone once the file was deleted (0.12.2), and Browse files on
+      testb's card shows `resend-test.bin` deleted with two History
+      versions (400.1 MB each, "removed in 30 days").
 
 ## Verified — clients 0.10.0–0.11.1: exclude list and dashboard login (2026-10-10)
 
