@@ -3,10 +3,24 @@
 # DNS record is proxied through Cloudflare, as long as port 80 is reachable
 # for the ACME challenge.
 api.filegarden.net {
+	# Signups closed during the pre-launch rework (DEPLOY.md section 29).
+	# These are the only two ways an account gets created; Google sign-in
+	# goes too because its callback creates the account on first use.
+	# Devices only use other routes here, so they keep working.
+	@closed path /signup /auth/google /auth/google/*
+	respond @closed "Signups are closed for now." 403
+
 	reverse_proxy api:3000
 }
 
 app.filegarden.net {
+	# Whole site behind a password during the pre-launch rework (DEPLOY.md
+	# section 29), except /client/*: install.sh and devices' update check
+	# (update_check.rs fetches /client/Cargo.toml) have no way to log in.
+	@gated not path /client/*
+	basic_auth @gated {
+		{$SITE_USERNAME} {$SITE_PASSWORD_HASH}
+	}
 	# Everything under /api/* goes to the backend, prefix stripped so the
 	# Express routes stay unprefixed (e.g. /api/signup -> POST /signup).
 	handle_path /api/* {

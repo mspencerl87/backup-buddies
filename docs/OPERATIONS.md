@@ -119,6 +119,7 @@ the container.**
 | `STALE_CLEANUP_EXEMPT_EMAILS` | no | | Comma-separated emails never flagged as stale (admins never are) |
 | `B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET` | for backups | | Read by `backup-db.sh`, not the API. Use a key limited to that bucket that can't delete |
 | `BACKUP_PING_URL` | no | | Uptime Kuma push URL, called after each successful backup |
+| `SITE_USERNAME`, `SITE_PASSWORD_HASH` | yes, while the site is gated | | Login for the pre-launch password on app.filegarden.net (`/client/*` stays open). Read by the `caddy` container, not the API; compose won't start without them. Hash from `caddy hash-password`, single-quoted in `.env` because it contains `$`. See DEPLOY.md section 29 |
 
 ## Settings: relay-1 `.env`
 

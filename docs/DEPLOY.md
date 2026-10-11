@@ -1064,3 +1064,40 @@ docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
 ```
 The file isn't on app-1 until the push, so copy it over first (or paste the
 one `ALTER TABLE` line into `psql`).
+
+## 29. Pre-launch site gate (signups closed)
+
+While the architecture is being reworked, nobody new should be able to
+sign up. Caddy (`deploy/app/Caddyfile`) now:
+- puts all of `app.filegarden.net` behind a username and password, except
+  `/client/*` (install.sh and devices' update check can't log in);
+- returns `403` for `/signup`, `/auth/google` and `/auth/google/*` on
+  `api.filegarden.net`, the only two routes that create accounts. Device
+  routes are untouched.
+
+Your browser asks for the password once per session. Google sign-in still
+works through the app host, after the password.
+
+**Before pushing** (compose won't start Caddy without these, so the deploy
+would fail and leave the old containers running):
+```bash
+cd /opt/backup-buddies/deploy/app
+docker run --rm -it caddy:2-alpine caddy hash-password   # type it twice
+```
+Add to `deploy/app/.env`, with the hash in **single quotes** (it contains
+`$`):
+```
+SITE_USERNAME=spencer
+SITE_PASSWORD_HASH='$2a$14$...'
+```
+After the push, `docker compose up -d` recreates Caddy because its
+environment changed, and it loads the new Caddyfile. Check:
+```bash
+curl -sI https://app.filegarden.net/ | head -1                    # 401
+curl -sI https://app.filegarden.net/client/Cargo.toml | head -1   # 200
+curl -s -X POST https://api.filegarden.net/signup                 # Signups are closed for now.
+```
+
+**To reopen**, delete the `@closed`/`respond` lines and the
+`@gated`/`basic_auth` block from the Caddyfile and the `environment:` block
+from the `caddy` service, push, and then remove the two lines from `.env`.

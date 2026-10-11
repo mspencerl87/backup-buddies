@@ -37,6 +37,12 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    # Login for the site gate in the Caddyfile. `:?` makes compose refuse to
+    # start instead of handing Caddy an empty hash, which it would fail to
+    # parse, taking the API down for devices as well.
+    environment:
+      SITE_USERNAME: ${SITE_USERNAME:?set SITE_USERNAME in deploy/app/.env}
+      SITE_PASSWORD_HASH: ${SITE_PASSWORD_HASH:?set SITE_PASSWORD_HASH in deploy/app/.env}
     ports:
       - "80:80"
       - "443:443"
