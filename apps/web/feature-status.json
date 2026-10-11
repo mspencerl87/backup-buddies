@@ -55,7 +55,7 @@
     },
     {
       "title": "Local dashboard login",
-      "description": "Client 0.11.0 puts the local status dashboard behind a login: set DASHBOARD_PASSWORD in the client's .env to open it from your other devices. Without a password it only opens on the machine running the client."
+      "description": "Client 0.11 puts the local status dashboard behind a login. Set DASHBOARD_PASSWORD in the client's .env for the first login, then change the password from the dashboard whenever you like."
     }
   ],
   "limitations": [

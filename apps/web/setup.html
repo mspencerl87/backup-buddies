@@ -127,7 +127,7 @@
             Network shares (NFS/SMB) work: mount them on the host first, then use the mount path here.
           </p>
           <p class="muted" style="margin:1rem 0 0.25rem">
-            <code>.env</code> — your token and passphrase. Only <strong>DEVICE_TOKEN</strong> and <strong>BACKUP_PASSPHRASE</strong> need filling in; the rest have sensible defaults:
+            <code>.env</code> — your token and passphrase. Only <strong>DEVICE_TOKEN</strong>, <strong>BACKUP_PASSPHRASE</strong> and <strong>DASHBOARD_PASSWORD</strong> need filling in; the rest have sensible defaults:
           </p>
           <pre style="background:#11141a; padding:0.75rem; border-radius:8px; overflow-x:auto"><code>API_URL=https://api.filegarden.net
 RELAY_URL=https://relay.filegarden.net
@@ -148,10 +148,9 @@ PGID=1000
 # rather than Docker mapping it for you).
 #DASHBOARD_PORT=8080
 
-# Password for that dashboard (you log in as admin). Without one, the
-# dashboard only opens on this machine itself; set one to open it from
-# your other devices.
-#DASHBOARD_PASSWORD=
+# Password for your first login to that dashboard (as admin). It stays
+# locked until you set one. You can change it from the dashboard later.
+<strong style="color:#4f8cff">DASHBOARD_PASSWORD=a password for this device's dashboard</strong>
 
 # The UDP port used for the actual connection to your buddy (not the
 # dashboard above). Backup Buddies works fine without ever touching this
@@ -218,7 +217,7 @@ cd backup-buddies-client</code></pre>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
             <li>Connects directly to your buddy's device when possible — including finding them automatically on the same local network and connecting over it, never touching the relay — falling back to the relay automatically when a direct connection isn't possible</li>
             <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
-            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>, behind the <code>DASHBOARD_PASSWORD</code> login from <code>.env</code>; without one it only opens on the device itself) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land in your restore folder under <code>&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>, behind a login: <code>DASHBOARD_PASSWORD</code> from <code>.env</code> the first time, then change it from the dashboard) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land in your restore folder under <code>&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
           </ul>
         </div>
@@ -264,7 +263,8 @@ mv ./data/received/* /mnt/storage/buddy-files/
 docker compose up -d</code></pre>
           Your existing <code>./data</code> config folder keeps working as it is. If the client instead refuses to start saying buddy files exist in <em>both</em> places, a folder was half-moved — finish moving everything from <code>./data/received/</code> into your buddy-files folder. Old restores in <code>./data/restored</code> stay where they are; new ones go to your <code>/restored</code> folder.</li>
         <li><strong>Fails to start with an "address already in use" error, or logs show it exiting immediately:</strong> something else on this host — often another device's client — already has that <code>DASHBOARD_PORT</code> or <code>SYNC_PORT</code>. Give this device its own, different values for both in its <code>.env</code> (see above) and restart. With <code>network_mode: host</code>, these bind directly on the host, so they must be unique across every client running on the same machine.</li>
-        <li><strong>The dashboard says it has no password yet:</strong> it only opens on the machine running the client until you set <code>DASHBOARD_PASSWORD</code> in <code>.env</code> and run <code>docker compose up -d</code>. On Docker Desktop with a <code>ports:</code> mapping that's true even on the same machine, so set one there.</li>
+        <li><strong>The dashboard says it doesn't have a password yet:</strong> set <code>DASHBOARD_PASSWORD</code> in <code>.env</code>, run <code>docker compose up -d</code>, and log in as <code>admin</code>.</li>
+        <li><strong>Forgot the dashboard password:</strong> delete <code>dashboard-login</code> from the config folder and run <code>docker compose restart</code>; the <code>DASHBOARD_PASSWORD</code> in <code>.env</code> works again.</li>
         <li><strong>On Docker Desktop (Mac/Windows), the dashboard or buddy connections stop working after adding <code>network_mode: host</code>:</strong> host networking isn't fully supported there the way it is on Linux. Remove that line, add back a <code>ports:</code> section instead (<code>"${DASHBOARD_PORT:-8080}:8080"</code> and <code>"${SYNC_PORT:-11235}:${SYNC_PORT:-11235}/udp"</code>), and everything still works — you just won't get local-network (mDNS) direct connections to a buddy on the same LAN; relay and direct-over-internet connections are unaffected.</li>
         <li><strong>Registered, but no cycle line ("backup cycle complete" or "nothing new to back up"):</strong> confirm your buddy pairing shows as "active" on your dashboard, and that your buddy has also completed these steps on their end.</li>
         <li><strong>A big upload fails partway with "connection lost" or "timed out":</strong> this can happen occasionally, most often between two buddies on the same local network or two clients on the same machine. Nothing is lost: on the next check (about 30 seconds later) files of 256 MB or more carry on from where they stopped, as long as both buddies run client 0.8.0 or newer, and smaller files are sent again. If it happens on every attempt, use Contact support on your dashboard.</li>

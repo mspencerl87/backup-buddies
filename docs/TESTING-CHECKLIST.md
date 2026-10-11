@@ -1349,7 +1349,8 @@ other migration there).
 - ~~No per-file/pattern exclude list for what gets backed up~~ — since
   0.10.0 (`excludes.txt` plus built-in defaults)
 - ~~Local status dashboard has no login of its own~~ — since 0.11.0:
-  `DASHBOARD_PASSWORD` login; without one it answers this machine only
+  login, first with `DASHBOARD_PASSWORD` from `.env`, then changeable on
+  the dashboard (stored hashed in `DATA_DIR/dashboard-login`)
 
 ## Flagged, not yet scoped
 
