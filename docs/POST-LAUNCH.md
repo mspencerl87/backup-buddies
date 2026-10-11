@@ -15,10 +15,12 @@ Last reviewed: 2026-10-04.
       `ignore` crate: Syncthing's first-match-wins order (so `!(?i)*.pst` can
       override a default) isn't gitignore's last-match-wins. 0.11.0 added
       the dashboard editor, behind the new dashboard login.
-- [ ] **Warn about big files that keep re-sending.** Local dashboard: "vm.qcow2
-      (20 GB) re-sent 4 times this week, 80 GB total", suggesting an
-      exclude or backing up an export instead. Protects users from surprise
-      relay usage (free cap pause, or per-GB fees on paid plans).
+- [x] **Warn about big files that keep re-sending.** Client 0.12.0: the
+      index logs each re-send (a file already on the buddy sent again);
+      the dashboard lists files with 3+ re-sends and 1 GB+ in the past
+      week, with a one-click exact-path exclude. Thresholds are constants
+      in `dashboard.rs` (RESEND_*). Not done: warning anywhere but the
+      local dashboard (e.g. the web dashboard or an email).
 - [ ] **Chunked, rsync-like transfers. Revisit only if usage shows it's
       needed** (decided 2026-10-10): typical files for an off-site backup
       (photos, documents, exports) are written once, so whole-file sends

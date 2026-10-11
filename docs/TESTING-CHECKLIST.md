@@ -1019,6 +1019,22 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+## Needs testing — client 0.12.0: big files that keep re-sending (2026-10-11)
+
+`cargo test` (38 tests) and clippy clean, the e2e test checks a changed
+file is logged as a re-send and a first upload isn't, and the card was
+checked in a browser with mocked data. Not yet live.
+
+- [ ] Put a ~400 MB file in testa's backup folder; after its first upload
+      the card stays hidden (first uploads don't count).
+- [ ] Change it three times (e.g. `dd if=/dev/urandom of=big.bin bs=1M
+      count=400`, one cycle apart). After the third re-send (1.2 GB) it
+      shows: "re-sent 3 times this week".
+- [ ] **Exclude** → confirm: `/big.bin` appears near the top of
+      `config/excludes.txt` and in the Exclusions card; the card hides it;
+      next cycle removes it from testb (History keeps a copy).
+- [ ] Remove the line again: backed up on the next cycle.
+
 ## Verified — clients 0.10.0–0.11.1: exclude list and dashboard login (2026-10-10)
 
 Spencer reported all of it working live on testa/testb (both on 0.11.1).
