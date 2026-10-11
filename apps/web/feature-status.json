@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-10",
+  "updated": "2026-10-11",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -27,7 +27,7 @@
     },
     {
       "title": "Dashboard",
-      "description": "Per-buddy backup status (with a live progress bar, speed and time left while a backup is running), your device's name/build/uptime/local file count, how many buddies are currently visible on your local network, each buddy's real disk usage, and a lifetime direct-vs-relay bandwidth breakdown."
+      "description": "Per-buddy backup status (with a live progress bar, speed and time left while a backup is running), your device's name/build/uptime/local file count, how many buddies are currently visible on your local network, each buddy's real disk usage, a lifetime direct-vs-relay bandwidth breakdown, an Activity log, the exclude list, and a warning for big files that keep re-sending. Behind its own login."
     },
     {
       "title": "Find a buddy",
@@ -56,6 +56,14 @@
     {
       "title": "Local dashboard login",
       "description": "Client 0.11 puts the local status dashboard behind a login. Set DASHBOARD_PASSWORD in the client's .env for the first login, then change the password from the dashboard whenever you like."
+    },
+    {
+      "title": "Activity log on the local dashboard",
+      "description": "Client 0.13 adds an Activity card under your buddies: the last 50 things that happened, in plain language. Files sent or removed (click for the list), a buddy going offline and coming back, files a buddy refused, what a buddy stored with you, restores, exclude-list changes, logins and wrong passwords. Filter to Backups, Problems or Security, or open the raw log for the full detail."
+    },
+    {
+      "title": "Warning for big files that keep re-sending",
+      "description": "Any change re-sends the whole file, so a big file that changes often adds up fast. Since client 0.12, the local dashboard lists files re-sent 3 or more times (1 GB or more) in the past week, with a one-click Exclude."
     }
   ],
   "limitations": [

@@ -213,11 +213,12 @@ cd backup-buddies-client</code></pre>
           <h3>Does</h3>
           <ul>
             <li>Scans your folder roughly every 30 seconds and sends only what's new or changed — unchanged files aren't re-sent each cycle</li>
+            <li>Skips files that are a poor fit by default (Outlook PST/OST, live database files, VM disks, temp files) and anything else you list in <code>excludes.txt</code> in its config folder, or in the Exclusions card on its dashboard</li>
             <li>Mirrors deletions too, so your buddy's copy matches yours rather than only ever growing</li>
             <li>Encrypts everything with your <code>BACKUP_PASSPHRASE</code> before it ever leaves this machine — your buddy's device only ever stores ciphertext</li>
             <li>Connects directly to your buddy's device when possible — including finding them automatically on the same local network and connecting over it, never touching the relay — falling back to the relay automatically when a direct connection isn't possible</li>
             <li>Keeps a backstop when a file is overwritten or deleted — the live copy plus its last 2 replaced versions are kept on your buddy's disk, so a bad overwrite or an accidental local delete isn't necessarily final</li>
-            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>, behind a login: <code>DASHBOARD_PASSWORD</code> from <code>.env</code> the first time, then change it from the dashboard) showing per-buddy pledge usage, sent/received totals, last cycle result, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land in your restore folder under <code>&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
+            <li>A local status dashboard (<code>http://&lt;this device&gt;:8080</code>, behind a login: <code>DASHBOARD_PASSWORD</code> from <code>.env</code> the first time, then change it from the dashboard) showing per-buddy pledge usage, sent/received totals, last cycle result, an Activity log of what happened, big files that keep re-sending, a file browser with per-file version history, and one-click restore — restored files are never written back over your live folder; they land in your restore folder under <code>&lt;buddy&gt;/</code>, and the dashboard shows the exact path once a restore finishes</li>
             <li>Enforces your buddy's pledge — won't accept more from them than they've pledged to store</li>
           </ul>
         </div>
