@@ -26,6 +26,10 @@
       "description": "Each buddy pairing has an agreed storage size. Going over it is refused automatically, and your dashboard tells you exactly why a file didn't send (pledge full, file too large, buddy's disk full)."
     },
     {
+      "title": "More than one buddy",
+      "description": "You can pair with as many buddies as you like, through invite codes or Find a buddy. Each pairing is its own 1:1 pledge, and your backup folder goes to every buddy, so each one holds its own full encrypted copy. Your pledges add up toward the 50GB free tier, and your disk needs room for everything you've pledged (the dashboard warns you if it doesn't have it)."
+    },
+    {
       "title": "Drift detection (reconciliation)",
       "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects, catching anything lost or changed outside the normal backup flow, and automatically re-sends anything missing."
     },
@@ -91,9 +95,9 @@
       "description": "You can now filter “Find a buddy” by country. Upload speed, “usually online”, and “relay-only” are still shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
     },
     {
-      "title": "One buddy per pledge",
+      "title": "Every buddy gets the same folder",
       "status": "limitation",
-      "description": "Each pledge is a 1:1 relationship with a single buddy. There's no way to share one backup folder across multiple buddies at once."
+      "description": "With more than one buddy, your whole backup folder goes to each of them; you can't send different folders to different buddies yet. Each extra buddy means another full upload, more re-sends of changed files, and more relay bandwidth when a direct connection isn't possible. Buddies are backed up one after another, not all at once."
     }
   ]
 }
