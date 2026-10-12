@@ -14,6 +14,10 @@ export const devicesRouter = Router();
 // The person copies this into the .env file for the Docker client.
 devicesRouter.post('/devices', requireAuth, async (req, res) => {
   const { label } = req.body ?? {};
+  // Bounded like the form's maxlength; it had no limit before.
+  if (label !== undefined && label !== null && (typeof label !== 'string' || label.length > 60)) {
+    return res.status(400).json({ error: 'label must be text, 60 characters or fewer' });
+  }
 
   const token = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');

@@ -37,6 +37,12 @@ const signupPerIp = rateLimit({
 const forgotPerIp = rateLimit({ name: 'forgot-ip', windowMs: 15 * MINUTE, max: 5 });
 const resetPerIp = rateLimit({ name: 'reset-ip', windowMs: 15 * MINUTE, max: 10 });
 const verifyPerIp = rateLimit({ name: 'verify-ip', windowMs: 15 * MINUTE, max: 20 });
+// What login compares against when there's no password hash to check. Made
+// once at startup rather than hard-coded: the hard-coded one was 51
+// characters, bcryptjs only accepts 60, so it rejected it instantly and an
+// unknown email answered in 0 ms against ~185 ms for a real account
+// (measured in the pre-public review).
+const timingDummyHash = bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
 const OAUTH_STATE_COOKIE = 'oauth_state';
 const googleClient = process.env.GOOGLE_CLIENT_ID
   ? new OAuth2Client(process.env.GOOGLE_CLIENT_ID)
@@ -126,12 +132,12 @@ authRouter.post('/login', loginPerIp, loginPerEmail, async (req, res) => {
     [normalizedEmail],
   );
 
-  // Always run bcrypt.compare even on a missing account, against a fixed
-  // dummy hash — otherwise a "no such account" response returns faster
-  // than a "wrong password" one, letting an attacker enumerate which
-  // emails are registered by timing alone.
+  // Always run bcrypt.compare even on a missing account (or a Google-only
+  // one), against a real cost-12 hash — otherwise a "no such account"
+  // response returns faster than a "wrong password" one, letting an
+  // attacker enumerate which emails are registered by timing alone.
   const account = result.rows[0];
-  const hashToCheck = account?.password_hash ?? '$2a$12$invalidsaltinvalidsaltinvalidsaltinvalidsalt';
+  const hashToCheck = account?.password_hash ?? (await timingDummyHash);
   const passwordMatches = await bcrypt.compare(password, hashToCheck);
 
   if (!account || !passwordMatches) {
@@ -245,8 +251,44 @@ authRouter.get('/auth/google/callback', async (req, res) => {
 
   if (!account) {
     const byEmail = (
-      await pool.query('SELECT id, email, tier FROM accounts WHERE email = $1', [normalizedEmail])
+      await pool.query('SELECT id, email, tier, email_verified FROM accounts WHERE email = $1', [
+        normalizedEmail,
+      ])
     ).rows[0];
+
+    // An unverified password account with this email was never proven to
+    // belong to whoever made it: someone could have signed up with this
+    // address first, set a password, and waited for the real owner to
+    // arrive through Google, which would then link to it and leave their
+    // password working too (found in the pre-public review). Google has
+    // just proven this person owns the address, so the account becomes
+    // theirs alone: the unproven password, its sessions and any devices
+    // registered under it go. (An unverified account can't pair or create
+    // invites, so there's nothing else to clear.)
+    if (byEmail && !byEmail.email_verified) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE accounts
+              SET password_hash = NULL,
+                  password_reset_token_hash = NULL,
+                  password_reset_sent_at = NULL,
+                  email_verification_token_hash = NULL
+            WHERE id = $1`,
+          [byEmail.id],
+        );
+        await client.query('DELETE FROM sessions WHERE account_id = $1', [byEmail.id]);
+        await client.query('DELETE FROM devices WHERE account_id = $1', [byEmail.id]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+      console.log(`Google sign-in claimed unverified account ${byEmail.email}: cleared its password, sessions and devices.`);
+    }
 
     if (byEmail) {
       // Reaching this callback at all means they came through the gated

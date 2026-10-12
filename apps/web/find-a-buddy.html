@@ -98,6 +98,16 @@
       return bits.join(' · ');
     }
 
+    // Nickname, note and country are typed by other users and stored as-is,
+    // so every value going into the innerHTML below is escaped. They used to
+    // go in raw, which let a listing's note run script in the browser of
+    // everyone who browsed that size (found in the pre-public review).
+    function escapeText(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
     function renderListing(listing) {
       const row = document.createElement('div');
       row.className = 'marketplace-row';
@@ -111,12 +121,12 @@
 
       row.innerHTML = `
         <div>
-          <strong>${listing.inviter_label}</strong>
-          ${criteria ? `<div class="muted">${criteria}</div>` : ''}
-          ${memberSince ? `<div class="muted">Member since ${memberSince} · ${pairingCount} completed pairing${pairingCount === 1 ? '' : 's'}</div>` : ''}
-          ${listing.note ? `<div class="muted">"${listing.note}"</div>` : ''}
+          <strong>${escapeText(listing.inviter_label)}</strong>
+          ${criteria ? `<div class="muted">${escapeText(criteria)}</div>` : ''}
+          ${memberSince ? `<div class="muted">Member since ${escapeText(memberSince)} · ${pairingCount} completed pairing${pairingCount === 1 ? '' : 's'}</div>` : ''}
+          ${listing.note ? `<div class="muted">"${escapeText(listing.note)}"</div>` : ''}
         </div>
-        <button class="btn btn-secondary request-pairing-btn" data-id="${listing.id}" type="button" style="flex-shrink:0">
+        <button class="btn btn-secondary request-pairing-btn" data-id="${escapeText(listing.id)}" type="button" style="flex-shrink:0">
           Request pairing
         </button>
       `;

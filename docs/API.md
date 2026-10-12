@@ -49,7 +49,7 @@ There are five ways to authenticate. Each route below says which one it uses.
 |---|---|---|
 | **Session** | `session_id` cookie (httpOnly, secure, SameSite=Lax, 30 days). Missing → `401 not authenticated`; expired → `401 session expired or invalid` | `POST /signup`, `POST /login`, Google sign-in |
 | **Session + verified** | Session, and the account's email is verified. Otherwise `403` with `email_unverified: true` | Clicking the emailed link, or signing in with Google |
-| **Admin** | Session, and the account's email is in `ADMIN_EMAILS` (env, comma-separated, case-insensitive). Otherwise `403 admin access required`. It's an allowlist, not a database role | `.env` on app-1 |
+| **Admin** | Session, the account's email is in `ADMIN_EMAILS` (env, comma-separated, case-insensitive), **and that email is verified**. Otherwise `403 admin access required`. It's an allowlist, not a database role | `.env` on app-1 |
 | **Device token** | `Authorization: Bearer <device token>`. Only the SHA-256 is stored. Missing → `401 missing device token`, unknown → `401 invalid device token` | `POST /devices` (shown once, in the dashboard) |
 | **Relay token** | `Authorization: Bearer <RELAY_ACCESS_TOKEN>` | Same value in `deploy/app/.env` and `deploy/relay/.env` |
 | **Stripe signature** | `Stripe-Signature` header checked against `STRIPE_WEBHOOK_SECRET` | Stripe dashboard webhook endpoint |
@@ -136,7 +136,10 @@ cookie and redirects to Google's consent screen. If `GOOGLE_CLIENT_ID`,
 Auth: none. Google redirects here (`GOOGLE_REDIRECT_URI`). It checks the
 state, swaps the code for an ID token and verifies it. Then it signs in by
 Google subject. If none matches, it links an existing account with the
-same email (marking it verified and recording terms acceptance). Otherwise
+same email (marking it verified and recording terms acceptance). If that
+account was **unverified**, its password, sessions and devices are removed
+first: nobody had proven they owned the address, and Google just did.
+Otherwise
 it creates a new, already-verified account. Then it sets the session and
 redirects to `/dashboard.html`. Failures redirect to `/login.html?error=`
 with one of: `google_not_configured`, `google_state_mismatch`,
@@ -200,7 +203,8 @@ instead of your email. Up to 40 characters; `""` or `null` clears it.
 `routes/devices.js`. Managing your own devices from the dashboard.
 
 ### `POST /devices`
-Auth: session. Body `{label?}`. Creates a device and issues it a token.
+Auth: session. Body `{label?}` (up to 60 characters, else `400`). Creates a
+device and issues it a token.
 `201 {"device": {id, label, created_at, token_last_four}, "token": "<64 hex>"}`.
 **The token is only ever returned here.** The user pastes it into the
 client's `.env` as `DEVICE_TOKEN`. A lost token can't be recovered:
@@ -272,7 +276,7 @@ Auth: session + verified. Creates an invite, private by default.
 |---|---|---|
 | `pledged_bytes` | yes | Multiple of 5 GB, 5 GB to 20,000 GB |
 | `is_public` | no | `true` lists it in the marketplace |
-| `note` | no | String shown on the listing |
+| `note` | no | String shown on the listing, up to 200 characters |
 | `country` | no | String, up to 100 characters, from the dashboard's country list (or "Other") |
 | `speed_tier` | no | `under_10`, `10_50`, `50_200` or `200_plus` (Mbps) |
 | `always_on` | no | Boolean |

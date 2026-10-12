@@ -52,7 +52,8 @@ meRouter.get('/me', requireAuth, async (req, res) => {
       created_at: req.account.created_at,
       has_password: Boolean(req.account.password_hash),
       has_google: Boolean(req.account.google_sub),
-      is_admin: isAdminEmail(req.account.email),
+      // Same rule as requireAdmin: listed and verified.
+      is_admin: Boolean(req.account.email_verified) && isAdminEmail(req.account.email),
       email_verified: req.account.email_verified,
     },
     devices: devices.rows,

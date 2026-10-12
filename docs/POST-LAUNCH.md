@@ -97,6 +97,18 @@ Last reviewed: 2026-10-04.
 - Marketplace UI details (stale criteria on private invites, size preselect
   from the dashboard link).
 - Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted).
+- From the pre-public security review (2026-10-12; the XSS, Google
+  pre-account takeover, unverified admin and login timing findings were
+  fixed then). Still open, all low:
+  - Security headers in the Caddyfile: `frame-ancestors 'none'` /
+    `X-Frame-Options: DENY` and `nosniff` are easy; a real
+    Content-Security-Policy means moving every page's inline script into
+    files first.
+  - A malformed UUID in a URL (`/devices/:id`, `/invites/public/:id`) or
+    the session cookie makes Postgres throw 22P02, answered as a 500
+    rather than 400/404. Log noise, not a hole.
+  - Per-IP limits can be dodged by hitting app-1 directly with a forged
+    `CF-Connecting-IP` (DEPLOY §24 has the firewall fix).
 - Annual plan ($30/year, alongside the flat $3/month from DEPLOY §30): cuts
   Stripe's ~$0.39 fixed fee per charge from ~13% to ~4%. Blocked on mixing
   intervals: the relay item is a monthly metered price on the same

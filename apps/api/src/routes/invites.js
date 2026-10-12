@@ -48,6 +48,7 @@ const PLEDGE_MAX_BYTES = 20_000 * GB;
 // booleans just coerce.
 const SPEED_TIERS = ['under_10', '10_50', '50_200', '200_plus'];
 const MAX_COUNTRY_LENGTH = 100;
+const MAX_NOTE_LENGTH = 200;
 
 // Default page size for GET /invites/public, and the most a caller can
 // ask for — a marketplace could grow into hundreds of listings at one
@@ -84,6 +85,11 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
   }
   if (note !== undefined && note !== null && typeof note !== 'string') {
     return res.status(400).json({ error: 'note must be a string' });
+  }
+  // Shown to everyone browsing the marketplace, so bounded (the form's
+  // maxlength matches); there was no limit before.
+  if (typeof note === 'string' && note.length > MAX_NOTE_LENGTH) {
+    return res.status(400).json({ error: `note must be ${MAX_NOTE_LENGTH} characters or fewer` });
   }
   if (
     country !== undefined &&

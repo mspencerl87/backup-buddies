@@ -80,7 +80,7 @@
         which rebuilds it.</p>
       </div>
       <div class="inline-form" style="margin-top:1rem">
-        <input type="text" id="device-label" placeholder="e.g. Spencer's desktop">
+        <input type="text" id="device-label" maxlength="60" placeholder="e.g. Spencer's desktop">
         <button class="btn" id="add-device-btn" type="button">Add device</button>
       </div>
       <p class="error" id="device-error"></p>
@@ -125,7 +125,7 @@
             displayed, same as the note below.
           </p>
           <label for="invite-note">Note (optional)</label>
-          <input type="text" id="invite-note" placeholder="e.g. Fast connection, available evenings">
+          <input type="text" id="invite-note" maxlength="200" placeholder="e.g. Fast connection, available evenings">
           <label for="invite-country">Country (optional)</label>
           <select id="invite-country"></select>
           <label for="invite-speed-tier">Upload speed (optional)</label>
