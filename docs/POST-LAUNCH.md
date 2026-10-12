@@ -109,12 +109,6 @@ Last reviewed: 2026-10-04.
     rather than 400/404. Log noise, not a hole.
   - Per-IP limits can be dodged by hitting app-1 directly with a forged
     `CF-Connecting-IP` (DEPLOY §24 has the firewall fix).
-- Annual plan ($30/year, alongside the flat $3/month from DEPLOY §30): cuts
-  Stripe's ~$0.39 fixed fee per charge from ~13% to ~4%. Blocked on mixing
-  intervals: the relay item is a monthly metered price on the same
-  subscription, and stripe-node 16 can't put a yearly and a monthly price
-  on one subscription. Needs a Stripe API/SDK upgrade with mixed-interval
-  subscriptions, or a separate monthly relay-only subscription.
 - ~~Error messages show container paths (`/backup`) instead of host paths~~ —
   client 0.7.3 uses `BACKUP_DIR_HOST` / `BUDDY_FILES_DIR_HOST` when set,
   otherwise says to look in docker-compose.yml.
