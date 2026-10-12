@@ -1,22 +1,25 @@
 # Deploying
 
-Two Linodes, matching `docs/architecture` from earlier planning: `app-1`
-(control plane) and `relay-1` (Iroh relay).
+Two VPSes: `app-1` (control plane) and `relay-1` (Iroh relay).
 
-## 1. Provision the Linodes
+Commands here use `$CHECKOUT` for where the repo is checked out on each
+server. Set it once in the deploy user's shell profile (e.g.
+`export CHECKOUT=/srv/backup-buddies` in `~/.bashrc`) so they paste as-is.
+
+## 1. Provision the servers
 
 For both:
 
 - **Image**: Ubuntu 24.04 LTS (not "latest" — see README for why)
-- `app-1`: Linode 2GB plan
-- `relay-1`: Nanode 1GB plan
+- `app-1`: 2GB RAM
+- `relay-1`: 1GB RAM
 - Add your SSH key during creation rather than a root password
-- Enable Linode Backups on `app-1` (its Postgres data is the one thing here
-  that isn't recoverable from anywhere else)
+- Turn on the provider's disk backups for `app-1` (its Postgres data is the
+  one thing here that isn't recoverable from anywhere else)
 
 ## 2. Lock down networking
 
-Create a Cloud Firewall (Linode's dashboard, free) for each:
+Create a firewall for each (the provider's cloud firewall, or `ufw`):
 
 - `app-1`: allow inbound 22 (SSH, ideally restricted to your IP), 80, 443.
   Nothing else — Postgres is never exposed outside the Docker network.
@@ -40,17 +43,14 @@ Create a Cloud Firewall (Linode's dashboard, free) for each:
 curl -fsSL https://get.docker.com | sh
 ```
 
-(Linode's marketplace also offers a one-click Docker image if you'd rather
-provision with it already installed.)
-
 ## 5. First deploy — app-1
 
 ```bash
 # on your machine, clone the private repo onto the server
 ssh app-1-ip
-sudo mkdir -p /opt/backup-buddies && sudo chown $USER /opt/backup-buddies
-git clone git@github.com:yourusername/backup-buddies.git /opt/backup-buddies
-cd /opt/backup-buddies/deploy/app
+sudo mkdir -p $CHECKOUT && sudo chown $USER $CHECKOUT
+git clone git@github.com:yourusername/backup-buddies.git $CHECKOUT
+cd $CHECKOUT/deploy/app
 
 cp ../../.env.example .env
 # edit .env: set a real POSTGRES_PASSWORD, DATABASE_URL with the same
@@ -71,7 +71,7 @@ working, not just best-guess from docs.
 
 ```bash
 ssh relay-1-ip
-mkdir -p /opt/backup-buddies && cd /opt/backup-buddies
+mkdir -p $CHECKOUT && cd $CHECKOUT
 git clone https://github.com/yourusername/backup-buddies.git .
 cd deploy/relay
 ```
@@ -100,7 +100,7 @@ new cert. Add a deploy hook that restarts the service on renewal:
 ```bash
 cat > /etc/letsencrypt/renewal-hooks/deploy/restart-relay.sh << 'EOF'
 #!/bin/sh
-cd /opt/backup-buddies/deploy/relay && docker compose restart relay
+cd $CHECKOUT/deploy/relay && docker compose restart relay
 EOF
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-relay.sh
 ```
@@ -128,7 +128,7 @@ against a fresh, empty Postgres volume, so on an already-running database
 you apply the migration by hand, once:
 
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
   < ../../db/migrations/002_auth_and_invites.sql
 ```
@@ -136,7 +136,7 @@ docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
 **Every deploy after a pull:**
 
 ```bash
-cd /opt/backup-buddies
+cd $CHECKOUT
 git pull
 cd deploy/app
 docker compose up -d --build   # --build picks up the new npm deps in apps/api
@@ -175,7 +175,7 @@ customers is whatever's on disk here — **which CI will never update for
 you**. After any push that touches `apps/client/`, pull it by hand:
 
 ```bash
-cd /opt/backup-buddies && git pull
+cd $CHECKOUT && git pull
 ```
 
 No `docker compose` command needed — Caddy just serves files off disk, so
@@ -194,6 +194,9 @@ In the repo's Settings → Secrets and variables → Actions, add:
 - `LINODE_APP_USER` — the SSH user you deploy as
 - `LINODE_APP_SSH_KEY` — a private key whose public half is authorized on
   app-1 (consider a dedicated deploy key, not your personal one)
+
+The workflows (`deploy.yml`, `build-client.yml`) `cd` into the checkout
+by its full path; if your `$CHECKOUT` is somewhere else, change it there.
 
 From then on, pushing to `main` with changes under `apps/api/` or
 `deploy/app/` builds the image, pushes it to GHCR, and redeploys app-1
@@ -237,7 +240,7 @@ unset and the "Continue with Google" button just redirects to a
    before running this — restarting at the same moment races it for the
    `app-api-1` container name (see section 11's note):
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/003_google_oauth.sql
    docker compose up -d
@@ -284,7 +287,7 @@ section 13.
    just now, let CI's own deploy finish first; see section 11's note on
    why running this concurrently races it):
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/005_billing.sql
    docker compose up -d
@@ -313,7 +316,7 @@ agent customers run in Docker. This section is server-side setup; see
 
 1. **Apply the migration:**
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/006_devices_and_marketplace.sql
    ```
@@ -365,7 +368,7 @@ Access is gated by `ADMIN_EMAILS` (comma-separated, case-insensitive) in
 you. Unset or empty, `/admin/*` 403s for everyone, you included.
 
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 # edit .env: add/confirm ADMIN_EMAILS=mspencerl87@gmail.com (or your real list)
 docker compose up -d
 ```
@@ -411,7 +414,7 @@ into Stripe Billing Meter events on a 15-minute schedule
    sync-job code already deployed on push, via CI; if that was just now,
    let CI's own deploy finish first, see section 11's note):
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose up -d
    ```
    No new migration — `relay_usage_events` already exists (`db/init.sql`).
@@ -470,7 +473,7 @@ already have a mailbox. This was set up against **Purelymail**
    that was just now, let CI's own deploy finish first; see section 11's
    note on why running this concurrently races it):
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/007_email_verification.sql
    docker compose up -d
@@ -517,7 +520,7 @@ is actually working.
    push; see section 11's note on why running `docker compose up` by
    hand here too would just race it):
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/008_stale_account_cleanup.sql
    ```
@@ -571,7 +574,7 @@ way every other static page under `apps/web` already is.
 **Apply the migration before — or any time around — this deploys, not
 strictly after:**
 ```bash
-cd /opt/backup-buddies
+cd $CHECKOUT
 git pull
 cd deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
@@ -603,7 +606,7 @@ already actively paired (409, "you and this account are already paired
 up"), and a new unique index closes the race a check-then-insert can't:
 
 ```bash
-cd /opt/backup-buddies
+cd $CHECKOUT
 git pull
 cd deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
@@ -665,7 +668,7 @@ nullable with no default, so it's safe any time relative to the API
 deploy):
 
 ```bash
-cd /opt/backup-buddies
+cd $CHECKOUT
 git pull
 cd deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
@@ -696,7 +699,7 @@ checks, relink / resync quantity / cancel). Also adds
 
 **Apply the migration before this deploys:**
 ```bash
-cd /opt/backup-buddies
+cd $CHECKOUT
 git pull
 cd deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
@@ -786,7 +789,7 @@ it is admin-only by accident.
 ## 23. Lock the relay to customers + free relay allowance
 
 Until now relay-1 ran with `access = "everyone"`. Anyone running an Iroh
-client could push traffic through it on your Linode bill, and free
+client could push traffic through it on our hosting bill, and free
 accounts' relay use was unlimited. This section closes both:
 
 - **Only registered devices can use the relay.** On every connection,
@@ -818,7 +821,7 @@ token would deny every device.
    let the code deploy. Merging to `main` deploys the API; it changes
    nothing for the relay yet.
    ```bash
-   cd /opt/backup-buddies/deploy/app
+   cd $CHECKOUT/deploy/app
    echo 'RELAY_ACCESS_TOKEN=<token>' >> .env
    docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
      < ../../db/migrations/014_relay_usage_by_month.sql
@@ -839,7 +842,7 @@ token would deny every device.
    Don't continue until the first one says `true`.
 4. **relay-1**: pull, add the same token, restart:
    ```bash
-   cd /opt/backup-buddies && git pull
+   cd $CHECKOUT && git pull
    cd deploy/relay
    echo 'RELAY_ACCESS_TOKEN=<token>' > .env && chmod 600 .env
    docker compose up -d
@@ -896,8 +899,8 @@ someone who finds app-1's real IP and skips Cloudflare could fake that
 header and dodge the per-IP limits. That's why login also has a per-email
 limit, and invite redemption is per-account: neither can be faked.
 
-To close it fully (optional), restrict app-1's inbound 80/443 in the Linode
-Cloud Firewall to Cloudflare's published ranges
+To close it fully (optional), restrict app-1's inbound 80/443 in its
+firewall to Cloudflare's published ranges
 (https://www.cloudflare.com/ips/). Afterwards, confirm Caddy can still renew
 its certificates. Watch `docker compose logs caddy` around the next renewal,
 or run a forced renewal, since a challenge that can't get through would
@@ -940,7 +943,7 @@ existing install found". It refused safely, but uselessly. Both are fixed.
 **Migration** (apply any time; the code works with or without it, and
 versions just aren't recorded until it's in):
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
   < ../../db/migrations/015_device_client_version.sql
 ```
@@ -953,8 +956,8 @@ the version bump, nobody is told to update. See apps/client/README.md,
 
 ## 26. Nightly off-site database backup (Backblaze B2)
 
-Linode Backups snapshot app-1's disk, but they're deleted along with the
-Linode and depend on the same account. Since client 0.7.0 the account id
+The provider's disk backups snapshot app-1, but they're deleted along with the
+server and depend on the same account. Since client 0.7.0 the account id
 is part of every user's encryption key, so losing the database would also
 stop users restoring onto a new machine. `deploy/app/backup-db.sh` dumps
 Postgres every night and uploads it to B2.
@@ -972,12 +975,13 @@ Postgres every night and uploads it to B2.
 
 **One-time setup on app-1:**
 ```bash
-cd /opt/backup-buddies && git pull
+cd $CHECKOUT && git pull
 cd deploy/app
 # Add to .env: B2_KEY_ID, B2_APP_KEY, B2_BUCKET (and BACKUP_PING_URL below)
 chmod +x backup-db.sh
 ./backup-db.sh          # first run by hand: should print "uploaded backup_buddies-….sql.gz"
-cp bb-db-backup.service bb-db-backup.timer /etc/systemd/system/
+sed "s|@CHECKOUT@|$CHECKOUT|" bb-db-backup.service > /etc/systemd/system/bb-db-backup.service
+cp bb-db-backup.timer /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now bb-db-backup.timer
 systemctl list-timers bb-db-backup.timer   # shows the next run (03:30 UTC)
@@ -993,7 +997,7 @@ upload, so a failed or skipped backup raises an alert the next day.
 **Restore** (test this once now, into a scratch database, so it's known to
 work before it's needed):
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 # List backups and download one (fill in the key, id and bucket):
 docker run --rm -e RCLONE_CONFIG_B2_TYPE=b2 -e RCLONE_CONFIG_B2_ACCOUNT=<keyID> \
   -e RCLONE_CONFIG_B2_KEY=<applicationKey> rclone/rclone:1.68.2 ls b2:<bucket>/postgres/
@@ -1058,7 +1062,7 @@ storage until it's cancelled from the admin Stripe section.
 the column directly, so invites, relay reports and the admin page fail
 until it exists):
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 docker compose exec -T postgres psql -U backup_buddies -d backup_buddies \
   < ../../db/migrations/016_billing_exempt.sql
 ```
@@ -1081,7 +1085,7 @@ works through the app host, after the password.
 **Before pushing** (compose won't start Caddy without these, so the deploy
 would fail and leave the old containers running):
 ```bash
-cd /opt/backup-buddies/deploy/app
+cd $CHECKOUT/deploy/app
 docker run --rm -it caddy:2-alpine caddy hash-password   # type it twice
 ```
 Add to `deploy/app/.env`, with the hash in **single quotes** (it contains

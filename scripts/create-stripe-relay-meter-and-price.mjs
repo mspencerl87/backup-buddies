@@ -26,10 +26,9 @@ if (!secretKey) {
   process.exit(1);
 }
 
-// Rate rationale: Linode (who host relay.filegarden.net) charges roughly
-// $0.005-0.01/GB for network egress overage as of 2026 — see
-// https://www.cloudcompare.dev/linode-pricing and
-// https://www.linode.com/community/questions/18659. $0.02/GB keeps a
+// Rate rationale: the VPS host behind relay.filegarden.net charges roughly
+// $0.005-0.01/GB for network egress overage as of 2026 (typical for VPS
+// providers with a monthly transfer allowance). $0.02/GB keeps a
 // healthy margin (2-4x) over that actual cost while staying far below
 // typical cloud egress pricing (AWS/GCP commonly run $0.08-0.12/GB) and is
 // easy to explain to users.

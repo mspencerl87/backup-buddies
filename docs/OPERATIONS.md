@@ -47,13 +47,13 @@ numbered sections that are referenced below as "DEPLOY §N".
 
 ## Servers
 
-Both are Linodes running Ubuntu 24.04 with Docker. The repo is checked out
-at `/opt/backup-buddies` on each.
+Both are VPSes running Ubuntu 24.04 with Docker. The repo is checked out
+at `$CHECKOUT` on each.
 
 | Host | Plan | Runs | Compose file | Firewall (inbound) |
 |---|---|---|---|---|
-| **app-1** | Linode 2GB, Linode Backups on | `api` (image from GHCR), `postgres` (16-alpine, volume `pgdata`, not exposed), `caddy` (TLS, static files) | `deploy/app/docker-compose.yml` | 22, 80, 443 |
-| **relay-1** | Nanode 1GB | `relay` (`n0computer/iroh-relay:v1.3.0`) | `deploy/relay/docker-compose.yml` | 22, 443, 7824/udp (80 for certbot renewals) |
+| **app-1** | 2GB, provider disk backups on | `api` (image from GHCR), `postgres` (16-alpine, volume `pgdata`, not exposed), `caddy` (TLS, static files) | `deploy/app/docker-compose.yml` | 22, 80, 443 |
+| **relay-1** | 1GB | `relay` (`n0computer/iroh-relay:v1.3.0`) | `deploy/relay/docker-compose.yml` | 22, 443, 7824/udp (80 for certbot renewals) |
 
 DNS is on Cloudflare (DEPLOY §3):
 
@@ -80,7 +80,7 @@ Everything someone taking over would need access to:
 |---|---|---|
 | GitHub `mspencerl87/backup-buddies` (private) | Source, CI, GHCR images (`api`, `client`) | Actions secrets (see [CI](#ci-github-actions)) |
 | GitHub `mspencerl87/backup-buddies-client` (public) | GPL mirror of `apps/client` | Deploy key, secret `PUBLIC_CLIENT_DEPLOY_KEY` (DEPLOY §27) |
-| Linode | app-1, relay-1, Cloud Firewalls, disk backups | Linode dashboard |
+| VPS provider | app-1, relay-1, firewalls, disk backups | Provider dashboard |
 | Cloudflare | DNS and proxy for `filegarden.net` | Cloudflare dashboard |
 | Stripe | Subscriptions, Checkout, Billing Portal, relay usage meter, webhooks | `STRIPE_*` env vars; prices made by `scripts/` (DEPLOY §10, §13) |
 | Google Cloud | "Continue with Google" OAuth client | `GOOGLE_*` env vars (DEPLOY §9) |
@@ -90,7 +90,7 @@ Everything someone taking over would need access to:
 
 ## Settings: app-1 `.env`
 
-`/opt/backup-buddies/deploy/app/.env`, read by the `api` container
+`$CHECKOUT/deploy/app/.env`, read by the `api` container
 (`env_file`) and by compose itself. The template, with comments, is
 `.env.example` at the repo root. **The API reads these once at startup:
 after a change, run `docker compose up -d` (from `deploy/app`) to recreate
@@ -126,7 +126,7 @@ the container.**
 
 ## Settings: relay-1 `.env`
 
-`/opt/backup-buddies/deploy/relay/.env` (template:
+`$CHECKOUT/deploy/relay/.env` (template:
 `deploy/relay/.env.example`).
 
 | Variable | Required | What it does |
@@ -207,7 +207,7 @@ app-1's checkout is where devices read the latest client version from.
 `build-client.yml` pulls it once the image is published (its
 `publish-version` job; it shares the `app-1-checkout` concurrency group
 with `deploy.yml`'s deploy job so the two never `git pull` at once). If
-that job fails, run `git pull` in `/opt/backup-buddies` on app-1 by hand.
+that job fails, run `git pull` in `$CHECKOUT` on app-1 by hand.
 
 Repository secrets: `LINODE_APP_HOST`, `LINODE_APP_USER`,
 `LINODE_APP_SSH_KEY` (deploy over SSH), `PUBLIC_CLIENT_DEPLOY_KEY`
@@ -215,7 +215,7 @@ Repository secrets: `LINODE_APP_HOST`, `LINODE_APP_USER`,
 
 ## Routine commands
 
-On **app-1**, from `/opt/backup-buddies/deploy/app` unless noted.
+On **app-1**, from `$CHECKOUT/deploy/app` unless noted.
 
 ```bash
 # Is it up?
@@ -235,7 +235,7 @@ docker compose up -d
 docker compose restart api
 
 # Deploy by hand (what CI does)
-cd /opt/backup-buddies && git pull && cd deploy/app && docker compose pull api && docker compose up -d
+cd $CHECKOUT && git pull && cd deploy/app && docker compose pull api && docker compose up -d
 
 # SQL shell
 docker compose exec postgres psql -U backup_buddies -d backup_buddies
@@ -254,12 +254,12 @@ journalctl -u bb-db-backup.service -n 50
 
 Restoring a database dump is in DEPLOY §26.
 
-On **relay-1**, from `/opt/backup-buddies/deploy/relay`:
+On **relay-1**, from `$CHECKOUT/deploy/relay`:
 
 ```bash
 docker compose logs -f --tail 100 relay
 docker compose restart relay
-cd /opt/backup-buddies && git pull && cd deploy/relay && docker compose up -d   # update (no CI for relay-1)
+cd $CHECKOUT && git pull && cd deploy/relay && docker compose up -d   # update (no CI for relay-1)
 ```
 
 ## Built-in limits and constants

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Nightly off-site backup of the Postgres database to Backblaze B2.
 #
-# Linode Backups snapshot the whole disk, but they live and die with this
-# Linode (deleting it, or losing the account, takes them too). Since client
+# The VPS provider's backups snapshot the whole disk, but they live and die
+# with the server (deleting it, or losing the account, takes them too). Since client
 # 0.7.0 the account id is part of every user's encryption key, so losing
 # the database would also stop users restoring on a new machine. This keeps
 # a plain SQL dump somewhere else.

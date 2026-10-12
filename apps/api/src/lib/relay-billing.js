@@ -24,7 +24,7 @@ import { PLAN_USD_PER_MONTH } from '../routes/billing.js';
 // in .env is informational only — nothing in this codebase reads it).
 export const RELAY_METER_EVENT_NAME = 'relay_bandwidth_mb';
 
-// $0.02/GB. Linode (who host relay.filegarden.net) charges roughly
+// $0.02/GB. The VPS host behind relay.filegarden.net charges roughly
 // $0.005-0.01/GB for network egress overage as of 2026, so this keeps a
 // healthy margin over the actual cost of relayed traffic while staying far
 // below typical cloud egress pricing and easy to explain to users. See

@@ -7,7 +7,7 @@ service, can read the other's data.
 
 ## How it's laid out
 
-This is two independently deployable pieces, matching the two Linodes:
+This is two independently deployable pieces, one per server:
 
 | Path | Deploys to | What it is |
 |---|---|---|
@@ -39,7 +39,7 @@ responses, and you already pay for it. Use it there.
 UDP/QUIC reachability for NAT hole-punching and direct connections; Cloudflare's
 proxy only handles HTTP(S)/TCP traffic on specific ports and will break this.
 Give the relay host (e.g. `relay.yourdomain.com`) a **DNS-only (grey cloud)**
-record pointing straight at the Linode's IP.
+record pointing straight at the relay server's IP.
 
 Cloudflare is still useful for the relay's DNS record itself, and you can put
 Cloudflare Access in front of anything admin-only later (e.g. a future
@@ -47,7 +47,7 @@ dashboard) without it interfering with the relay protocol.
 
 ## OS choice: Ubuntu 24.04 LTS, not "latest"
 
-Use **Ubuntu 24.04 LTS** on both Linodes specifically, not whatever "latest"
+Use **Ubuntu 24.04 LTS** on both servers specifically, not whatever "latest"
 resolves to at image-creation time. LTS releases get security patches for
 years and won't change Docker/kernel behavior out from under you on a
 re-provision; a non-LTS "latest" release goes end-of-life in ~9 months, which
@@ -55,7 +55,7 @@ you don't want to discover mid-production.
 
 ## Deploying
 
-See `docs/DEPLOY.md` for the step-by-step: provisioning the two Linodes,
+See `docs/DEPLOY.md` for the step-by-step: provisioning the two servers,
 DNS records, environment variables, and the first `docker-compose up`.
 
 ## Reference
