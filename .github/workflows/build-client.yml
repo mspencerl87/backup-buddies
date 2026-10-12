@@ -16,8 +16,19 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # For the provenance attestation below: id-token lets the job get a
+      # short-lived signing certificate for this exact workflow run, and
+      # attestations lets it store the signed statement on GitHub.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
+
+      # The version devices compare against, so each release is also
+      # pullable (and verifiable) by number, not just as :latest.
+      - name: Read client version
+        id: version
+        run: echo "version=$(grep -m1 '^version' apps/client/Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -27,12 +38,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: apps/client
           build-args: BB_INSTALL_KIND=image
           push: true
-          tags: ghcr.io/${{ github.repository }}/client:latest,ghcr.io/${{ github.repository }}/client:${{ github.sha }}
+          tags: ghcr.io/${{ github.repository }}/client:latest,ghcr.io/${{ github.repository }}/client:${{ steps.version.outputs.version }},ghcr.io/${{ github.repository }}/client:${{ github.sha }}
+
+      # Build provenance: a statement, signed by GitHub for this run, that
+      # the image with this digest was built by this workflow in this public
+      # repo from this commit. Anyone can check it with
+      #   gh attestation verify oci://ghcr.io/mspencerl87/backup-buddies/client:<version> --owner mspencerl87
+      # so "the code is open, but is that what I'm running?" has an answer
+      # people can verify themselves (see the client README).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}/client
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
   # Devices learn about a release from app-1's checkout (Caddy serves
   # apps/client from it at /client/, and update_check.rs and the web

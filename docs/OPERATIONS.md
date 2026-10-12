@@ -199,7 +199,7 @@ Every workflow runs on a push to `main` that touches its paths.
 | Workflow | Paths | Does | Takes |
 |---|---|---|---|
 | `deploy.yml` | `apps/api/**`, `apps/web/**`, `deploy/app/**`, `db/migrations/**` | 1. Stamps asset versions and commits "Stamp asset versions" if anything changed. 2. Builds and pushes `ghcr.io/mspencerl87/backup-buddies/api:latest` (and `:<sha>`). 3. Over SSH on app-1: `git pull`, `docker compose pull api`, `docker compose up -d`, `caddy reload` (applies a changed `deploy/app/caddy/Caddyfile`), prune images. **Doesn't run migrations** | ~1.5 min |
-| `build-client.yml` | `apps/client/**` | Builds and publishes `ghcr.io/mspencerl87/backup-buddies/client:latest` (and `:<sha>`), then over SSH on app-1 runs `git pull --ff-only`, so `/client/Cargo.toml` (what devices and the web dashboard compare against) only moves once the image exists | ~7 min |
+| `build-client.yml` | `apps/client/**` | Builds and publishes `ghcr.io/mspencerl87/backup-buddies/client:latest` (and `:<version>`, `:<sha>`) with a signed build-provenance attestation (`gh attestation verify`, client README "Verifying the image"), then over SSH on app-1 runs `git pull --ff-only`, so `/client/Cargo.toml` (what devices and the web dashboard compare against) only moves once the image exists | ~7 min |
 | `sync-public-client.yml` | `apps/client/**` (can also be run by hand) | Copies `apps/client` to the public repo as one commit | seconds |
 
 app-1's checkout is where devices read the latest client version from.
