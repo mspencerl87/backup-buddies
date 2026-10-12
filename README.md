@@ -12,7 +12,9 @@ This is two independently deployable pieces, one per server:
 | Path | Deploys to | What it is |
 |---|---|---|
 | `apps/api/` + `deploy/app/` | `app-1` | Control plane: Express API + Postgres + Caddy (TLS) |
+| `apps/web/` | `app-1` (served by Caddy) | The site, dashboard and admin page (plain HTML/JS) |
 | `deploy/relay/` | `relay-1` | Self-hosted Iroh relay (NAT-traversal fallback) |
+| `apps/client/` | users' machines | The backup client (Rust, Docker image on GHCR) |
 
 The API never touches user file data — it only handles accounts, buddy
 pairing, device NodeIds, quotas, and billing. The relay only ever forwards
@@ -70,3 +72,18 @@ DNS records, environment variables, and the first `docker-compose up`.
 
 Copy `.env.example` to `.env` on `app-1` and fill in real values. **Never
 commit `.env`.**
+
+## License
+
+Copyright (C) 2026 Spencer LeBlanc.
+
+- **`apps/client/`**, the program that runs on your machine: GPL-3.0-only,
+  see [`apps/client/LICENSE`](apps/client/LICENSE). It's also mirrored on
+  its own at
+  [backup-buddies-client](https://github.com/mspencerl87/backup-buddies-client).
+- **Everything else** (API, site, database schema, deploy files, scripts,
+  docs): AGPL-3.0-only, see [`LICENSE`](LICENSE). If you run a modified
+  version of the server for other people, the AGPL asks you to offer them
+  your source.
+
+Contributions are welcome; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
