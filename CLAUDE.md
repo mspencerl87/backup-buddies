@@ -23,13 +23,18 @@ device over iroh (direct, or through our relay). Live at filegarden.net
 
 ## Rules
 
-- **`apps/client` is public.** It's mirrored on every push to
-  github.com/mspencerl87/backup-buddies-client (GPL-3.0-only, copyright
-  Spencer LeBlanc; `.github/workflows/sync-public-client.yml`). Never put
-  secrets, test-device names/paths, internal IPs or references to private
-  docs (`docs/`, `apps/api`, deploy notes) in anything under it. New source
-  files get the two-line SPDX/copyright header. Changes made directly on
-  the public repo are overwritten by the next sync; bring them in here.
+- **This whole repo is public** (github.com/mspencerl87/backup-buddies,
+  history included). Never commit secrets, real `.env` values, keys or
+  tokens anywhere; `.env.example` files hold placeholders only. Licenses:
+  `apps/client` is GPL-3.0-only (its own `LICENSE`), everything else
+  AGPL-3.0-only (root `LICENSE`), copyright Spencer LeBlanc.
+- **`apps/client` is also mirrored on its own** to
+  github.com/mspencerl87/backup-buddies-client on every push
+  (`.github/workflows/sync-public-client.yml`), so keep it self-contained:
+  no references to `docs/`, `apps/api` or deploy notes in anything under
+  it. New client source files get the two-line SPDX/copyright header.
+  Changes made directly on the mirror are overwritten by the next sync;
+  bring them in here.
 
 - **Never run `cargo fmt`.** The client isn't rustfmt-formatted; it would
   rewrite every file. Match the surrounding style by hand.
