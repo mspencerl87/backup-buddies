@@ -1019,6 +1019,29 @@ device+inode, not path. Nothing is ever moved automatically.
       NFS share untouched. Files moved back afterwards. Polish idea: the
       message shows the container path `/backup` rather than the host path
       (could use `BACKUP_DIR_HOST`, like restore results do)
+
+## Verified — flat $3/month plan, relay allowance on both plans (2026-10-12)
+
+DEPLOY §30, live Stripe (`rk_live_`). testa made non-complimentary for the
+test, 50GB pledged, 4.3GB relayed so far this month.
+
+- [x] Free card: "Free plan: 50GB of your 50GB free allowance pledged… the
+      paid plan is $3/month"; relay "4.3 of 10 GB included… syncing pauses
+      until the 1st unless you subscribe".
+- [x] Checkout: "Backup Buddies plan $3.00, billed monthly" plus the relay
+      line "$0.00001953 per MB" with its description (unit label and
+      description set on the relay product), $3.00 due today.
+- [x] After paying: webhook linked the subscription; card reads "Paid plan:
+      $3/month for any pledge size" and relay "4.3 of 10 GB included… past
+      the allowance, it's $0.02/GB" (usage from before subscribing counts
+      toward the allowance, as intended).
+- [x] `move-subscriptions-to-flat-plan.mjs` dry run: 0 live subscriptions on
+      the old price. Old tiered products archived.
+- [ ] Relay past 10GB on a paid account shows up as a metered charge on the
+      next invoice (needs more than 5.7GB more relayed this month).
+- [x] Cancelling clears the subscription link; card back to "Free plan"
+      (`customer.subscription.deleted`). testa refunded and made complimentary again.
+
 ## Needs testing — client 0.14.0: encrypted file and folder names (2026-10-11)
 
 Every path component is encrypted on its own, rclone-crypt style:
