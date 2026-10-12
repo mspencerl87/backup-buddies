@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireAdmin } from '../middleware/require-admin.js';
-import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
+import { pledgedGBForAccount, FREE_GB } from './billing.js';
 import { isAdminEmail } from '../lib/admin.js';
 import { stripe } from '../lib/stripe.js';
 import { FREE_RELAY_GB_PER_MONTH, FREE_RELAY_CAP_REASON } from '../lib/relay-billing.js';
@@ -279,13 +279,13 @@ adminRouter.get('/admin/accounts/:id', async (req, res) => {
     pledge: {
       pledged_gb: pledgedGB,
       free_allowance_gb: FREE_GB,
-      billable_gb: Math.max(0, pledgedGB - FREE_GB),
     },
     relay_usage: {
       total_bytes: Number(relay.total_bytes),
       last_30d_bytes: Number(relay.last_30d_bytes),
       this_month_bytes: Number(relay.this_month_bytes),
-      // Only enforced for free accounts (lib/relay-billing.js).
+      // Included on both plans: past it free accounts pause, paid ones are
+      // billed (lib/relay-billing.js).
       free_allowance_gb: FREE_RELAY_GB_PER_MONTH,
       unsynced_bytes: Number(relay.unsynced_bytes),
       unsynced_events: Number(relay.unsynced_events),
@@ -662,19 +662,20 @@ adminRouter.get('/admin/accounts/:id/stripe', async (req, res) => {
       checks.push({
         level: 'warn',
         message:
-          `The stored subscription item id doesn't match any item on the subscription, so pledge changes ` +
-          `won't update billing. "Relink from Stripe" will fix it.`,
+          `The stored subscription item id doesn't match any item on the subscription, so "Move to flat plan" ` +
+          `can't find the plan item. "Relink from Stripe" will fix it.`,
       });
-    } else {
-      const expectedQuantity = Math.max(1, await pledgedGBForAccount(account.id));
-      if (storageItem.quantity !== expectedQuantity) {
-        checks.push({
-          level: 'warn',
-          message:
-            `Stripe is billing for ${storageItem.quantity} GB of storage, but this account currently has ` +
-            `${expectedQuantity} GB pledged. "Resync quantity" will correct it.`,
-        });
-      }
+    } else if (storageItem.price?.id !== process.env.STRIPE_STORAGE_PRICE_ID || storageItem.quantity !== 1) {
+      // Subscribed before the flat $3/month plan (billing.js's
+      // PLAN_USD_PER_MONTH), when the item was the per-TB price with
+      // quantity = pledged GB.
+      checks.push({
+        level: 'warn',
+        message:
+          `The plan item is on price ${storageItem.price?.id} with quantity ${storageItem.quantity}, not the flat ` +
+          `plan (${process.env.STRIPE_STORAGE_PRICE_ID}, quantity 1). "Move to flat plan" switches it from the ` +
+          `next renewal.`,
+      });
     }
     if ((linkedSub.status === 'past_due' || linkedSub.status === 'unpaid') && account.relay_status === 'active') {
       checks.push({
@@ -813,23 +814,30 @@ adminRouter.post('/admin/accounts/:id/stripe/relink', async (req, res) => {
   });
 });
 
-// Like syncSubscriptionQuantity() in billing.js, but reports failures
-// instead of swallowing them, so the admin sees why it didn't work.
-adminRouter.post('/admin/accounts/:id/stripe/resync-quantity', async (req, res) => {
+// Puts a subscription from the per-TB days onto the flat plan: same
+// subscription item, swapped to STRIPE_STORAGE_PRICE_ID with quantity 1.
+// No proration — the per-TB price was billed in advance, so the period
+// they've already paid for stands and the flat price starts at the next
+// renewal. scripts/move-subscriptions-to-flat-plan.mjs does the same for
+// every subscription at once.
+adminRouter.post('/admin/accounts/:id/stripe/move-to-flat-plan', async (req, res) => {
   if (!stripeConfigured()) return res.status(503).json({ error: 'Stripe is not configured' });
+  if (!process.env.STRIPE_STORAGE_PRICE_ID) {
+    return res.status(503).json({ error: 'STRIPE_STORAGE_PRICE_ID is not set' });
+  }
   const account = await loadAccountOr404(req, res, 'id, stripe_subscription_item_id');
   if (!account) return;
   if (!account.stripe_subscription_item_id) {
     return res.status(400).json({ error: 'No subscription item is linked — try "Relink from Stripe" first.' });
   }
 
-  const quantity = Math.max(1, await pledgedGBForAccount(account.id));
   await stripe.subscriptionItems.update(account.stripe_subscription_item_id, {
-    quantity,
-    proration_behavior: 'create_prorations',
+    price: process.env.STRIPE_STORAGE_PRICE_ID,
+    quantity: 1,
+    proration_behavior: 'none',
   });
-  logAdminAction(req, 'stripe-resync-quantity', `quantity=${quantity}`);
-  res.json({ ok: true, quantity });
+  logAdminAction(req, 'stripe-move-to-flat-plan', `item=${account.stripe_subscription_item_id}`);
+  res.json({ ok: true });
 });
 
 // mode: 'period_end' (cancel when the paid period ends), 'undo' (reverse a
@@ -882,13 +890,8 @@ adminRouter.delete('/admin/accounts/:id/devices/:deviceId', async (req, res) => 
 
 // Remove a buddy pairing — scoped to pairings this account is actually
 // part of (as either side), same reasoning as the device route above.
-//
-// Ending a pairing changes what both sides are actually committed to, so
-// (same as the normal invite-redeem flow in invites.js) both accounts'
-// Stripe subscription quantities need resyncing afterward — missing this
-// previously meant a paid account kept being billed for storage pledged to
-// a pairing that no longer existed, with nothing to ever correct it short
-// of an unrelated pledge change.
+// Billing doesn't depend on pledge size any more (flat plan, billing.js),
+// so there's no Stripe quantity to resync afterward.
 adminRouter.delete('/admin/accounts/:id/pairings/:pairingId', async (req, res) => {
   const result = await pool.query(
     `DELETE FROM buddy_pairings
@@ -907,10 +910,6 @@ adminRouter.delete('/admin/accounts/:id/pairings/:pairingId', async (req, res) =
     `pairing=${req.params.pairingId} between=${account_a_id},${account_b_id} ` +
       `pledged_bytes=${pledged_bytes} status=${status}`,
   );
-  await Promise.all([
-    syncSubscriptionQuantity(account_a_id),
-    syncSubscriptionQuantity(account_b_id),
-  ]);
 
   res.status(204).end();
 });
@@ -945,14 +944,11 @@ adminRouter.delete('/admin/accounts/:id', async (req, res) => {
   }
 
   // Who this account is actively paired with, captured *before* the
-  // delete cascades the pairing rows away — needed both to tell the admin
-  // UI who's affected and to resync the survivor's Stripe quantity below
-  // (ending a pairing from either side changes what both are actually
-  // committed to; see the pairing-delete route above for the same fix).
+  // delete cascades the pairing rows away, to tell the admin UI who's
+  // affected.
   const activePairings = await pool.query(
     `SELECT other.email,
-            CEIL(buddy_pairings.pledged_bytes / 1073741824.0) AS pledged_gb,
-            CASE WHEN account_a_id = $1 THEN account_b_id ELSE account_a_id END AS other_account_id
+            CEIL(buddy_pairings.pledged_bytes / 1073741824.0) AS pledged_gb
        FROM buddy_pairings
        JOIN accounts other
          ON other.id = CASE WHEN account_a_id = $1 THEN account_b_id ELSE account_a_id END
@@ -974,10 +970,6 @@ adminRouter.delete('/admin/accounts/:id', async (req, res) => {
     'delete-account',
     `email=${result.rows[0].email} subscription=${result.rows[0].stripe_subscription_id ?? 'none'} ` +
       `ended_pairings=${activePairings.rows.length}`,
-  );
-
-  await Promise.all(
-    activePairings.rows.map((row) => syncSubscriptionQuantity(row.other_account_id)),
   );
 
   res.json({

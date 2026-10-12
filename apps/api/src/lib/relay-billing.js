@@ -1,16 +1,22 @@
 import { pool } from '../db/pool.js';
 import { sendMail, SUPPORT_EMAIL } from './mailer.js';
+// Circular (billing.js imports this file too), which is fine for ES modules
+// since it's only read inside a function, long after both have loaded.
+import { PLAN_USD_PER_MONTH } from '../routes/billing.js';
 
 // Shared relay-bandwidth billing constants and the write side of the
 // pipeline (the read/report side lives in jobs/sync-relay-usage.js).
 //
-// Relay billing is paid-tier only: free accounts (under the 50GB pledge
-// allowance, see billing.js's FREE_GB) are never charged for relay
-// bandwidth. They do get a monthly allowance instead (FREE_RELAY_GB below):
-// their usage is recorded but never sent to Stripe, and crossing the
-// allowance pauses the account's buddy syncing until the 1st of next month
-// (jobs/reset-free-relay-cap.js) or until it subscribes. Complimentary
-// (billing_exempt) accounts are neither billed nor capped.
+// Every account gets a monthly relay allowance (FREE_RELAY_GB_PER_MONTH
+// below) at no charge. Free accounts (under the 50GB pledge allowance, see
+// billing.js's FREE_GB) are never charged for relay bandwidth: their usage
+// is recorded but never sent to Stripe, and crossing the allowance pauses
+// the account's buddy syncing until the 1st of next month
+// (jobs/reset-free-relay-cap.js) or until it subscribes. Paid accounts get
+// the same allowance included and are billed only past it (it used to be
+// free accounts only, which meant subscribing took away 10GB that had been
+// free). Complimentary (billing_exempt) accounts are neither billed nor
+// capped.
 
 // Must match the event_name used when creating the Stripe Billing Meter —
 // see scripts/create-stripe-relay-meter-and-price.mjs. Stripe's meter-events
@@ -33,7 +39,8 @@ export const RELAY_USD_PER_GB = 0.02;
 // misbehaving client can't balloon someone's bill from one bad report.
 export const MAX_RELAY_MB_PER_REPORT = 100_000;
 
-// Monthly relay allowance for free (unsubscribed) accounts, in GB. Only
+// Monthly relay allowance in GB, per calendar month (UTC): the cap for free
+// accounts, and what's included before billing starts for paid ones. Only
 // traffic that actually goes through relay-1 counts — direct and LAN
 // connections are free and unlimited. Overridable per deployment.
 export const FREE_RELAY_GB_PER_MONTH = Number(process.env.FREE_RELAY_GB_PER_MONTH || 10);
@@ -43,9 +50,8 @@ const BYTES_PER_GB = 1024 ** 3;
 // jobs/reset-free-relay-cap.js looks for to resume it on the 1st.
 export const FREE_RELAY_CAP_REASON = 'free_relay_cap';
 
-// Relay bytes a free account has used since the start of this calendar
-// month (UTC). Paid accounts' rows are summed too if asked, but nothing
-// caps them.
+// Relay bytes an account has used since the start of this calendar month
+// (UTC), billed or not.
 export async function relayBytesThisMonth(accountId) {
   const result = await pool.query(
     `SELECT COALESCE(SUM(bytes_relayed), 0) AS bytes
@@ -67,11 +73,18 @@ export async function relayBytesThisMonth(accountId) {
 // same endpoint (devices.js), but that's enforced client-side, and a stale
 // or not-yet-updated client could still report usage in the meantime.
 //
-// Subscribed accounts: written unsynced, for jobs/sync-relay-usage.js to
-// bill. Free accounts: written as already "synced" so they're never sent
-// to Stripe (and never billed retroactively if the account subscribes
-// later) — they're recorded only to enforce FREE_RELAY_GB_PER_MONTH and to
-// show usage on the dashboard and admin page.
+// Subscribed accounts: whatever part of the report still fits in this
+// month's allowance is written as already "synced" (never sent to Stripe),
+// and the rest unsynced, for jobs/sync-relay-usage.js to bill. Usage from
+// before they subscribed counts toward the allowance too, so subscribing
+// mid-month doesn't hand out a second one. Two devices reporting at the same
+// instant can both see the same remainder, which errs (slightly) in the
+// account's favour; not worth a lock.
+//
+// Free accounts: written as already "synced" so they're never sent to
+// Stripe (and never billed retroactively if the account subscribes later)
+// — they're recorded only to enforce FREE_RELAY_GB_PER_MONTH and to show
+// usage on the dashboard and admin page.
 //
 // Complimentary accounts (billing_exempt, set by an admin): recorded like
 // free ones, so never billed, even if they also have a subscription, but
@@ -90,11 +103,30 @@ export async function recordRelayUsage(accountId, relayMb) {
   const isFree = !row.stripe_subscription_id;
   const neverBilled = isFree || row.billing_exempt;
   const bytes = BigInt(clampedMb) * 1024n * 1024n;
-  await pool.query(
-    `INSERT INTO relay_usage_events (account_id, bytes_relayed, occurred_at, synced_to_stripe)
-     VALUES ($1, $2, now(), $3)`,
-    [accountId, bytes.toString(), neverBilled],
-  );
+
+  let includedBytes = bytes;
+  if (!neverBilled) {
+    const allowance = BigInt(Math.round(FREE_RELAY_GB_PER_MONTH * BYTES_PER_GB));
+    const usedBefore = BigInt(await relayBytesThisMonth(accountId));
+    const left = allowance > usedBefore ? allowance - usedBefore : 0n;
+    includedBytes = bytes < left ? bytes : left;
+  }
+  const billedBytes = bytes - includedBytes;
+
+  if (includedBytes > 0n) {
+    await pool.query(
+      `INSERT INTO relay_usage_events (account_id, bytes_relayed, occurred_at, synced_to_stripe)
+       VALUES ($1, $2, now(), true)`,
+      [accountId, includedBytes.toString()],
+    );
+  }
+  if (billedBytes > 0n) {
+    await pool.query(
+      `INSERT INTO relay_usage_events (account_id, bytes_relayed, occurred_at, synced_to_stripe)
+       VALUES ($1, $2, now(), false)`,
+      [accountId, billedBytes.toString()],
+    );
+  }
 
   if (isFree && !row.billing_exempt) await enforceFreeRelayCap(accountId, row.email);
 }
@@ -130,8 +162,9 @@ async function enforceFreeRelayCap(accountId, email) {
         `Your devices couldn't connect to your buddy directly, so your backups have been going through our relay — ` +
         `and you've now used this month's free ${FREE_RELAY_GB_PER_MONTH} GB of it. Buddy syncing is paused until the ` +
         `1st of next month. Your existing backups are untouched.\n\n` +
-        `To keep syncing now, add a payment method — relay traffic on a paid plan is $${RELAY_USD_PER_GB.toFixed(2)}/GB, ` +
-        `and syncing resumes right away: ${appUrl}/dashboard.html#billing\n\n` +
+        `To keep syncing now, subscribe — $${PLAN_USD_PER_MONTH}/month, which includes ${FREE_RELAY_GB_PER_MONTH} GB of ` +
+        `relay a month, then $${RELAY_USD_PER_GB.toFixed(2)}/GB — and syncing resumes right away: ` +
+        `${appUrl}/dashboard.html#billing\n\n` +
         `Tip: if your device and your buddy's can reach each other directly (e.g. by forwarding a port on your router), ` +
         `that traffic doesn't use the relay at all and is always free.` +
         `\n\nQuestions? Just reply to this email (it goes to ${SUPPORT_EMAIL}).`,
@@ -140,8 +173,9 @@ async function enforceFreeRelayCap(accountId, email) {
         `<p>Your devices couldn't connect to your buddy directly, so your backups have been going through our relay — ` +
         `and you've now used this month's free ${FREE_RELAY_GB_PER_MONTH} GB of it. Buddy syncing is paused until the ` +
         `1st of next month. Your existing backups are untouched.</p>` +
-        `<p>To keep syncing now, <a href="${appUrl}/dashboard.html#billing">add a payment method</a> — relay traffic on a ` +
-        `paid plan is $${RELAY_USD_PER_GB.toFixed(2)}/GB, and syncing resumes right away.</p>` +
+        `<p>To keep syncing now, <a href="${appUrl}/dashboard.html#billing">subscribe</a> — ` +
+        `$${PLAN_USD_PER_MONTH}/month, which includes ${FREE_RELAY_GB_PER_MONTH} GB of relay a month, then ` +
+        `$${RELAY_USD_PER_GB.toFixed(2)}/GB — and syncing resumes right away.</p>` +
         `<p>Tip: if your device and your buddy's can reach each other directly (e.g. by forwarding a port on your router), ` +
         `that traffic doesn't use the relay at all and is always free.</p>` +
         `<p>Questions? Just reply to this email (it goes to <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>).</p>`,

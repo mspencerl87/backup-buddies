@@ -411,7 +411,7 @@
             }
             if (data.ended_active_pairings?.length) {
               const names = data.ended_active_pairings.map((p) => `${p.email} (${p.pledged_gb}GB)`).join(', ');
-              notes.push(`Ended active pairing(s) with: ${names}. Their Stripe subscription quantity, if any, was resynced to reflect this.`);
+              notes.push(`Ended active pairing(s) with: ${names}.`);
             }
             if (notes.length) {
               alert(`Account deleted. ${notes.join(' ')}`);
@@ -664,19 +664,22 @@
           ? '<span class="tier-badge comp">comp</span> <span class="muted">no card needed: pledges past the free allowance, relay never billed or capped</span>'
           : 'no'],
         ['Pledged storage', `${pledge.pledged_gb} GB across active pairings` +
-          ` <span class="muted">(${pledge.free_allowance_gb} GB free, ${pledge.billable_gb} GB billable)</span>`],
+          ` <span class="muted">(free tier up to ${pledge.free_allowance_gb} GB)</span>`],
         ['Relay usage', `${formatBytes(relay.last_30d_bytes)} last 30 days · ${formatBytes(relay.total_bytes)} total` +
           (relay.last_event_at ? ` <span class="muted">(last ${escapeHtml(formatDate(relay.last_event_at))})</span>` : '') +
           unsynced],
-        // Free accounts only: the monthly relay allowance that pauses them
-        // when used up (lib/relay-billing.js). Paid and comp accounts
-        // aren't capped.
-        !account.stripe_subscription_id && !account.billing_exempt
-          ? ['Free relay this month', (() => {
+        // The monthly relay allowance (lib/relay-billing.js): used up, it
+        // pauses a free account, and a paid one starts being billed per GB.
+        // Comp accounts are neither capped nor billed.
+        !account.billing_exempt
+          ? ['Included relay this month', (() => {
               const usedGb = relay.this_month_bytes / (1024 ** 3);
               const over = usedGb >= relay.free_allowance_gb;
+              const overNote = account.stripe_subscription_id
+                ? 'allowance used — billing per GB until the 1st'
+                : 'allowance used — resets on the 1st';
               return `<span class="${over ? 'warn-text' : ''}">${usedGb.toFixed(1)} of ${relay.free_allowance_gb} GB</span>` +
-                (over ? ' <span class="muted">(allowance used — resets on the 1st)</span>' : '');
+                (over ? ` <span class="muted">(${overNote})</span>` : '');
             })()]
           : null,
         account.stale_warning_sent_at
@@ -1012,10 +1015,13 @@
       }
 
       if (linked && ['active', 'trialing', 'past_due', 'unpaid'].includes(linked.status)) {
-        wrap.appendChild(actionButton('Resync quantity', async (btn) => {
-          const res = await runAdminAction(btn, '/stripe/resync-quantity', {}, 'stripe-action-result');
-          if (res) await reload(`Storage quantity set to ${res.quantity} GB (prorated).`);
-        }, { title: 'Sets the billed storage quantity to the current pledged GB' }));
+        // Only for subscriptions from the per-TB days, before the flat plan.
+        if (!linked.items.some((item) => item.is_storage && item.quantity === 1)) {
+          wrap.appendChild(actionButton('Move to flat plan', async (btn) => {
+            const res = await runAdminAction(btn, '/stripe/move-to-flat-plan', {}, 'stripe-action-result');
+            if (res) await reload('Moved to the flat plan — the new price applies from the next renewal.');
+          }, { title: 'Swaps the per-TB storage item for the flat $3/month plan, from the next renewal' }));
+        }
 
         if (linked.cancel_at_period_end) {
           wrap.appendChild(actionButton('Undo scheduled cancel', async (btn) => {

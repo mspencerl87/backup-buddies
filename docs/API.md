@@ -239,7 +239,9 @@ Auth: device token. The client's ~30-second poll. It:
 2. if `relay_mb` (an integer above 0) is given, records that many relayed
    megabytes **since the last successful report**. Capped at 100,000 per
    report. Free accounts are capped at `FREE_RELAY_GB_PER_MONTH`.
-   Subscribed ones are billed. Complimentary ones are never billed or
+   Subscribed ones get the same allowance included and are billed past
+   it (the report is split into an unbilled and a billed row as it
+   crosses). Complimentary ones are never billed or
    capped (`lib/relay-billing.js`). Nothing is recorded while the account
    is paused;
 3. returns:
@@ -297,9 +299,9 @@ transaction, it checks:
   subscription that isn't complimentary can't go past 50 GB (`402`; the
   redeemer's error has `requires_subscription: true`).
 
-Then it creates the pairing, marks the invite redeemed, and updates both
-sides' Stripe subscription quantity. `201 {"pairing": {id, account_a_id,
-account_b_id, pledged_bytes, status, created_at}}`.
+Then it creates the pairing and marks the invite redeemed. `201
+{"pairing": {id, account_a_id, account_b_id, pledged_bytes, status,
+created_at}}`.
 
 ## Marketplace
 
@@ -331,10 +333,11 @@ doesn't match. Same responses as `POST /invites/:code/redeem`.
 
 ## Billing
 
-`routes/billing.js`. Storage is billed on **pledged** GB (a Stripe
-subscription quantity that changes only when pairings change), tiered:
-first 50 GB free, then $3/TB/month. Relay bandwidth is $0.02/GB, for paid
-accounts only, as a second metered line item on the same subscription.
+`routes/billing.js`. Free up to 50 GB **pledged** across active pairings;
+past that, a flat $3/month plan for any pledge size (one Stripe price,
+quantity 1). Every account gets 10 GB/month of relay included (calendar
+month, UTC). Past it, free accounts pause until the 1st and paid accounts
+pay $0.02/GB, as a second metered line item on the same subscription.
 
 ### `GET /billing/summary`
 Auth: session.
@@ -343,19 +346,18 @@ Auth: session.
 |---|---|
 | `pledged_gb` | GB pledged across active pairings (rounded up) |
 | `free_allowance_gb` | 50 |
-| `billable_gb` | `max(0, pledged_gb - 50)` |
-| `estimated_monthly_usd` | An estimate only. Stripe is the source of truth |
+| `plan_usd_per_month` | 3: the paid plan's flat price |
 | `has_subscription` | Account has a Stripe subscription |
 | `billing_exempt` | Complimentary account: never needs a card |
 | `relay_status` | `active` or `paused` |
 | `relay_usd_per_gb` | 0.02 |
 | `relay_billing_enabled` | `STRIPE_RELAY_PRICE_ID` is set on this deployment |
-| `free_relay_gb_per_month` | Free accounts' monthly relay allowance |
+| `free_relay_gb_per_month` | Monthly relay allowance, included on both plans |
 | `relay_bytes_this_month` | Relay bytes recorded since the 1st (UTC) |
 
 ### `POST /billing/checkout`
 Auth: session. Creates a Stripe Checkout session (subscription mode,
-storage price, plus the relay price if configured) and returns
+the flat plan price with quantity 1, plus the relay price if configured) and returns
 `{"url"}` to redirect to. It creates the Stripe customer if there isn't
 one yet. `503` if `STRIPE_STORAGE_PRICE_ID` or `APP_URL` isn't set. `409`
 if already subscribed. The subscription is linked to the account by the
@@ -434,8 +436,8 @@ only reach back to the last time the container was recreated (every deploy).
 |---|---|
 | `GET /admin/accounts` | Every account, newest first: `id, email, nickname, tier, relay_status, relay_paused_at, relay_paused_reason, created_at, billing_exempt, has_subscription, device_count, buddies[{email, pledged_bytes, status}], is_admin` |
 | `GET /admin/stats` | Service totals: relay bytes (all time, this month, of which paid, accounts relaying), accounts (total, verified, subscribed, paused, new in 7 and 30 days), devices (total, online in the last 5 min, seen in 24 h, counts by client version), active pairings and pledged bytes, open marketplace listings. Cached for 12 hours; **`?refresh=1`** recomputes |
-| `GET /admin/accounts/:id` | Everything for a support ticket: `account` (with Stripe ids, sign-in methods, verification, `billing_exempt`, `stale_warning_sent_at`), `devices` (with `client_version`), `pairings` (all statuses, with the other side's email), `invites` created, `redeemed_invites`, `activity` (active sessions, last sign-in), `pledge` (pledged, free, billable GB), `relay_usage` (total, last 30 days, this month, unsynced bytes and events, last event). Never includes password or token hashes. `404` if not found |
-| `GET /admin/accounts/:id/stripe` | Live Stripe state: customer, subscriptions (items, quantities, periods, cancel state), payment method, recent invoices, plus `checks[]` (`level`: `info`, `warn`, `error`) comparing Stripe with the database (missing or deleted customer, unlinked subscription, several live subscriptions, quantity not matching pledged GB, no payment method, and so on). `{"configured": false}` if Stripe isn't set up |
+| `GET /admin/accounts/:id` | Everything for a support ticket: `account` (with Stripe ids, sign-in methods, verification, `billing_exempt`, `stale_warning_sent_at`), `devices` (with `client_version`), `pairings` (all statuses, with the other side's email), `invites` created, `redeemed_invites`, `activity` (active sessions, last sign-in), `pledge` (pledged GB, free allowance), `relay_usage` (total, last 30 days, this month, unsynced bytes and events, last event). Never includes password or token hashes. `404` if not found |
+| `GET /admin/accounts/:id/stripe` | Live Stripe state: customer, subscriptions (items, quantities, periods, cancel state), payment method, recent invoices, plus `checks[]` (`level`: `info`, `warn`, `error`) comparing Stripe with the database (missing or deleted customer, unlinked subscription, several live subscriptions, plan item not on the flat price with quantity 1, no payment method, and so on). `{"configured": false}` if Stripe isn't set up |
 
 ### Account actions
 
@@ -446,7 +448,7 @@ only reach back to the last time the container was recreated (every deploy).
 | `POST /admin/accounts/:id/resend-verification` | none | Resends the verification email. `409` if already verified, `429` within 60 s of the last one, `503` if SMTP isn't configured | yes |
 | `POST /admin/accounts/:id/revoke-sessions` | none | Signs the account out of every browser. Device tokens aren't affected. `400` on your own account. Returns `{revoked}` | yes |
 | `POST /admin/accounts/:id/relay` | `{action: "pause" \| "resume", reason?}` | **pause**: stops buddy syncing; `reason` (up to 100 characters, default `admin`) is shown in the admin list. **resume**: clears any pause, whatever the reason. A later failed payment, or the free cap on the next relay report, can pause it again | yes (`relay-pause` / `relay-resume`) |
-| `POST /admin/accounts/:id/billing-exempt` | `{exempt: true \| false}` (must be a boolean) | Complimentary account. **true**: pledges past 50 GB need no subscription; relay is recorded but never billed or capped; a `free_relay_cap` pause is lifted (other pauses stay). **false**: back to normal; the free cap applies from the next relay report. Doesn't touch Stripe, so an existing subscription keeps billing storage until cancelled. Manual only: being an admin doesn't make an account exempt | yes |
+| `POST /admin/accounts/:id/billing-exempt` | `{exempt: true \| false}` (must be a boolean) | Complimentary account. **true**: pledges past 50 GB need no subscription; relay is recorded but never billed or capped; a `free_relay_cap` pause is lifted (other pauses stay). **false**: back to normal; the free cap applies from the next relay report. Doesn't touch Stripe, so an existing subscription keeps billing the plan until cancelled. Manual only: being an admin doesn't make an account exempt | yes |
 
 ### Stripe actions
 
@@ -455,7 +457,7 @@ only reach back to the last time the container was recreated (every deploy).
 | Route | Body | Does | Logged |
 |---|---|---|---|
 | `POST /admin/accounts/:id/stripe/relink` | none | Rebuilds the account's Stripe link from what Stripe has, to fix a missed webhook. Finds the customer (the stored id, else by email, preferring the one whose `metadata.account_id` matches; `409` if several and none match, `404` if none), picks the newest live subscription (`active`, `trialing`, `past_due`, `unpaid`), and stores the customer, subscription and storage item ids (clearing the subscription if there's none). `409` if those ids belong to another account. Returns the ids and `other_live_subscriptions` | yes |
-| `POST /admin/accounts/:id/stripe/resync-quantity` | none | Sets the storage item quantity to the current pledged GB (at least 1), with proration. Unlike the automatic sync, it reports errors. `400` if no item is linked | yes |
+| `POST /admin/accounts/:id/stripe/move-to-flat-plan` | none | Swaps the linked plan item to `STRIPE_STORAGE_PRICE_ID` with quantity 1, no proration (the flat price starts at the next renewal). For subscriptions from the per-TB days. `400` if no item is linked, `503` if the price id isn't set | yes (`stripe-move-to-flat-plan`) |
 | `POST /admin/accounts/:id/stripe/cancel` | `{mode: "period_end" \| "undo" \| "now"}` | **period_end**: cancel when the paid period ends. **undo**: reverse a pending period-end cancel. **now**: cancel immediately and clear the link. `400` if no subscription is linked | yes (`stripe-cancel-<mode>`) |
 
 ### Deletes
@@ -468,9 +470,9 @@ row is gone afterwards). All return `204` (except the account delete) or
 | Route | Does |
 |---|---|
 | `DELETE /admin/accounts/:id/devices/:deviceId` | Removes one device of that account, which revokes its token |
-| `DELETE /admin/accounts/:id/pairings/:pairingId` | Removes a pairing the account is part of (the row is deleted, not marked revoked) and updates **both** sides' Stripe quantities |
+| `DELETE /admin/accounts/:id/pairings/:pairingId` | Removes a pairing the account is part of (the row is deleted, not marked revoked) |
 | `DELETE /admin/accounts/:id/invites/:inviteId` | Removes an invite the account created |
-| `DELETE /admin/accounts/:id` | Deletes the account. Devices, pairings, invites it created, sessions and relay usage cascade; invites it redeemed keep the row with `redeemed_by_account_id` set to null. Updates each former buddy's Stripe quantity. **Doesn't cancel Stripe.** Returns `{ok, had_stripe_subscription, ended_active_pairings[{email, pledged_gb}]}`. `400` on your own account |
+| `DELETE /admin/accounts/:id` | Deletes the account. Devices, pairings, invites it created, sessions and relay usage cascade; invites it redeemed keep the row with `redeemed_by_account_id` set to null. **Doesn't cancel Stripe.** Returns `{ok, had_stripe_subscription, ended_active_pairings[{email, pledged_gb}]}`. `400` on your own account |
 
 ## Things there is no route for
 

@@ -229,7 +229,7 @@
       if (account.relay_paused_reason === 'free_relay_cap') {
         document.getElementById('paused-banner-text').textContent =
           "You've used this month's free relay bandwidth, so buddy syncing is paused until the 1st. " +
-          "Your existing backups aren't affected. Subscribe to keep syncing now — relay is billed per GB on a paid plan.";
+          "Your existing backups aren't affected. Subscribe ($3/month) to keep syncing now — relay past the monthly allowance is billed per GB on the paid plan.";
         document.getElementById('paused-banner-action').textContent = 'Subscribe';
       }
     }
@@ -341,17 +341,13 @@
         return;
       }
 
-      const freeNote = data.billable_gb === 0
-        ? ` (within your ${data.free_allowance_gb}GB free allowance)`
-        : ` — an estimated $${data.estimated_monthly_usd.toFixed(2)}/month`;
-      // Relay-bandwidth billing only ever applies once there's an active
-      // subscription (see apps/api/src/lib/relay-billing.js) — showing the
-      // rate before then would be a charge that can't actually happen yet.
-      const relayNote = data.has_subscription && data.relay_billing_enabled
-        ? ` Relay bandwidth (when a buddy connection can't go direct) is billed separately at $${data.relay_usd_per_gb.toFixed(2)}/GB.`
-        : '';
-      summaryEl.textContent =
-        `${data.pledged_gb}GB pledged across your buddy pairings${freeNote}.${relayNote}`;
+      // The paid plan is flat (apps/api/src/routes/billing.js), so pledge
+      // size only matters for whether an account still fits the free tier.
+      summaryEl.textContent = data.has_subscription
+        ? `Paid plan: $${data.plan_usd_per_month}/month for any pledge size. ` +
+          `${data.pledged_gb}GB pledged across your buddy pairings.`
+        : `Free plan: ${data.pledged_gb}GB of your ${data.free_allowance_gb}GB free allowance pledged. ` +
+          `To pledge more, the paid plan is $${data.plan_usd_per_month}/month for any pledge size.`;
 
       // Complimentary accounts (billing_exempt, set by an admin) never need
       // a card: no allowance to show, no Subscribe button. One that still
@@ -364,16 +360,23 @@
         return;
       }
 
-      // Free accounts get a monthly relay allowance instead of relay billing.
-      // Direct connections never count toward it, so most people only ever
-      // see a small number here.
+      // Both plans include a monthly relay allowance; past it, free accounts
+      // pause and paid ones are billed per GB. Direct connections never
+      // count toward it, so most people only ever see a small number here.
       const noteEl = document.getElementById('billing-relay-allowance');
-      if (!data.has_subscription && data.free_relay_gb_per_month) {
+      if (data.free_relay_gb_per_month) {
         const usedGb = data.relay_bytes_this_month / (1024 ** 3);
+        // Relay billing only applies on deployments that have the relay
+        // Price set up; without it, paid accounts' relay is never charged.
+        const past = !data.has_subscription
+          ? 'syncing pauses until the 1st unless you subscribe'
+          : data.relay_billing_enabled
+            ? `it's $${data.relay_usd_per_gb.toFixed(2)}/GB`
+            : "it isn't charged";
         noteEl.textContent =
           `Relay bandwidth this month: ${usedGb < 0.1 && usedGb > 0 ? '<0.1' : usedGb.toFixed(1)} of ` +
-          `${data.free_relay_gb_per_month} GB free. Only traffic that can't go directly between your device and ` +
-          `your buddy's counts; past the allowance, syncing pauses until the 1st unless you subscribe.`;
+          `${data.free_relay_gb_per_month} GB included. Only traffic that can't go directly between your device and ` +
+          `your buddy's counts; past the allowance, ${past}.`;
         noteEl.style.display = 'block';
       } else {
         noteEl.style.display = 'none';

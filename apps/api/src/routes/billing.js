@@ -11,13 +11,20 @@ export const billingRouter = Router();
 // pledging past that requires an active Stripe subscription.
 export const FREE_GB = 50;
 const BYTES_PER_GB = 1024 ** 3;
-const USD_PER_TB_MONTH = 3;
+
+// The paid plan is a flat $3/month for any pledge size (STRIPE_STORAGE_PRICE_ID,
+// see scripts/create-stripe-storage-price.mjs). It used to be $3/TB/month on
+// what you'd pledged, with the subscription quantity tracking pledged GB, but
+// a pairing is a symmetric swap of disks people supply themselves, and paying
+// per TB for it read as renting your own disk (feedback on the launch post).
+// Direct transfers cost us nothing at any size; the per-account service and
+// the relay are what cost money, so those are what get charged for.
+export const PLAN_USD_PER_MONTH = 3;
 
 // How much storage this account is actually committed to right now, across
 // every active buddy pairing it's part of (on either side — pledging and
-// being pledged to are symmetric). This is what gets billed, per the
-// "billed on pledged storage" model: a subscription quantity that only
-// moves when a pairing is created or ends, not a live usage meter.
+// being pledged to are symmetric). No longer what's billed, but still what
+// decides whether an account fits in the free tier.
 //
 // Exported so invites.js can enforce the free allowance at the point a
 // pledge is actually made (invite creation and redemption), not just
@@ -47,41 +54,13 @@ async function getOrCreateStripeCustomer(account) {
   return customer.id;
 }
 
-// Called after a pairing is created or ends: brings the account's live
-// Stripe subscription quantity (if it has one — this is a no-op for an
-// account that hasn't subscribed yet) up to date with its current total
-// pledge. Never throws — a Stripe hiccup here shouldn't break the caller
-// (e.g. a successful invite redemption).
-export async function syncSubscriptionQuantity(accountId) {
-  const result = await pool.query(
-    'SELECT stripe_subscription_item_id FROM accounts WHERE id = $1',
-    [accountId],
-  );
-  const itemId = result.rows[0]?.stripe_subscription_item_id;
-  if (!itemId) return;
-
-  try {
-    const quantity = Math.max(1, await pledgedGBForAccount(accountId));
-    await stripe.subscriptionItems.update(itemId, {
-      quantity,
-      proration_behavior: 'create_prorations',
-    });
-  } catch (err) {
-    console.error(`Failed to sync Stripe subscription quantity for account ${accountId}:`, err);
-  }
-}
-
 billingRouter.get('/billing/summary', requireAuth, async (req, res) => {
   const pledgedGB = await pledgedGBForAccount(req.account.id);
-  const billableGB = Math.max(0, pledgedGB - FREE_GB);
 
   res.json({
     pledged_gb: pledgedGB,
     free_allowance_gb: FREE_GB,
-    billable_gb: billableGB,
-    // Informational estimate only — the Stripe subscription (once created)
-    // is the actual source of truth for what gets charged.
-    estimated_monthly_usd: Number(((billableGB * USD_PER_TB_MONTH) / 1024).toFixed(2)),
+    plan_usd_per_month: PLAN_USD_PER_MONTH,
     has_subscription: Boolean(req.account.stripe_subscription_id),
     // Complimentary account (set by an admin, see routes/admin.js): no
     // card needed, so the dashboard shows that instead of Subscribe.
@@ -92,8 +71,9 @@ billingRouter.get('/billing/summary', requireAuth, async (req, res) => {
     // show the rate and whether it's actually live on this deployment.
     relay_usd_per_gb: RELAY_USD_PER_GB,
     relay_billing_enabled: Boolean(process.env.STRIPE_RELAY_PRICE_ID),
-    // Free accounts' monthly relay allowance (lib/relay-billing.js) and how
-    // much of it is used so far this month. Shown to free accounts only.
+    // The monthly relay allowance (lib/relay-billing.js), included on both
+    // plans, and how much of it is used so far this month. Past it, free
+    // accounts pause and paid ones pay relay_usd_per_gb.
     free_relay_gb_per_month: FREE_RELAY_GB_PER_MONTH,
     relay_bytes_this_month: await relayBytesThisMonth(req.account.id),
   });
@@ -110,13 +90,8 @@ billingRouter.post('/billing/checkout', requireAuth, async (req, res) => {
   }
 
   const customerId = await getOrCreateStripeCustomer(req.account);
-  // Quantity starts at the account's current pledge (minimum 1 — Stripe
-  // line items can't be zero). If that's under the 50GB free allowance the
-  // tiered price charges $0, which is fine: this just gets billing set up
-  // and ready to scale automatically as pledges grow.
-  const quantity = Math.max(1, await pledgedGBForAccount(req.account.id));
-
-  const lineItems = [{ price: process.env.STRIPE_STORAGE_PRICE_ID, quantity }];
+  // The flat plan: quantity is always 1, however much is pledged.
+  const lineItems = [{ price: process.env.STRIPE_STORAGE_PRICE_ID, quantity: 1 }];
   // Bundled into the same subscription as storage, as a second line item —
   // one invoice, one subscription to manage. Only added when this
   // deployment has actually created the relay Price (see

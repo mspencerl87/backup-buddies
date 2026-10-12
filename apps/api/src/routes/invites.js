@@ -4,7 +4,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireEmailVerified } from '../middleware/require-email-verified.js';
 import { rateLimit } from '../lib/rate-limit.js';
-import { syncSubscriptionQuantity, pledgedGBForAccount, FREE_GB } from './billing.js';
+import { pledgedGBForAccount, FREE_GB } from './billing.js';
 
 export const invitesRouter = Router();
 
@@ -303,14 +303,6 @@ async function redeemInvite({ lockQuery, lockParam, redeemerAccountId, expectedP
     );
 
     await client.query('COMMIT');
-
-    // Pairing is now active — bring each side's Stripe subscription
-    // quantity (if they have one) up to date with their new total pledge.
-    // Deliberately after the commit: a Stripe hiccup here should never
-    // roll back a successful pairing, and syncSubscriptionQuantity never
-    // throws on its own.
-    await syncSubscriptionQuantity(invite.inviter_account_id);
-    await syncSubscriptionQuantity(redeemerAccountId);
 
     return { status: 201, body: { pairing: pairingResult.rows[0] } };
   } catch (err) {

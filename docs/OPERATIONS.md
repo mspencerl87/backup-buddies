@@ -107,7 +107,7 @@ the container.**
 | `ADMIN_EMAILS` | for admin | empty | Comma-separated emails allowed into `/admin.html` and `/admin/*`. Also who gets the stale-account digest. Empty means nobody is admin |
 | `STRIPE_SECRET_KEY` | for billing | | `sk_test_…` or `sk_live_…` |
 | `STRIPE_WEBHOOK_SECRET` | for billing | | `whsec_…` for `/webhooks/stripe` |
-| `STRIPE_STORAGE_PRICE_ID` | for billing | | The tiered storage price (`scripts/create-stripe-storage-price.mjs`) |
+| `STRIPE_STORAGE_PRICE_ID` | for billing | | The flat $3/month plan price (`scripts/create-stripe-storage-price.mjs`). The name is from when it was a per-TB storage price |
 | `STRIPE_RELAY_PRICE_ID` | no | | The metered relay price. Setting it adds relay to new checkouts and turns on the 15-minute usage sync to Stripe |
 | `STRIPE_RELAY_METER_ID` | no | | For reference only; no code reads it |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | no | | Google sign-in. If any is missing, the Google button just reports "not configured". Redirect URI: `https://app.filegarden.net/api/auth/google/callback` |
@@ -117,7 +117,7 @@ the container.**
 | `SUPPORT_EMAIL` | no | `support@filegarden.net` | Where the support form goes, and the reply-to on notices |
 | `RELAY_ACCESS_TOKEN` | yes | | Shared secret with relay-1 (`openssl rand -hex 32`). If unset, every relay connection is refused |
 | `RELAY_HOSTNAME` | no | | For reference; no code reads it |
-| `FREE_RELAY_GB_PER_MONTH` | no | `10` | Free accounts' monthly relay allowance in GB |
+| `FREE_RELAY_GB_PER_MONTH` | no | `10` | Monthly relay allowance in GB, on both plans: the cap for free accounts, included before billing for paid ones |
 | `STALE_ACCOUNT_CLEANUP_ENABLED` | no | off | `true` turns on the inactivity warning emails and the monthly admin digest |
 | `STALE_CLEANUP_EXEMPT_EMAILS` | no | | Comma-separated emails never flagged as stale (admins never are) |
 | `B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET` | for backups | | Read by `backup-db.sh`, not the API. Use a key limited to that bucket that can't delete |
@@ -152,7 +152,6 @@ Things that happen on request, not on a timer:
   and emails the user.
 - **Failed payment:** paused by the Stripe webhook once Stripe stops
   retrying.
-- **Stripe quantity sync:** after every pairing change.
 
 Outside the API: **nightly database backup**, `deploy/app/backup-db.sh`,
 run by the systemd timer `bb-db-backup.timer` at 03:30 UTC (DEPLOY §26).
@@ -186,9 +185,10 @@ script. None needs `npm install`.
 
 | Command | Does |
 |---|---|
-| `STRIPE_SECRET_KEY=sk_… node scripts/create-stripe-storage-price.mjs` | Creates the storage product and tiered price (50 GB free, then $3/TB/month) and prints the id for `STRIPE_STORAGE_PRICE_ID`. Each run makes a **new** price |
+| `STRIPE_SECRET_KEY=sk_… node scripts/create-stripe-storage-price.mjs` | Creates the plan product and flat $3/month price and prints the id for `STRIPE_STORAGE_PRICE_ID`. Each run makes a **new** price |
 | `STRIPE_SECRET_KEY=sk_… node scripts/create-stripe-relay-meter-and-price.mjs` | Creates the relay billing meter (event `relay_bandwidth_mb`) and the $0.02/GB metered price, and prints ids for `STRIPE_RELAY_PRICE_ID` / `STRIPE_RELAY_METER_ID`. Each run makes **new** ones |
 | `STRIPE_SECRET_KEY=… STRIPE_STORAGE_PRICE_ID=… STRIPE_RELAY_PRICE_ID=… node scripts/add-relay-price-to-existing-subscriptions.mjs` | Adds the relay price to every active subscription that has storage but not relay (subscriptions from before relay billing). Safe to re-run |
+| `STRIPE_SECRET_KEY=… OLD_STORAGE_PRICE_ID=… STRIPE_STORAGE_PRICE_ID=… node scripts/move-subscriptions-to-flat-plan.mjs [--apply]` | Lists every live subscription still on the old per-TB price with what it pays now vs. the flat price (flagging who goes up); **`--apply`** swaps each one's item to the flat price, quantity 1, from the next renewal. Dry run without it. Safe to re-run |
 | `node scripts/stamp-asset-versions.mjs` | Rewrites `?v=<hash>` on CSS/JS references in `apps/web/*.html` so browsers fetch changed files. CI runs it on every deploy |
 | `node scripts/stamp-asset-versions.mjs --check` | **`--check`**: changes nothing; exits 1 if any reference is out of date |
 | `deploy/app/backup-db.sh` | `pg_dump` (gzipped) uploaded to B2, then pings `BACKUP_PING_URL`. Normally run by the timer; to run one now: `sudo systemctl start bb-db-backup.service` |
@@ -267,8 +267,8 @@ Changing these means a code change, not a setting.
 | What | Value | Where |
 |---|---|---|
 | Free pledge allowance | 50 GB | `routes/billing.js` `FREE_GB` |
-| Storage price | $3/TB/month past 50 GB | Stripe price; estimate in `routes/billing.js` |
-| Relay price | $0.02/GB (paid accounts) | `lib/relay-billing.js`, Stripe price |
+| Paid plan | $3/month flat, any pledge size | Stripe price; `routes/billing.js` `PLAN_USD_PER_MONTH` |
+| Relay price | $0.02/GB past the monthly allowance (paid accounts) | `lib/relay-billing.js`, Stripe price |
 | Pledge sizes | 5 GB steps, 5 GB to 20,000 GB | `routes/invites.js`; also `apps/web/pledge-options.js` |
 | Largest relay report accepted | 100,000 MB per poll | `lib/relay-billing.js` |
 | Session length | 30 days | `routes/auth.js` |

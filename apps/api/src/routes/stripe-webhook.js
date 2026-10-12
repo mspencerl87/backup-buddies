@@ -114,10 +114,9 @@ stripeWebhookRouter.post('/webhooks/stripe', async (req, res) => {
           // The subscription may carry a second item now (relay bandwidth,
           // see billing.js's checkout) alongside storage — find the storage
           // one by price id rather than assuming index 0, since
-          // stripe_subscription_item_id is specifically the one
-          // syncSubscriptionQuantity() (billing.js) keeps in sync with
-          // pledged GB. Falls back to the first item for safety if the
-          // price id isn't configured/found.
+          // stripe_subscription_item_id is specifically the plan item (the
+          // one admin.js's "Move to flat plan" swaps). Falls back to the
+          // first item for safety if the price id isn't configured/found.
           const storageItem =
             subscription.items.data.find(
               (item) => item.price?.id === process.env.STRIPE_STORAGE_PRICE_ID,

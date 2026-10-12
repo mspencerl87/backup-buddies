@@ -1101,3 +1101,41 @@ curl -s -X POST https://api.filegarden.net/signup                 # Signups are 
 **To reopen**, delete the `@closed`/`respond` lines and the
 `@gated`/`basic_auth` block from the Caddyfile and the `environment:` block
 from the `caddy` service, push, and then remove the two lines from `.env`.
+
+## 30. Flat $3/month plan, relay allowance on both plans
+
+The paid plan is now a flat $3/month for any pledge size instead of
+$3/TB/month on pledged GB (`PLAN_USD_PER_MONTH` in `routes/billing.js`),
+and paid accounts get the same 10GB/month of relay included as free ones,
+billed only past it (`recordRelayUsage` in `lib/relay-billing.js`). The free
+tier is unchanged: 50GB pledged, 10GB/month relay, then a pause. Nothing
+syncs the Stripe quantity on pairing changes any more; the admin page's
+"Resync quantity" is replaced by "Move to flat plan". No migration.
+
+**Before pushing** (otherwise new checkouts go out on the old tiered price
+with quantity 1, which charges $0):
+1. Create the flat price (test key first if you want to try it there):
+   ```bash
+   STRIPE_SECRET_KEY=sk_live_… node scripts/create-stripe-storage-price.mjs
+   ```
+2. On app-1, note the current `STRIPE_STORAGE_PRICE_ID` in
+   `deploy/app/.env` (that's the old tiered price; step 4 needs it), then
+   replace it with the new id. The push's `docker compose up -d` recreates
+   the API with it.
+
+**After the deploy:**
+3. Check the dashboard Billing card reads "Free plan: … the paid plan is
+   $3/month" and the pricing page shows the new copy.
+4. Move existing subscribers. Dry run first: it lists each live subscription
+   on the old price with what it pays now against $3, and flags who goes up
+   (anyone under about 1.07TB pledged):
+   ```bash
+   STRIPE_SECRET_KEY=sk_live_… OLD_STORAGE_PRICE_ID=price_old \
+     STRIPE_STORAGE_PRICE_ID=price_new node scripts/move-subscriptions-to-flat-plan.mjs
+   ```
+   Tell the ones going up before they renew, then rerun with `--apply`. It
+   swaps each subscription's item in place with no proration, so the period
+   they've paid for stands and $3 applies from their next renewal.
+   (Run from a machine with Node 20; the scripts need no `npm install`.)
+5. Archive the old tiered price in the Stripe dashboard so nothing can
+   subscribe to it by accident.

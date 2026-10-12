@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-// One-shot setup script: creates the Stripe Product + tiered Price for
-// storage billing (50GB free, then $3/TB/month), and prints the resulting
-// Price ID to put into .env as STRIPE_STORAGE_PRICE_ID.
+// One-shot setup script: creates the Stripe Product + flat Price for the
+// paid plan ($3/month, any pledge size; the 50GB free tier needs no Stripe
+// subscription at all), and prints the resulting Price ID to put into .env
+// as STRIPE_STORAGE_PRICE_ID. Before the flat plan this created a tiered
+// per-GB price (50GB free, then $3/TB/month); subscriptions on that one are
+// moved over by scripts/move-subscriptions-to-flat-plan.mjs.
 //
 // Run with STRIPE_SECRET_KEY set in your shell — no npm install needed,
 // this talks to Stripe's REST API directly over fetch (built into Node 20+):
@@ -18,11 +21,8 @@ if (!secretKey) {
   process.exit(1);
 }
 
-// $3 / 1024 GB per TB = exact price per GB, expressed in fractional cents
-// so there's no rounding error accumulated across quantities.
-const USD_PER_TB = 3;
-const CENTS_PER_GB = ((USD_PER_TB * 100) / 1024).toFixed(8); // "0.29296875"
-const FREE_GB_TIER = 50;
+// Must match PLAN_USD_PER_MONTH in apps/api/src/routes/billing.js.
+const USD_PER_MONTH = 3;
 
 async function stripeRequest(path, params) {
   const body = new URLSearchParams();
@@ -64,18 +64,15 @@ function flatten(obj, prefix = '') {
   return out;
 }
 
-console.log(`Creating a tiered Price: first ${FREE_GB_TIER}GB free, then $${USD_PER_TB}/TB/month (${CENTS_PER_GB}¢/GB)...`);
+console.log(`Creating a flat Price: $${USD_PER_MONTH}/month...`);
 
+// A new Product rather than the old "Backup Buddies Storage" one: this is
+// the name people see on their invoices, and they aren't paying for storage.
 const price = await stripeRequest('prices', {
   currency: 'usd',
-  billing_scheme: 'tiered',
-  tiers_mode: 'graduated',
-  tiers: [
-    { up_to: FREE_GB_TIER, unit_amount_decimal: '0' },
-    { up_to: 'inf', unit_amount_decimal: CENTS_PER_GB },
-  ],
+  unit_amount: USD_PER_MONTH * 100,
   recurring: { interval: 'month', usage_type: 'licensed' },
-  product_data: { name: 'Backup Buddies Storage' },
+  product_data: { name: 'Backup Buddies plan' },
 });
 
 console.log('\nDone. Add this to .env on app-1:\n');
