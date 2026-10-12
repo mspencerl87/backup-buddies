@@ -344,7 +344,7 @@ footer a {
 }
 
 /* Dashboard-only: a wider page split into two balanced columns instead of
-   one centered stack — cards flow left-then-right and settle wherever
+   one centered stack: cards flow left-then-right and settle wherever
    there's room, like a masonry layout, rather than every card stretching
    to a single column's width. */
 .dashboard-main {
@@ -465,7 +465,7 @@ th.sortable.sort-desc::after {
   color: var(--accent);
   box-shadow: 0 0 0 1px rgba(79, 140, 255, 0.25) inset;
 }
-/* Complimentary (billing_exempt) accounts — set by an admin. */
+/* Complimentary (billing_exempt) accounts, set by an admin. */
 .tier-badge.comp {
   background: rgba(178, 132, 255, 0.15);
   color: #b284ff;
@@ -478,7 +478,7 @@ th.sortable.sort-desc::after {
 }
 
 /* The global `label` and `input` rules (block label, full-width input)
-   are meant for stacked forms — inside the admin filter bar they pushed
+   are meant for stacked forms. Inside the admin filter bar they pushed
    the "Paused only" checkbox far away from its text. */
 .admin-controls .checkbox-inline {
   display: inline-flex;
@@ -1165,6 +1165,15 @@ code {
   text-align: center;
 }
 
+/* Homepage opens with the screenshots and closes with the pitch. */
+.screenshots-top {
+  margin-top: 2rem;
+}
+
+.hero-bottom {
+  margin-top: 3.5rem;
+}
+
 .screenshots h2 {
   font-size: 1.5rem;
   margin-bottom: 0.5rem;
@@ -1278,7 +1287,7 @@ code {
   transform: scale(1.2);
 }
 
-/* Important "read this before you continue" notes — same amber as the
+/* Important "read this before you continue" notes, same amber as the
    dashboard's billing-paused banner. */
 .callout-warning {
   border: 1px solid #e5a443;

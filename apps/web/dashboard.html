@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dashboard — Backup Buddies</title>
-  <meta name="description" content="Your Backup Buddies dashboard — backup status, disk usage, and buddy pairings.">
+  <title>Dashboard | Backup Buddies</title>
+  <meta name="description" content="Your Backup Buddies dashboard: backup status, disk usage, and buddy pairings.">
   <link rel="stylesheet" href="/style.css?v=f0c89385">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
   <link rel="alternate icon" href="/assets/favicon.ico">
@@ -32,13 +32,13 @@
       <h2>Your account</h2>
       <p id="account-summary" class="muted">Loading…</p>
       <p id="paused-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid #e5a443; border-radius:8px; background:#2a1d10;">
-        <span id="paused-banner-text">Buddy syncing is paused because of a billing issue — no new files are being sent or
+        <span id="paused-banner-text">Buddy syncing is paused because of a billing issue. No new files are being sent or
         received with your buddy until this is fixed. Your existing backups aren't affected.</span>
         <a href="#billing" style="margin-left:0.25rem" id="paused-banner-action">Fix billing</a> ·
         <a href="#support">Contact support</a>
       </p>
       <p id="verify-banner" style="display:none; padding:0.75rem; margin-top:0.75rem; border:1px solid var(--border); border-radius:8px; background:#2a2310;">
-        Please verify your email — you'll need to before pairing with a buddy.
+        Please verify your email. You'll need to before pairing with a buddy.
         <button class="btn btn-secondary" id="resend-verification-btn" type="button" style="margin-left:0.5rem">Resend verification email</button>
       </p>
       <p class="error" id="verify-error"></p>
@@ -62,7 +62,7 @@
         </thead>
         <tbody></tbody>
       </table>
-      <p id="devices-empty" class="muted">No devices yet — add one to get a token for the Docker client.</p>
+      <p id="devices-empty" class="muted">No devices yet. Add one to get a token for the Docker client.</p>
       <div id="client-update-notice" class="client-update-notice" style="display:none">
         <strong>A newer client is available</strong> (<span id="client-latest-version"></span>) for the device(s)
         marked above. Run this on each one, from inside its client folder (the one with <code>.env</code> in it):
@@ -85,7 +85,7 @@
       </div>
       <p class="error" id="device-error"></p>
       <div id="device-token-reveal" style="display:none; margin-top:1rem; padding:1rem; border:1px solid var(--border); border-radius:8px; background:#11141a;">
-        <p class="muted" style="margin-top:0">This token is shown once — copy it into that device's <code>.env</code> file now. It won't be shown again.</p>
+        <p class="muted" style="margin-top:0">This token is shown once. Copy it into that device's <code>.env</code> file now. It won't be shown again.</p>
         <code id="device-token-value" style="display:block; word-break:break-all; padding:0.5rem; margin-bottom:0.5rem"></code>
         <button class="btn btn-secondary" id="copy-token-btn" type="button">Copy token</button>
       </div>
@@ -105,7 +105,7 @@
         </thead>
         <tbody></tbody>
       </table>
-      <p id="pairings-empty" class="muted">No buddy pairings yet — invite someone below, or redeem a code they sent you.</p>
+      <p id="pairings-empty" class="muted">No buddy pairings yet. Invite someone below, or redeem a code they sent you.</p>
     </div>
 
     <div class="card" id="invite-a-buddy">
@@ -120,7 +120,7 @@
         </label>
         <div id="invite-criteria-rows" style="display:none">
           <p class="muted" style="margin-bottom:0.5rem">
-            Optional — shown on your listing so people can judge fit for
+            Optional, and shown on your listing so people can judge fit for
             themselves. None of this is required to match; it's just
             displayed, same as the note below.
           </p>
@@ -136,7 +136,7 @@
           </label>
           <label class="checkbox-row" for="invite-relay-only" style="margin-left:0">
             <input type="checkbox" id="invite-relay-only">
-            <span>My network usually can't make a direct connection (behind a restrictive firewall/CGNAT) — transfers go through the relay</span>
+            <span>My network usually can't make a direct connection (behind a restrictive firewall/CGNAT), so transfers go through the relay</span>
           </label>
         </div>
         <button class="btn" type="submit" style="margin-top:1rem">Generate invite code</button>
@@ -209,21 +209,21 @@
       if (account.has_password) methods.push('password');
       if (account.has_google) methods.push('Google');
       const methodNote = methods.length ? ` (signed in via ${methods.join(' & ')})` : '';
-      // has_subscription (not tier — see routes/me.js) is what actually
+      // has_subscription (not tier, see routes/me.js) is what actually
       // reflects whether this account is paying.
       const planLabel = account.has_subscription ? 'subscribed' : 'free';
       document.getElementById('account-summary').textContent =
-        `${account.email} — ${planLabel}${methodNote}`;
+        `${account.email} · ${planLabel}${methodNote}`;
 
       // Google accounts are verified at signup (see routes/auth.js) and
-      // never see this — only password accounts that haven't clicked their
+      // never see this, only password accounts that haven't clicked their
       // emailed link yet.
       document.getElementById('verify-banner').style.display = account.email_verified
         ? 'none'
         : 'block';
 
       // relay_status comes straight from the accounts table (routes/me.js)
-      // — 'paused' today only ever means a Stripe payment failed after
+      // 'paused' today only ever means a Stripe payment failed after
       // retries were exhausted (stripe-webhook.js), but this banner reacts
       // to the status itself rather than assuming why, so it keeps working
       // if a second pause reason (e.g. free-tier exhaustion) is ever wired
@@ -231,11 +231,11 @@
       document.getElementById('paused-banner').style.display =
         account.relay_status === 'active' ? 'none' : 'block';
       // The free relay allowance (lib/relay-billing.js) pauses through the
-      // same flag — but it isn't a billing problem, so say what it is.
+      // same flag, but it isn't a billing problem, so say what it is.
       if (account.relay_paused_reason === 'free_relay_cap') {
         document.getElementById('paused-banner-text').textContent =
           "You've used this month's free relay bandwidth, so buddy syncing is paused until the 1st. " +
-          "Your existing backups aren't affected. Subscribe ($3/month) to keep syncing now — relay past the monthly allowance is billed per GB on the paid plan.";
+          "Your existing backups aren't affected. Subscribe ($3/month) to keep syncing now. Relay past the monthly allowance is billed per GB on the paid plan.";
         document.getElementById('paused-banner-action').textContent = 'Subscribe';
       }
     }
@@ -256,7 +256,7 @@
           errorEl.textContent = data.error || 'Could not resend verification email.';
         } else {
           errorEl.className = 'muted';
-          errorEl.textContent = 'Verification email sent — check your inbox.';
+          errorEl.textContent = 'Verification email sent. Check your inbox.';
         }
       } catch (err) {
         errorEl.textContent = 'Could not reach the server. Try again.';
@@ -323,7 +323,7 @@
           tbody.appendChild(tr);
         }
       } catch (err) {
-        empty.textContent = 'Could not load your invites — try refreshing.';
+        empty.textContent = 'Could not load your invites. Try refreshing.';
         empty.style.display = 'block';
       }
     }
@@ -343,7 +343,7 @@
         }
         data = await parseJsonResponse(res);
       } catch (err) {
-        summaryEl.textContent = 'Could not load billing info — try refreshing.';
+        summaryEl.textContent = 'Could not load billing info. Try refreshing.';
         return;
       }
 
@@ -360,7 +360,7 @@
       // has a subscription keeps the normal view, so Manage billing stays
       // reachable (it bills for storage until cancelled).
       if (data.billing_exempt && !data.has_subscription) {
-        summaryEl.textContent = `Complimentary account — no billing. ${data.pledged_gb}GB pledged across your buddy pairings.`;
+        summaryEl.textContent = `Complimentary account, no billing. ${data.pledged_gb}GB pledged across your buddy pairings.`;
         document.getElementById('billing-relay-allowance').style.display = 'none';
         btnEl.style.display = 'none';
         return;
@@ -410,7 +410,7 @@
       };
     }
 
-    // The latest client version is whatever apps/client/Cargo.toml says —
+    // The latest client version is whatever apps/client/Cargo.toml says,
     // Caddy serves that folder at /client/ (it's what install.sh downloads
     // from), so this is always the version a fresh install or update gets.
     let latestClientVersion = null;
@@ -435,7 +435,7 @@
       return false;
     }
 
-    // A device needs updating if it reports an older version — or reports
+    // A device needs updating if it reports an older version, or reports
     // none at all while it's been seen running (clients before 0.2.0 didn't
     // report a version, so they're older by definition).
     function deviceNeedsUpdate(d) {
@@ -472,7 +472,7 @@
         const needsUpdate = deviceNeedsUpdate(d);
         const version = d.client_version
           ? `v${escapeText(d.client_version)}`
-          : (d.last_seen_at ? 'older than 0.2.0' : '—');
+          : (d.last_seen_at ? 'older than 0.2.0' : 'not connected yet');
         const versionCell = needsUpdate
           ? `${version} <span class="tier-badge paused">update available</span>`
           : version;
@@ -558,7 +558,7 @@
       try {
         await navigator.clipboard.writeText(token);
       } catch (err) {
-        // Clipboard API may be unavailable (e.g. non-HTTPS) — the token is
+        // Clipboard API may be unavailable (e.g. non-HTTPS), the token is
         // already shown on screen to copy by hand.
       }
     });
@@ -593,7 +593,7 @@
           return;
         }
         supportForm.reset();
-        resultEl.textContent = data.message || "Thanks — we'll reply by email.";
+        resultEl.textContent = data.message || "Thanks, we'll reply by email.";
         resultEl.style.display = 'block';
       } catch (err) {
         errorEl.textContent = 'Could not reach the server. Try again, or email support@filegarden.net.';
@@ -608,7 +608,7 @@
         me = await loadMe();
       } catch (err) {
         document.getElementById('account-summary').textContent =
-          'Could not load your account — try refreshing the page.';
+          'Could not load your account. Try refreshing the page.';
         return;
       }
       if (!me) return;
@@ -621,7 +621,7 @@
 
       // Each of these handles its own errors internally, so one section
       // failing (e.g. a stale deploy missing a route) never blocks the
-      // rest of the page from loading — that's what silently broke
+      // rest of the page from loading, that's what silently broke
       // Billing here before this was added.
       await loadInvites();
       await loadDevices();
@@ -630,10 +630,10 @@
       const checkoutStatus = new URLSearchParams(window.location.search).get('checkout');
       const noteEl = document.getElementById('billing-note');
       if (checkoutStatus === 'success') {
-        noteEl.textContent = 'Subscription started — thanks!';
+        noteEl.textContent = 'Subscription started. Thanks!';
         noteEl.style.display = 'block';
       } else if (checkoutStatus === 'cancelled') {
-        noteEl.textContent = 'Checkout was cancelled — no charge was made.';
+        noteEl.textContent = 'Checkout was cancelled. No charge was made.';
         noteEl.style.display = 'block';
       }
     }
@@ -676,7 +676,7 @@
           return;
         }
 
-        resultEl.textContent = `Invite code: ${data.invite.code} — send this to your buddy.`;
+        resultEl.textContent = `Invite code: ${data.invite.code}. Send this to your buddy.`;
         resultEl.style.display = 'block';
         await loadInvites();
       } catch (err) {

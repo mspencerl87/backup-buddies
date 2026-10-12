@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Getting started — Backup Buddies</title>
+  <title>Getting started | Backup Buddies</title>
   <meta name="description" content="Get started with Backup Buddies: sign up, invite a buddy, and start trading encrypted backups in minutes.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Backup Buddies">
-  <meta property="og:title" content="Getting started — Backup Buddies">
+  <meta property="og:title" content="Getting started | Backup Buddies">
   <meta property="og:description" content="Get started with Backup Buddies: sign up, invite a buddy, and start trading encrypted backups in minutes.">
   <meta property="og:url" content="https://app.filegarden.net/getting-started.html">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
@@ -47,7 +47,7 @@
       <h2>1. Create your account</h2>
       <p class="muted">
         <a href="/signup.html">Sign up</a> with an email and password, or
-        with Google — either way you'll need to accept the Terms of
+        with Google. Either way you'll need to accept the Terms of
         Service, which spells out that data stored with a buddy is at your
         own risk (see <a href="/terms.html">Terms</a> for the full picture
         of what that means and what doesn't change).
@@ -62,10 +62,10 @@
         you have two options:
       </p>
       <ul class="tech-list">
-        <li><strong>Invite someone you know</strong> — pick how much storage to pledge, generate a code under <a href="/dashboard.html#invite-a-buddy">Invite a buddy</a>, and send it to them directly.</li>
-        <li><strong>Find someone publicly</strong> — check "List this publicly" when creating your invite to list it in <a href="/dashboard.html#find-a-buddy">Find a buddy</a>, or browse that same list to request a pairing with someone who's already listed space.</li>
+        <li><strong>Invite someone you know</strong>: pick how much storage to pledge, generate a code under <a href="/dashboard.html#invite-a-buddy">Invite a buddy</a>, and send it to them directly.</li>
+        <li><strong>Find someone publicly</strong>: check "List this publicly" when creating your invite to list it in <a href="/dashboard.html#find-a-buddy">Find a buddy</a>, or browse that same list to request a pairing with someone who's already listed space.</li>
       </ul>
-      <p class="muted">Either way, a pairing becomes active the moment the other side redeems it — no approval step beyond that.</p>
+      <p class="muted">Either way, a pairing becomes active the moment the other side redeems it. There's no approval step beyond that.</p>
     </section>
 
     <section class="about-section">
@@ -76,7 +76,7 @@
         with 10GB/month of relay bandwidth included. Check where you stand
         and subscribe (if needed) under
         <a href="/dashboard.html#billing">Billing</a>. If you're staying
-        under 50GB, you can skip this — nothing to subscribe to yet.
+        under 50GB, you can skip this, since there's nothing to subscribe to yet.
       </p>
     </section>
 
@@ -87,14 +87,14 @@
         pairing:
       </p>
       <ul class="tech-list">
-        <li>Add a device under <a href="/dashboard.html#devices">Devices</a> on your dashboard — this gives you a token.</li>
+        <li>Add a device under <a href="/dashboard.html#devices">Devices</a> on your dashboard. This gives you a token.</li>
         <li>Follow the full walkthrough on the <a href="/setup.html">Client setup</a> page to install and run it with that token.</li>
-        <li>Do this on every machine you want backed up. Your buddy needs to do the same on theirs — both sides have to be running the client for anything to happen.</li>
+        <li>Do this on every machine you want backed up. Your buddy needs to do the same on theirs, since both sides have to be running the client for anything to happen.</li>
         <li>Before you pick a folder to back up, read <a href="#what-to-back-up">what to back up (and what not to)</a> below.</li>
       </ul>
       <div class="callout-warning">
           <strong>Save your backup passphrase in a password manager.</strong>
-          <code>BACKUP_PASSPHRASE</code> is the only key to your backups — files are encrypted with it on your
+          <code>BACKUP_PASSPHRASE</code> is the only key to your backups. Files are encrypted with it on your
           own machine, and nobody else ever has it. If you lose it, what your buddy holds for you can never be
           decrypted: not by a password reset (that's only your website login), not by support, not by us.
           It's not stored anywhere but your <code>.env</code> file, which won't help if the machine itself dies.
@@ -106,12 +106,12 @@
       <p class="muted">
         Once both clients are running, your dashboard's Devices card will
         show each device as connected, and the client's own logs will show
-        a cycle line roughly every 30 seconds — "backup cycle complete" if
+        a cycle line roughly every 30 seconds: "backup cycle complete" if
         there's something to send, or "nothing new to back up" if not
         (which is what you'll see on a device that's only receiving, every
-        cycle — that still confirms the connection). If you pointed this
+        cycle, and that still confirms the connection). If you pointed this
         device at a folder to back up, your buddy actually ends up holding
-        an encrypted, restorable copy of your files — not just a
+        an encrypted, restorable copy of your files, not just a
         connection test. See the <a href="/setup.html">Client setup</a>
         page's troubleshooting section if that's not happening.
       </p>
@@ -122,8 +122,8 @@
       <p class="muted">
         This is a real backup client, not a demo: it watches your folder,
         encrypts and sends new or changed files automatically, mirrors
-        deletions, and lets you restore everything — or a specific earlier
-        version of a file you've since overwritten — from its local
+        deletions, and lets you restore everything (or a specific earlier
+        version of a file you've since overwritten) from its local
         dashboard or the restore command. See the
         <a href="/setup.html">Client setup</a> page's "What this version
         actually does" section for the full rundown, including its current

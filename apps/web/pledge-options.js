@@ -1,10 +1,10 @@
-// Shared option lists for the invite-creation and "Find a buddy" pages —
+// Shared option lists for the invite-creation and "Find a buddy" pages,
 // a plain script (not a module) so both dashboard.html and
 // find-a-buddy.html can load it with a single <script src=...> tag and
 // use the globals below directly, no bundler involved.
 //
 // PLEDGE_GB_OPTIONS must track the API's PLEDGE_STEP_BYTES/PLEDGE_MAX_BYTES
-// (apps/api/src/routes/invites.js) — the API is the real source of truth
+// (apps/api/src/routes/invites.js), the API is the real source of truth
 // for what's accepted, this just has to keep matching it by hand.
 // SPEED_TIER_OPTIONS' values must match what POST /invites validates.
 
@@ -28,7 +28,7 @@ function populatePledgeSelect(selectEl, defaultGb) {
   }
 }
 
-// Self-reported upload speed, bucketed rather than a raw number — a typed
+// Self-reported upload speed, bucketed rather than a raw number, a typed
 // "Mbps" figure is rarely accurate (varies by time of day, ISP throttling,
 // Wi-Fi vs. wired) and buckets are easier to scan on a listing anyway.
 const SPEED_TIER_OPTIONS = [
@@ -52,7 +52,7 @@ function speedTierLabel(value) {
   return SPEED_TIER_OPTIONS.find((o) => o.value === value)?.label ?? null;
 }
 
-// Country only, deliberately — no state/city/postal code. This is self-
+// Country only, deliberately, no state/city/postal code. This is self-
 // reported on a *public* listing, and the API's own privacy stance for
 // marketplace listings is "nothing here reveals who someone is" (see the
 // comment on GET /invites/public); anything finer than country starts to
@@ -73,7 +73,7 @@ const COUNTRY_OPTIONS = [
 ].sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b)));
 
 // unselectedLabel defaults to the invite-creation form's framing ("skip
-// this field") — find-a-buddy.html's filter passes "Any country" instead,
+// this field"), find-a-buddy.html's filter passes "Any country" instead,
 // since there the empty option means "don't narrow by country" rather
 // than "I'd rather not share mine".
 function populateCountrySelect(selectEl, unselectedLabel) {

@@ -2,7 +2,7 @@
 // script (not a module), loaded with a <script src=...> tag before each
 // page's own inline script, same as pledge-options.js.
 
-// Every API route returns JSON, even its errors — except when a request
+// Every API route returns JSON, even its errors, except when a request
 // never reaches Express at all (wrong path, server down, Caddy/Cloudflare
 // returning its own error page). res.json() throws on those instead of
 // giving back something we can show, so callers use this instead of
@@ -10,7 +10,7 @@
 async function parseJsonResponse(res) {
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    throw new Error(`Unexpected response (${res.status}) — try refreshing the page.`);
+    throw new Error(`Unexpected response (${res.status}). Try refreshing the page.`);
   }
   return res.json();
 }
@@ -26,7 +26,7 @@ function formatDate(iso) {
 
 // Shared by every place an API call can come back blocked by the free
 // storage allowance (invite creation, direct redeem, marketplace redeem)
-// — shows the server's explanation plus a jump straight to the Billing
+// shows the server's explanation plus a jump straight to the Billing
 // card instead of leaving the person to go find it. billingHref lets a
 // page outside dashboard.html (e.g. find-a-buddy.html) point back at
 // dashboard.html#billing instead of just #billing on itself.
@@ -50,7 +50,7 @@ function showBlockedError(errorEl, data, fallback, billingHref = '#billing') {
 }
 
 // Redirects to login on a 401 rather than leaving the caller to handle
-// it — every page that calls this is already behind a login wall.
+// it, every page that calls this is already behind a login wall.
 async function loadMe() {
   const res = await fetch('/api/me', { credentials: 'same-origin' });
   if (res.status === 401) {

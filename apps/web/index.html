@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Backup Buddies — Peer-to-peer encrypted backup, no cloud storage bill</title>
-  <meta name="description" content="Trade storage with someone you trust and back each other up — encrypted end-to-end, peer-to-peer, no monthly cloud storage bill.">
+  <title>Backup Buddies | Peer-to-peer encrypted backup, no cloud storage bill</title>
+  <meta name="description" content="Need backup space? Trade storage with someone you know, or a stranger, and back each other up. Encrypted end to end, peer to peer, no monthly cloud storage bill.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Backup Buddies">
-  <meta property="og:title" content="Backup Buddies — Peer-to-peer encrypted backup, no cloud storage bill">
-  <meta property="og:description" content="Trade storage with someone you trust and back each other up — encrypted end-to-end, peer-to-peer, no monthly cloud storage bill.">
+  <meta property="og:title" content="Backup Buddies | Peer-to-peer encrypted backup, no cloud storage bill">
+  <meta property="og:description" content="Need backup space? Trade storage with someone you know, or a stranger, and back each other up. Encrypted end to end, peer to peer, no monthly cloud storage bill.">
   <meta property="og:url" content="https://app.filegarden.net/">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -34,29 +34,42 @@
   </header>
 
   <main>
-    <section class="hero">
-      <h1>Trade storage, not money.</h1>
-      <p>
-        Pair up with someone you trust and back each other up — encrypted
-        end to end, stored on each other's own machines. No cloud storage
-        bill, no middleman reading your files.
+    <section class="screenshots screenshots-top">
+      <h2>What the client looks like</h2>
+      <p class="muted">
+        Every device runs its own local dashboard, behind its own login:
+        disk, bandwidth and each buddy's pledge at a glance, a running log of
+        what happened, what to leave out of the backup, and a file browser to
+        restore anything (or roll back to an earlier version).
       </p>
-      <a class="btn" href="/signup.html">Get started</a>
-      <a class="btn btn-secondary" href="/login.html">Log in</a>
-    </section>
-
-    <section class="features">
-      <div class="feature">
-        <h3>Encrypted before it leaves your machine</h3>
-        <p>Your buddy stores your data, but can never read it — and neither can we.</p>
-      </div>
-      <div class="feature">
-        <h3>Invite someone you know</h3>
-        <p>Sign up, generate an invite, and send it to the person you want as your backup buddy.</p>
-      </div>
-      <div class="feature">
-        <h3>Direct, peer-to-peer</h3>
-        <p>Your files move straight between your two devices — we just handle the matchmaking.</p>
+      <div class="carousel" id="client-carousel">
+        <div class="carousel-viewport">
+        <div class="carousel-track">
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-overview.png" alt="Client dashboard overview, showing device info, disk usage, bandwidth, and each buddy's backup status" loading="lazy">
+            <figcaption>Overview: device info, disk, bandwidth, and every buddy's pledge in one place</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-activity.png" alt="Activity card listing recent backups, a buddy going offline and coming back, restores and logins" loading="lazy">
+            <figcaption>Activity: what was sent, removed, restored or refused, and when a buddy dropped off or came back</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-exclusions.png" alt="Exclusions editor and a list of big files that keep re-sending, each with an Exclude button" loading="lazy">
+            <figcaption>Exclusions: leave files out with Syncthing-style patterns, and spot big files that keep re-sending</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-browse.png" alt="File browser modal showing a buddy's backed-up folders" loading="lazy">
+            <figcaption>Browse a buddy's files and restore a folder, a selection, or everything</figcaption>
+          </figure>
+          <figure class="carousel-slide">
+            <img src="/assets/screenshots/client-history.png" alt="File version history, showing two previous backed-up versions of a file" loading="lazy">
+            <figcaption>Pull back an earlier version (the last 2 replaced copies of any file)</figcaption>
+          </figure>
+        </div>
+        </div>
+        <button type="button" class="carousel-arrow carousel-prev" aria-label="Previous screenshot">&#8249;</button>
+        <button type="button" class="carousel-arrow carousel-next" aria-label="Next screenshot">&#8250;</button>
+        <div class="carousel-dots" role="tablist" aria-label="Screenshot navigation"></div>
       </div>
     </section>
 
@@ -90,7 +103,7 @@
             </tr>
             <tr>
               <th scope="row">Pricing</th>
-              <td>Pay per GB stored, every month, forever — plus egress fees</td>
+              <td>Pay per GB stored, every month, forever, plus egress fees</td>
               <td>Free, but it's bring-your-own storage and hardware</td>
               <td class="us-col">Free up to 50GB pledged, including 10GB/month of relay. Past that, a flat $3/month for any pledge size, still with 10GB/month of relay included, then $0.02/GB for relay you can't avoid. No egress fees, and direct transfers are always free</td>
             </tr>
@@ -98,7 +111,7 @@
               <th scope="row">Connection</th>
               <td>Always through their servers</td>
               <td>Direct peer-to-peer between your devices, with a relay/mesh fallback</td>
-              <td class="us-col">Same idea — direct first, relay fallback — but between two different people's devices</td>
+              <td class="us-col">Same idea (direct first, relay as a fallback), but between two different people's devices</td>
             </tr>
             <tr>
               <th scope="row">Who's on the other end</th>
@@ -110,11 +123,11 @@
               <th scope="row">Encryption</th>
               <td>Varies by provider and plan</td>
               <td>Varies by setup</td>
-              <td class="us-col">Always, before it leaves your device — nobody, including us, can read it</td>
+              <td class="us-col">Always, before it leaves your device. Nobody, including us, can read it</td>
             </tr>
             <tr>
               <th scope="row">Source code</th>
-              <td>Closed — you trust the provider</td>
+              <td>Closed, so you have to trust the provider</td>
               <td>Open source (Syncthing) / source-available (ZeroTier)</td>
               <td class="us-col">The client on your machine is <a href="https://github.com/mspencerl87/backup-buddies-client" target="_blank" rel="noopener">open source (GPL-3.0)</a></td>
             </tr>
@@ -125,47 +138,35 @@
         Think of it as ZeroTier's direct-connection tech and Syncthing's
         peer-to-peer philosophy, aimed at a different problem: instead of
         syncing your own devices, you pair with someone else's for real
-        backup redundancy — at cloud-storage reliability, without the
+        backup redundancy, without the
         monthly bill.
       </p>
     </section>
 
-    <section class="screenshots">
-      <h2>What the client looks like</h2>
-      <p class="muted">
-        Every device also runs its own local dashboard, behind its own login:
-        disk, bandwidth and each buddy's pledge at a glance, a running log of
-        what happened, what to leave out of the backup, and a file browser to
-        restore anything (or roll back to an earlier version).
+    <section class="hero hero-bottom">
+      <h1>Need backup space?</h1>
+      <p>
+        Trade it with someone you know, or with a stranger who needs space
+        too. You each keep an encrypted copy of the other's files on your
+        own machine. No cloud storage bill, and nobody in the middle can
+        read your files.
       </p>
-      <div class="carousel" id="client-carousel">
-        <div class="carousel-viewport">
-        <div class="carousel-track">
-          <figure class="carousel-slide">
-            <img src="/assets/screenshots/client-overview.png" alt="Client dashboard overview, showing device info, disk usage, bandwidth, and each buddy's backup status" loading="lazy">
-            <figcaption>Overview — device info, disk, bandwidth, and every buddy's pledge in one place</figcaption>
-          </figure>
-          <figure class="carousel-slide">
-            <img src="/assets/screenshots/client-activity.png" alt="Activity card listing recent backups, a buddy going offline and coming back, restores and logins" loading="lazy">
-            <figcaption>Activity — what was sent, removed, restored or refused, and when a buddy dropped off or came back</figcaption>
-          </figure>
-          <figure class="carousel-slide">
-            <img src="/assets/screenshots/client-exclusions.png" alt="Exclusions editor and a list of big files that keep re-sending, each with an Exclude button" loading="lazy">
-            <figcaption>Exclusions — leave files out with Syncthing-style patterns, and spot big files that keep re-sending</figcaption>
-          </figure>
-          <figure class="carousel-slide">
-            <img src="/assets/screenshots/client-browse.png" alt="File browser modal showing a buddy's backed-up folders" loading="lazy">
-            <figcaption>Browse a buddy's files and restore a folder, a selection, or everything</figcaption>
-          </figure>
-          <figure class="carousel-slide">
-            <img src="/assets/screenshots/client-history.png" alt="File version history, showing two previous backed-up versions of a file" loading="lazy">
-            <figcaption>Pull back an earlier version — the last 2 replaced copies of any file</figcaption>
-          </figure>
-        </div>
-        </div>
-        <button type="button" class="carousel-arrow carousel-prev" aria-label="Previous screenshot">&#8249;</button>
-        <button type="button" class="carousel-arrow carousel-next" aria-label="Next screenshot">&#8250;</button>
-        <div class="carousel-dots" role="tablist" aria-label="Screenshot navigation"></div>
+      <a class="btn" href="/signup.html">Get started</a>
+      <a class="btn btn-secondary" href="/login.html">Log in</a>
+    </section>
+
+    <section class="features">
+      <div class="feature">
+        <h3>Encrypted before it leaves your machine</h3>
+        <p>Your buddy stores your files but can never read them, and neither can we. File names are encrypted too.</p>
+      </div>
+      <div class="feature">
+        <h3>Someone you know, or someone new</h3>
+        <p>Send an invite to a friend, or browse Find a buddy for someone with space to trade.</p>
+      </div>
+      <div class="feature">
+        <h3>Direct, peer-to-peer</h3>
+        <p>Your files go straight between your two devices. We just handle the matchmaking.</p>
       </div>
     </section>
   </main>

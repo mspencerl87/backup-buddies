@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Feature status — Backup Buddies</title>
-  <meta name="description" content="See what's available now, in progress, and known limitations in Backup Buddies — our public feature status page.">
+  <title>Feature status | Backup Buddies</title>
+  <meta name="description" content="See what's available now, in progress, and known limitations in Backup Buddies, on our public feature status page.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Backup Buddies">
-  <meta property="og:title" content="Feature status — Backup Buddies">
-  <meta property="og:description" content="See what's available now, in progress, and known limitations in Backup Buddies — our public feature status page.">
+  <meta property="og:title" content="Feature status | Backup Buddies">
+  <meta property="og:description" content="See what's available now, in progress, and known limitations in Backup Buddies, on our public feature status page.">
   <meta property="og:url" content="https://app.filegarden.net/status.html">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -47,7 +47,7 @@
     <section class="about-section">
       <h2>Available now</h2>
       <p class="muted">
-        Verified against real, live devices — not just "it compiles."
+        Verified against real, live devices, not just "it compiles."
       </p>
       <ul class="status-list" id="available-list">
         <li class="status-item status-fallback">
@@ -59,7 +59,7 @@
     <section class="about-section">
       <h2>Known limitations &amp; in progress</h2>
       <p class="muted">
-        Nothing here is secret or hidden — just not finished, not yet
+        Nothing here is secret or hidden. It's just not finished, not yet
         proven under real conditions, or an inherent limit we want to be
         upfront about.
       </p>
@@ -78,8 +78,8 @@
         transfers) is <a href="https://github.com/mspencerl87/backup-buddies-client" target="_blank" rel="noopener">open
         source under GPL-3.0</a>; the server that handles accounts, pairing
         and billing is closed. Issues and feature requests are open to
-        anyone. Check the lists above first — your
-        issue might already be a known limitation — then
+        anyone. Check the lists above first, since your
+        issue might already be a known limitation. Then
         <a href="https://github.com/mspencerl87/backup-buddies-feedback/issues/new/choose" target="_blank" rel="noopener">file it here</a>.
       </p>
     </section>
@@ -100,7 +100,7 @@
 
   <script>
     // Renders from feature-status.json rather than hand-written markup, so
-    // this page updates whenever that one data file changes — no HTML
+    // this page updates whenever that one data file changes, no HTML
     // edits, no separate deploy step beyond the normal apps/web/** CI
     // deploy that change already triggers. Same-origin fetch (no GitHub
     // API/auth involved); if it fails for any reason, the static
@@ -141,7 +141,7 @@
       })
       .catch(() => {
         const msg = '<li class="status-item status-fallback"><span class="status-item-body">' +
-          '<span>Couldn’t load the live status list right now — ' +
+          '<span>Couldn’t load the live status list right now. ' +
           '<a href="/setup.html">see client setup</a> or try refreshing.</span></span></li>';
         document.getElementById('available-list').innerHTML = msg;
         document.getElementById('limitations-list').innerHTML = '';

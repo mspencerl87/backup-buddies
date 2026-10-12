@@ -11,11 +11,11 @@
     },
     {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
-      "description": "Your device and your buddy's device try to connect directly first. On the same local network, that's instant and automatic. Over the internet, it depends on both sides' network/router — when a direct connection isn't possible, your data still transfers reliably through our relay, which can never read it (see “Known limitations” below for when this applies)."
+      "description": "Your device and your buddy's device try to connect directly first. On the same local network, that's instant and automatic. Over the internet, it depends on both sides' network and router. When a direct connection isn't possible, your data still transfers reliably through our relay, which can never read it (see “Known limitations” below for when this applies)."
     },
     {
       "title": "Restore, including file history",
-      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since changed or deleted (kept for 30 days, or remove a deleted file's copies sooner with “Delete permanently”) — with a live progress indicator while it runs."
+      "description": "Restore a single file, restore everything your buddy has for you at once, or pull back a specific earlier version of a file you've since changed or deleted (kept for 30 days, or remove a deleted file's copies sooner with “Delete permanently”), with a live progress indicator while it runs."
     },
     {
       "title": "Pledge-based storage limits",
@@ -23,11 +23,11 @@
     },
     {
       "title": "Drift detection (reconciliation)",
-      "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects — catching anything lost or changed outside the normal backup flow — and automatically re-sends anything missing."
+      "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects, catching anything lost or changed outside the normal backup flow, and automatically re-sends anything missing."
     },
     {
       "title": "Unreachable-buddy detection",
-      "description": "If your buddy's device genuinely can't be reached, your dashboard flags it as stale rather than silently showing “backup ok” — backed by a real connectivity check, not an assumption."
+      "description": "If your buddy's device genuinely can't be reached, your dashboard flags it as stale rather than silently showing “backup ok”. It's backed by a real connectivity check, not an assumption."
     },
     {
       "title": "Dashboard",
@@ -39,15 +39,15 @@
     },
     {
       "title": "Free tier",
-      "description": "The first 50GB you pledge to buddies is free, no card required — including 10GB a month of relay bandwidth for connections that can't go direct. Direct and local-network transfers are always free and unlimited."
+      "description": "The first 50GB you pledge to buddies is free, no card required, including 10GB a month of relay bandwidth for connections that can't go direct. Direct and local-network transfers are always free and unlimited."
     },
     {
       "title": "Relay bandwidth billing",
-      "description": "On a paid plan, relay usage (when a direct connection isn't possible) is metered and billed at $0.02/GB, shown as its own line item on your invoice — confirmed end-to-end against real billing."
+      "description": "On a paid plan, relay usage (when a direct connection isn't possible) is metered and billed at $0.02/GB, shown as its own line item on your invoice, and confirmed end to end against real billing."
     },
     {
       "title": "Low-disk protection",
-      "description": "Your device refuses incoming files once its own disk runs low (a flat 2GB, or 5% of the disk, whichever's bigger), independent of pledge size — so a buddy's data can never fill your disk to nothing."
+      "description": "Your device refuses incoming files once its own disk runs low (a flat 2GB, or 5% of the disk, whichever's bigger), independent of pledge size, so a buddy's data can never fill your disk to nothing."
     },
     {
       "title": "Password reset and account support",
@@ -74,7 +74,7 @@
     {
       "title": "Direct connections aren't guaranteed on every network",
       "status": "limitation",
-      "description": "Whether a direct connection is possible depends on your router/network's NAT behavior. Many home networks and local networks work great. Some networks — strict corporate firewalls especially — block the hole-punching direct connections need entirely, forwarded port or not. When that happens, your backups still complete normally through our relay; this is expected, graceful behavior, not a failure."
+      "description": "Whether a direct connection is possible depends on your router/network's NAT behavior. Many home networks and local networks work great. Some networks (strict corporate firewalls especially) block the hole-punching direct connections need entirely, forwarded port or not. When that happens, your backups still complete normally through our relay; this is expected, graceful behavior, not a failure."
     },
     {
       "title": "Long transfers can occasionally drop on a local network",
@@ -89,7 +89,7 @@
     {
       "title": "One buddy per pledge",
       "status": "limitation",
-      "description": "Each pledge is a 1:1 relationship with a single buddy — there's no way to share one backup folder across multiple buddies at once."
+      "description": "Each pledge is a 1:1 relationship with a single buddy. There's no way to share one backup folder across multiple buddies at once."
     }
   ]
 }

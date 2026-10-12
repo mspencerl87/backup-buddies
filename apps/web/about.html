@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>How it works — Backup Buddies</title>
+  <title>How it works | Backup Buddies</title>
   <meta name="description" content="How Backup Buddies works: pair with a buddy, trade storage, and back each other up with direct peer-to-peer transfer and end-to-end encryption.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Backup Buddies">
-  <meta property="og:title" content="How it works — Backup Buddies">
+  <meta property="og:title" content="How it works | Backup Buddies">
   <meta property="og:description" content="How Backup Buddies works: pair with a buddy, trade storage, and back each other up with direct peer-to-peer transfer and end-to-end encryption.">
   <meta property="og:url" content="https://app.filegarden.net/about.html">
   <meta property="og:image" content="https://app.filegarden.net/assets/screenshots/client-overview.png">
@@ -39,7 +39,7 @@
       <p>
         Two people trade storage, not money. Each one's files are encrypted
         before they ever leave the device, so your buddy stores your data
-        without being able to read it — and so do we.
+        without being able to read it, and so do we.
       </p>
     </section>
 
@@ -48,7 +48,7 @@
       <p class="muted">
         Everything below the dashed line is content Backup Buddies' own
         servers never touch. The only things that ever reach our server are
-        account details, buddy pairings, and invite codes — never file
+        account details, buddy pairings, and invite codes. Never file
         contents, never encryption keys.
       </p>
 
@@ -59,7 +59,7 @@
 
           <!-- Server zone (metadata only) -->
           <rect x="20" y="20" width="720" height="110" rx="10" class="zone zone-server" />
-          <text x="40" y="44" class="zone-label">Backup Buddies server — metadata only</text>
+          <text x="40" y="44" class="zone-label">Backup Buddies server: metadata only</text>
           <rect x="300" y="58" width="160" height="56" rx="8" class="box box-server" />
           <text x="380" y="82" text-anchor="middle" class="box-title">Accounts &amp;</text>
           <text x="380" y="99" text-anchor="middle" class="box-title">pairings DB</text>
@@ -125,7 +125,7 @@
           <strong>You pair up.</strong>
           One of you generates an invite code tied to a pledged storage
           amount; the other redeems it. This creates a buddy pairing record
-          in our database — just the two account IDs and the pledged size,
+          in our database: just the two account IDs and the pledged size,
           nothing about your files.
         </li>
         <li>
@@ -147,15 +147,15 @@
         <li>
           <strong>Devices connect directly, peer-to-peer.</strong>
           Using the Iroh networking layer, your device and your buddy's
-          device negotiate a direct QUIC connection — the same kind of NAT
-          hole-punching BitTorrent and similar P2P tools use — and the
+          device negotiate a direct QUIC connection (the same kind of NAT
+          hole-punching BitTorrent and similar P2P tools use), and the
           encrypted blob transfers straight between you.
         </li>
         <li>
           <strong>If a direct connection isn't possible, a relay assists.</strong>
           Some network setups (strict corporate firewalls, certain carrier
           NATs) block direct hole-punching. When that happens, encrypted
-          bytes are relayed through our self-hosted relay server — but the
+          bytes are relayed through our self-hosted relay server, but the
           relay only ever moves already-encrypted ciphertext. It has no
           decryption key and cannot read, inspect, or reconstruct your
           files.
@@ -163,7 +163,7 @@
         <li>
           <strong>Your buddy's device stores the ciphertext.</strong>
           It counts against their pledged storage and sits there, encrypted,
-          until you need to restore it. They cannot decrypt it — they don't
+          until you need to restore it. They cannot decrypt it: they don't
           have your key.
         </li>
         <li>
@@ -223,7 +223,7 @@
         <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt, salted with your account ID. The same passphrase gives a different key on every account, so nobody holding encrypted files can test one list of guessed passphrases against every user at once. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
         <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file, verified on arrival. Every ~10 minutes your device also checks what your buddy actually holds against what it expects, and re-sends anything missing.</li>
         <li><strong>File names:</strong> each file and folder name is encrypted on its own with AES-SIV (deterministic, authenticated), padded to 16-byte steps and base32-encoded, in the style of rclone's crypt remote, with a key derived from the same passphrase. Your buddy sees encrypted names, sizes and folder layout, never real names or contents.</li>
-        <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established — it's a blind forwarder, not a storage point.</li>
+        <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established. It's a blind forwarder, not a storage point.</li>
         <li><strong>Client source:</strong> the program that runs on your machine (scanning, encryption, transfers) is open source under GPL-3.0, so you can read exactly what it does with your files: <a href="https://github.com/mspencerl87/backup-buddies-client" target="_blank" rel="noopener">github.com/mspencerl87/backup-buddies-client</a>.</li>
         <li><strong>Server:</strong> a small Node/Express API and Postgres database, holding only accounts, device identities (public node IDs, not keys), buddy pairings, and invite codes.</li>
       </ul>

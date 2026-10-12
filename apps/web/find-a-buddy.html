@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Find a buddy — Backup Buddies</title>
+  <title>Find a buddy | Backup Buddies</title>
   <meta name="description" content="Browse public Backup Buddies listings and find someone to trade backup storage with.">
   <link rel="stylesheet" href="/style.css?v=f0c89385">
   <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
@@ -29,7 +29,7 @@
     <div class="card">
       <h2>Find a buddy</h2>
       <p class="muted">
-        Listings are matched by exact pledge size — pick the size you want
+        Listings are matched by exact pledge size. Pick the size you want
         to trade below, and you'll only see listings pledging exactly
         that much. <a href="/dashboard.html#invite-a-buddy">List your own</a>
         from the dashboard.
@@ -44,7 +44,7 @@
       <p id="results-count" class="muted" style="margin-top:1rem"></p>
       <div id="listings"></div>
       <p id="listings-empty" class="muted" style="display:none">
-        No public listings match right now — be the first to
+        No public listings match right now. Be the first to
         <a href="/dashboard.html#invite-a-buddy">list one</a>, or try a different size or country.
       </p>
       <p class="error" id="listings-error"></p>
@@ -207,7 +207,7 @@
         const me = await loadMe();
         if (!me) return;
       } catch (err) {
-        errorEl.textContent = 'Could not load your account — try refreshing the page.';
+        errorEl.textContent = 'Could not load your account. Try refreshing the page.';
         return;
       }
       await loadListings({ reset: true });
