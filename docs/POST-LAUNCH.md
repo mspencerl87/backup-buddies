@@ -96,19 +96,15 @@ Last reviewed: 2026-10-04.
 - Container start on a host with no IPv6; stale mDNS records after restart.
 - Marketplace UI details (stale criteria on private invites, size preselect
   from the dashboard link).
-- Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted).
+- ~~Per-IP rate limiting (needs Caddy/Cloudflare client-IP header trusted)~~:
+  DEPLOY §24, with the trusted client IP from §31.
 - From the pre-public security review (2026-10-12; the XSS, Google
   pre-account takeover, unverified admin and login timing findings were
-  fixed then). Still open, all low:
-  - Security headers in the Caddyfile: `frame-ancestors 'none'` /
-    `X-Frame-Options: DENY` and `nosniff` are easy; a real
-    Content-Security-Policy means moving every page's inline script into
-    files first.
-  - A malformed UUID in a URL (`/devices/:id`, `/invites/public/:id`) or
-    the session cookie makes Postgres throw 22P02, answered as a 500
-    rather than 400/404. Log noise, not a hole.
-  - Per-IP limits can be dodged by hitting app-1 directly with a forged
-    `CF-Connecting-IP` (DEPLOY §24 has the firewall fix).
+  fixed then, and the low ones below in DEPLOY §31):
+  - ~~Frame-blocking and `nosniff` headers~~, ~~malformed ids answered as
+    500~~, ~~per-IP limits dodged with a forged `CF-Connecting-IP`~~.
+  - Still open: a real Content-Security-Policy (script sources), which
+    means moving every page's inline script into files first.
 - ~~Error messages show container paths (`/backup`) instead of host paths~~ —
   client 0.7.3 uses `BACKUP_DIR_HOST` / `BUDDY_FILES_DIR_HOST` when set,
   otherwise says to look in docker-compose.yml.

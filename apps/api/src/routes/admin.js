@@ -989,6 +989,8 @@ adminRouter.delete('/admin/accounts/:id', async (req, res) => {
 // it's what makes these buttons usable for troubleshooting at all.
 // eslint-disable-next-line no-unused-vars
 adminRouter.use((err, req, res, next) => {
+  // 22P02: Postgres couldn't parse a value, i.e. a malformed id in the URL.
+  if (err?.code === '22P02') return res.status(400).json({ error: 'invalid id' });
   console.error(`[admin] ${req.method} ${req.path} failed:`, err);
   const source = err?.type?.startsWith?.('Stripe') ? 'Stripe' : null;
   res.status(err?.statusCode && err.statusCode < 500 ? 400 : 502).json({

@@ -1,21 +1,58 @@
-# Replace with your real API hostname. Caddy will automatically obtain and
-# renew a TLS certificate via Let's Encrypt — this works whether or not the
-# DNS record is proxied through Cloudflare, as long as port 80 is reachable
-# for the ACME challenge.
+{
+	servers {
+		# Who the visitor really is. Both hostnames are proxied by
+		# Cloudflare, which puts the visitor's IP in CF-Connecting-IP. Caddy
+		# only believes that header when the request actually comes from a
+		# Cloudflare address (their published ranges,
+		# https://www.cloudflare.com/ips/, as of 2026-10-12); a request
+		# straight to this server's IP gets its real socket address instead,
+		# whatever headers it sends. The API reads the result from
+		# X-Client-IP (lib/rate-limit.js), so per-IP rate limits can't be
+		# dodged by forging the header (found in the pre-public review).
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+	}
+}
+
+# Headers on every response. No page is meant to be shown inside another
+# site's frame (that's how clickjacking dresses up the dashboard's buttons),
+# and nosniff stops browsers guessing a file is something other than what
+# it says it is.
+(security_headers) {
+	header {
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+}
+
+# The API, called by devices, relay-1 and Stripe's webhooks. Caddy will
+# automatically obtain and renew a TLS certificate via Let's Encrypt — this
+# works whether or not the DNS record is proxied through Cloudflare, as long
+# as port 80 is reachable for the ACME challenge.
 api.filegarden.net {
-	reverse_proxy api:3000
+	import security_headers
+	reverse_proxy api:3000 {
+		# Overwrites anything the caller sent under this name.
+		header_up X-Client-IP {client_ip}
+	}
 }
 
 app.filegarden.net {
+	import security_headers
+
 	# Everything under /api/* goes to the backend, prefix stripped so the
 	# Express routes stay unprefixed (e.g. /api/signup -> POST /signup).
 	handle_path /api/* {
-		reverse_proxy api:3000
+		reverse_proxy api:3000 {
+			header_up X-Client-IP {client_ip}
+		}
 	}
 
-	# The backup client's source + install files, served publicly so
-	# customers can fetch it with one curl command even though this repo
-	# itself is private — see apps/client/install.sh.
+	# The backup client's source + install files, so customers can fetch it
+	# with one curl command (apps/client/install.sh), and what devices read
+	# the latest version from (update_check.rs).
 	handle_path /client/* {
 		root * /srv/client
 		header Cache-Control "no-cache"

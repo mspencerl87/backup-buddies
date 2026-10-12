@@ -22,20 +22,27 @@ setInterval(() => {
 
 // The real visitor IP. Requests arrive Cloudflare -> Caddy -> API, so the
 // socket address is always Caddy's container and Caddy's X-Forwarded-For is
-// a Cloudflare edge IP — neither identifies the visitor. Cloudflare puts the
-// real one in CF-Connecting-IP, which Caddy passes through.
+// a Cloudflare edge IP — neither identifies the visitor.
 //
-// Caveat: app-1's port 443 is open to the internet, so someone who hits the
-// origin directly (bypassing Cloudflare) can send any CF-Connecting-IP they
-// like and dodge per-IP limits. That's why the sensitive endpoints also have
-// a limit keyed on something that can't be faked (the email being logged
-// into, the logged-in account). Restricting app-1's firewall to Cloudflare's
-// IP ranges would close it fully — see docs/DEPLOY.md section 24.
+// Caddy works it out and sends it as X-Client-IP (deploy/app/Caddyfile): it
+// takes CF-Connecting-IP only from requests that really come from
+// Cloudflare's ranges, and the socket address otherwise, overwriting
+// whatever the caller sent. Reading CF-Connecting-IP here instead used to
+// let anyone who hit app-1 directly (bypassing Cloudflare) set it to
+// anything and dodge per-IP limits. The API's port isn't published outside
+// Docker, so X-Client-IP can only come from Caddy.
 export function clientIp(req) {
+  const fromCaddy = req.get('x-client-ip');
+  if (fromCaddy && fromCaddy.length <= 45) return fromCaddy.trim();
+  // A Caddy still running its old config (it only picks up a changed
+  // Caddyfile on reload) doesn't send X-Client-IP; falling straight to
+  // X-Forwarded-For would key every visitor by a Cloudflare edge IP and
+  // lump strangers into one bucket. Forgeable, as before, but only until
+  // the reload.
   const cf = req.get('cf-connecting-ip');
   if (cf && cf.length <= 45) return cf.trim();
-  // Not via Cloudflare (local dev, or a direct hit): Caddy sets
-  // X-Forwarded-For to its immediate peer; take the last hop.
+  // No Caddy in front (local dev): the last X-Forwarded-For hop, or the
+  // socket itself.
   const xff = req.get('x-forwarded-for');
   if (xff) return xff.split(',').pop().trim();
   return req.socket?.remoteAddress || 'unknown';

@@ -892,14 +892,14 @@ per window, so `docker compose logs api | grep rate-limit` shows who hit what.
 
 **No migration, no env vars.** Merging to `main` deploys it.
 
-**The real visitor IP** comes from Cloudflare's `CF-Connecting-IP` header,
-because every request arrives Cloudflare → Caddy → API and the socket
-address is always Caddy's. app-1's port 443 is open to the internet, so
-someone who finds app-1's real IP and skips Cloudflare could fake that
-header and dodge the per-IP limits. That's why login also has a per-email
-limit, and invite redemption is per-account: neither can be faked.
+**The real visitor IP** comes from Caddy as `X-Client-IP` since §31: Caddy
+trusts Cloudflare's `CF-Connecting-IP` only on requests from Cloudflare's
+ranges, so someone who finds app-1's real IP and skips Cloudflare can no
+longer fake it. (Before §31 the API read `CF-Connecting-IP` itself, which
+could be faked that way.) Login also has a per-email limit, and invite
+redemption is per-account, which never depended on the IP.
 
-To close it fully (optional), restrict app-1's inbound 80/443 in its
+As an extra layer (optional), restrict app-1's inbound 80/443 in its
 firewall to Cloudflare's published ranges
 (https://www.cloudflare.com/ips/). Afterwards, confirm Caddy can still renew
 its certificates. Watch `docker compose logs caddy` around the next renewal,
@@ -1115,3 +1115,37 @@ with quantity 1, which charges $0):
    (Run from a machine with Node 20; the scripts need no `npm install`.)
 5. Archive the old tiered price in the Stripe dashboard so nothing can
    subscribe to it by accident.
+
+## 31. Security headers and a real client IP from Caddy
+
+`deploy/app/Caddyfile` now:
+- trusts `CF-Connecting-IP` only on requests from Cloudflare's published
+  ranges (`trusted_proxies` + `client_ip_headers`, global options) and sends
+  the result to the API as `X-Client-IP`, overwriting anything a caller
+  sent. `lib/rate-limit.js` keys per-IP limits on it, so going around
+  Cloudflare to app-1's IP no longer lets anyone pick their own IP;
+- adds `X-Frame-Options: DENY` and `frame-ancestors 'none'` (no page can be
+  shown inside another site's frame), `X-Content-Type-Options: nosniff` and
+  a `Referrer-Policy` to every response on both hostnames.
+
+The API also answers a malformed id in a URL or session cookie with
+`400`/`401` instead of a `500` (Postgres 22P02).
+
+**After the push** (the deploy restarts the API, but Caddy only reads a
+changed Caddyfile on reload, so it keeps the old one until then):
+```bash
+cd $CHECKOUT/deploy/app
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+`reload` refuses an invalid config and keeps the running one, so a typo
+can't take the site down. Until the reload, the API falls back to reading
+`CF-Connecting-IP` itself, as before. Check:
+```bash
+curl -sI https://app.filegarden.net/ | grep -iE 'x-frame-options|nosniff|frame-ancestors'
+```
+
+**Cloudflare's ranges change rarely.** If they do, update the list in the
+Caddyfile from https://www.cloudflare.com/ips/ and reload; a missing range
+just means visitors arriving through it are keyed by the Cloudflare edge
+address until then.

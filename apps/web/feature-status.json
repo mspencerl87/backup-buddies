@@ -10,6 +10,10 @@
       "description": "Since client 0.14.0, your buddy can't see what your files or folders are called: every name is encrypted on your device, the way rclone's crypt does it, and your passphrase brings the names back on restore. Updating re-sends what's already backed up once, under the new names. Names over 127 bytes can't be backed up and are flagged on your dashboard. What your buddy can still see: file sizes, how many files you have, how your folders nest and how many entries each holds, and when things change."
     },
     {
+      "title": "See what your buddy sees",
+      "description": "Since client 0.15.0, Browse files has a “What your buddy sees” view: your files listed the way they sit on your buddy's disk, with encrypted names and stored sizes, and the first bytes of any one exactly as stored (an age header, then ciphertext). You can check for yourself that nothing on their side is readable, instead of taking our word for it."
+    },
+    {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
       "description": "Your device and your buddy's device try to connect directly first. On the same local network, that's instant and automatic. Over the internet, it depends on both sides' network and router. When a direct connection isn't possible, your data still transfers reliably through our relay, which can never read it (see “Known limitations” below for when this applies)."
     },
@@ -42,8 +46,8 @@
       "description": "The first 50GB you pledge to buddies is free, no card required, including 10GB a month of relay bandwidth for connections that can't go direct. Direct and local-network transfers are always free and unlimited."
     },
     {
-      "title": "Relay bandwidth billing",
-      "description": "On a paid plan, relay usage (when a direct connection isn't possible) is metered and billed at $0.02/GB, shown as its own line item on your invoice, and confirmed end to end against real billing."
+      "title": "Paid plan and relay bandwidth billing",
+      "description": "Past 50GB, a flat $3 a month for any pledge size. It includes the same 10GB a month of relay bandwidth; relay past that (only when a direct connection isn't possible) is metered at $0.02/GB and shown as its own line item on your invoice, confirmed end to end against real billing."
     },
     {
       "title": "Low-disk protection",

@@ -236,6 +236,10 @@ docker compose restart api
 # Deploy by hand (what CI does)
 cd $CHECKOUT && git pull && cd deploy/app && docker compose pull api && docker compose up -d
 
+# Apply a changed Caddyfile (CI doesn't: Caddy only reads it on reload;
+# reload refuses an invalid one and keeps the running config)
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+
 # SQL shell
 docker compose exec postgres psql -U backup_buddies -d backup_buddies
 

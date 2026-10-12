@@ -47,6 +47,13 @@ app.use(adminRouter);
 // Express 4 doesn't auto-catch async errors) lands here instead of
 // crashing the process or hanging the request.
 app.use((err, req, res, next) => {
+  // 22P02 (invalid_text_representation): Postgres couldn't parse a value,
+  // which here only ever means a malformed id in the URL, e.g.
+  // DELETE /devices/not-a-uuid. That's the caller's mistake, not a server
+  // fault, so a 400 rather than a 500 and a stack trace in the logs.
+  if (err?.code === '22P02') {
+    return res.status(400).json({ error: 'invalid id' });
+  }
   console.error(err);
   res.status(500).json({ error: 'internal server error' });
 });

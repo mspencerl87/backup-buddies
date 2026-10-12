@@ -61,6 +61,8 @@ There are five ways to authenticate. Each route below says which one it uses.
   response).
 - Errors are `{ "error": "<human-readable message>" }`, worded to be shown
   to the user as-is.
+- A malformed id in the URL (not a UUID) gives `400 {"error": "invalid
+  id"}`, and a malformed session cookie `401`, rather than a 500.
 - An unhandled exception gives `500 {"error": "internal server error"}`
   (logged). Admin routes instead return the real message, prefixed with
   `Stripe:` when Stripe raised it: `400` if the upstream error was a 4xx,
