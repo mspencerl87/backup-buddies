@@ -99,6 +99,23 @@ main {
   padding: 2.5rem 1.5rem 4rem;
 }
 
+/* Homepage: wide enough for readable screenshots, the comparison table
+   and the cards on a big screen. Paragraphs keep their own narrower
+   max-widths, since long lines are hard to read. */
+.home-main {
+  max-width: 1200px;
+}
+
+.home-main .hero p {
+  max-width: 560px;
+}
+
+.home-main .features {
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .hero {
   text-align: center;
   padding: 3rem 0 2rem;
@@ -348,7 +365,7 @@ footer a {
    there's room, like a masonry layout, rather than every card stretching
    to a single column's width. */
 .dashboard-main {
-  max-width: 1120px;
+  max-width: 1600px;
 }
 
 .dashboard-grid {
@@ -361,9 +378,38 @@ footer a {
   -webkit-column-break-inside: avoid;
 }
 
+/* A third column only once the page is at its full width. Any earlier
+   and each card gets narrower than two columns made it at the old
+   1120px, and the Devices table already wraps its dates there. */
+@media (min-width: 1700px) {
+  .dashboard-grid {
+    column-count: 3;
+  }
+}
+
 @media (max-width: 860px) {
   .dashboard-grid {
     column-count: 1;
+  }
+}
+
+/* Find a buddy: the filters stay a normal size on a wide page. */
+#size-filter,
+#country-filter {
+  max-width: 420px;
+}
+
+/* Find a buddy: listings side by side on a wide screen instead of one
+   long column of full-width rows. */
+#listings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  column-gap: 2rem;
+}
+
+@media (max-width: 600px) {
+  #listings {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1100,12 +1146,25 @@ code {
 }
 
 .comparison > p.muted {
-  max-width: 560px;
+  max-width: 640px;
   margin: 0 auto 2rem;
 }
 
 .comparison-table-wrap {
   overflow-x: auto;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+/* Equal columns: left to the browser, the long pricing cell took most of
+   the width on a wide screen and squeezed the other two into narrow
+   strips. */
+.comparison-table {
+  table-layout: fixed;
+}
+
+.comparison-table thead th:first-child {
+  width: 16%;
 }
 
 .comparison-table {
@@ -1180,13 +1239,15 @@ code {
 }
 
 .screenshots > p.muted {
-  max-width: 520px;
+  max-width: 640px;
   margin: 0 auto 2rem;
 }
 
+/* The screenshots are 1100px wide; at 620px the dashboard in them
+   couldn't be read on a big screen. */
 .carousel {
   position: relative;
-  max-width: 620px;
+  max-width: 960px;
   margin: 0 auto;
 }
 
