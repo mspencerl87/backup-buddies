@@ -53,7 +53,7 @@ device over iroh (direct, or through our relay). Live at filegarden.net
   themselves, so **build and test before pushing**.
 - `apps/api/**`, `apps/web/**`, `deploy/app/**`, `db/migrations/**` →
   `deploy.yml` stamps asset versions, builds the API, and on app-1 runs
-  `git pull` + `docker compose up -d` (~1.5 min).
+  `git pull` + `docker compose up -d` + `caddy reload` (~1.5 min).
 - Devices read the latest version from app-1's checkout. `build-client.yml`
   runs `git pull` there itself once the image is published, so a version
   bump shows as "Update available" about 7 minutes after the push.

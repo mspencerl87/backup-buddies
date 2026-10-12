@@ -24,7 +24,7 @@ setInterval(() => {
 // socket address is always Caddy's container and Caddy's X-Forwarded-For is
 // a Cloudflare edge IP — neither identifies the visitor.
 //
-// Caddy works it out and sends it as X-Client-IP (deploy/app/Caddyfile): it
+// Caddy works it out and sends it as X-Client-IP (deploy/app/caddy/Caddyfile): it
 // takes CF-Connecting-IP only from requests that really come from
 // Cloudflare's ranges, and the socket address otherwise, overwriting
 // whatever the caller sent. Reading CF-Connecting-IP here instead used to

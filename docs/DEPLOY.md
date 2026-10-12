@@ -56,7 +56,7 @@ cp ../../.env.example .env
 # edit .env: set a real POSTGRES_PASSWORD, DATABASE_URL with the same
 # password, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_RELAY_METER_ID
 
-# edit Caddyfile: replace api.yourdomain.com with your real domain
+# edit caddy/Caddyfile: replace the hostnames with your real domains
 
 docker compose up -d
 docker compose logs -f api   # confirm it started cleanly
@@ -1118,7 +1118,7 @@ with quantity 1, which charges $0):
 
 ## 31. Security headers and a real client IP from Caddy
 
-`deploy/app/Caddyfile` now:
+`deploy/app/caddy/Caddyfile` (`deploy/app/Caddyfile` until §32) now:
 - trusts `CF-Connecting-IP` only on requests from Cloudflare's published
   ranges (`trusted_proxies` + `client_ip_headers`, global options) and sends
   the result to the API as `X-Client-IP`, overwriting anything a caller
@@ -1131,21 +1131,33 @@ with quantity 1, which charges $0):
 The API also answers a malformed id in a URL or session cookie with
 `400`/`401` instead of a `500` (Postgres 22P02).
 
-**After the push** (the deploy restarts the API, but Caddy only reads a
-changed Caddyfile on reload, so it keeps the old one until then):
-```bash
-cd $CHECKOUT/deploy/app
-docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-```
-`reload` refuses an invalid config and keeps the running one, so a typo
-can't take the site down. Until the reload, the API falls back to reading
+**Applied on 2026-10-12** with `docker compose up -d --force-recreate caddy`:
+a plain `caddy reload` kept serving the old Caddyfile (see §32 for why and
+the fix). Until Caddy has the new config, the API falls back to reading
 `CF-Connecting-IP` itself, as before. Check:
 ```bash
 curl -sI https://app.filegarden.net/ | grep -iE 'x-frame-options|nosniff|frame-ancestors'
 ```
 
-**Cloudflare's ranges change rarely.** If they do, update the list in the
-Caddyfile from https://www.cloudflare.com/ips/ and reload; a missing range
-just means visitors arriving through it are keyed by the Cloudflare edge
-address until then.
+**Cloudflare's ranges change rarely.** If they do, update the list in
+`caddy/Caddyfile` from https://www.cloudflare.com/ips/ and push (§32
+reloads it); a missing range just means visitors arriving through it are
+keyed by the Cloudflare edge address until then.
+
+## 32. Caddyfile in its own folder, reloaded by CI
+
+The Caddyfile was bind-mounted as a single file. `git pull` replaces a
+changed file rather than editing it in place, and a single-file bind mount
+stays attached to the old copy, so the container kept seeing (and
+`caddy reload` kept applying) the stale Caddyfile: §31's headers only took
+effect after recreating the container. Now:
+- it lives at `deploy/app/caddy/Caddyfile`, and compose mounts the folder
+  (`./caddy:/etc/caddy:ro`), so a pull is visible inside the container;
+- `deploy.yml` runs `caddy reload` after `docker compose up -d` on every
+  deploy (retried a few times while a just-recreated Caddy starts). It's a
+  no-op when nothing changed, and an invalid Caddyfile is refused (the
+  running config stays) and fails the job.
+
+**Nothing to do by hand.** The first deploy with this change recreates the
+`caddy` container itself, because its mount changed: a second or two
+without the site.

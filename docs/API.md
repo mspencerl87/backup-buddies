@@ -32,7 +32,7 @@ endpoints are in `apps/client/README.md` ("Commands and settings").
 
 ## Base URLs
 
-The same Express app is reachable two ways (see `deploy/app/Caddyfile`):
+The same Express app is reachable two ways (see `deploy/app/caddy/Caddyfile`):
 
 | URL | Used by | Path |
 |---|---|---|

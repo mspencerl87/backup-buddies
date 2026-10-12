@@ -98,6 +98,19 @@ jobs:
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
             docker compose pull api
             docker compose up -d
+            # up -d doesn't restart Caddy for a changed Caddyfile; a reload
+            # applies it (a no-op if unchanged). It refuses an invalid one,
+            # keeping the running config and failing this job. Retried
+            # because a just-recreated Caddy takes a moment to accept it.
+            reloaded=0
+            for attempt in 1 2 3 4 5; do
+              if docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile; then
+                reloaded=1
+                break
+              fi
+              sleep 3
+            done
+            [ "$reloaded" = 1 ]
             docker image prune -f
         env:
           GH_ACTOR: ${{ github.actor }}

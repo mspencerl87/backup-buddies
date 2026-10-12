@@ -41,7 +41,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The folder, not the single file: git pull replaces a file rather
+      # than editing it in place, and a single-file bind mount stays on the
+      # old copy, so Caddy kept reloading a stale Caddyfile (seen with
+      # DEPLOY 31). deploy.yml reloads Caddy on every deploy.
+      - ./caddy:/etc/caddy:ro
       - ../../apps/web:/srv/web:ro
       - ../../apps/client:/srv/client:ro
       - caddy_data:/data
