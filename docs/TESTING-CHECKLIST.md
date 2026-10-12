@@ -1035,24 +1035,49 @@ clients left. `cargo test` (53, including an e2e that walks the buddy's
 whole folder for plaintext names, restores a folder and a version,
 deletes permanently, and migrates a 0.13-style backup) and clippy clean.
 
-- [ ] Update testb first, then testa. testa's first cycle re-sends
+- [x] Update testb first, then testa. testa's first cycle re-sends
       everything: progress line says "(N to hide their names)", Activity
       says "Sent N files (…), N of them already backed up, sent again to
-      hide their names". Nothing in the "keeps re-sending" warning.
-- [ ] On the buddy, `ls -R` testa's folder under testb's buddy-files
-      (TrueNAS SMB mount): only `n1/` with long lowercase names, plus
-      `.versions/` (old plaintext names stay there until they expire in
-      30 days, as documented) and `.incoming/`. No empty plaintext
-      folders left behind.
-- [ ] Browse files on testa: real names, each file once, folders
+      hide their names". **2026-10-12:** Activity read "Sent 1 file
+      (2.7 GB), 1 of them already backed up, sent again to hide their
+      names · direct" (the Hyper-V ISO). Not yet checked: the "keeps
+      re-sending" warning staying empty.
+- [x] On the buddy, testa's folder under testb's buddy-files (TrueNAS SMB
+      mount): only `n1/` with long lowercase names, plus `.versions/` and
+      `.incoming/`. **2026-10-12:** `find` showed live files only as
+      `n1/c16qemuq8…` (the ISO); `.versions/` held the ISO's plaintext
+      `.v1` from the migration plus pre-update deletes (`1-create.sh`,
+      `resend-test.bin`, …), expiring in 30 days as documented. The other
+      direction (testb → testa, a new 628 MB file) had only `n1/` and
+      `.incoming/`.
+- [x] Empty folders removed on delete. **2026-10-12:** added
+      `Photos/b.txt` and `Photos/2024/a.txt`; testb showed
+      `n1/ms4kc…/q638n…` and `n1/ms4kc…/0qj9i…/jg2t7…` (one encrypted
+      folder per level). After `rm -r Photos` and one cycle, the whole
+      `ms4kc…` tree was gone from the live files; the copies went to
+      `.versions/n1/…`, also encrypted.
+- [x] Browse files on testa: real names, each file once, folders
       collapse as before. Restore all; restore one folder; History on a
       file changed after the update and on one from before (finds the old
       copies under the plaintext name); Delete permanently on a deleted
-      file.
-- [ ] Reconcile (~10 min): "✓ reconciled", nothing missing/unexpected.
+      file. **2026-10-12:** the ISO listed once under its real name (not
+      twice, despite the plaintext copy in `.versions/`); `Photos/`
+      shown as a folder. Restoring the current ISO (fetched by its `n1/`
+      name) and History → version 1 (the plaintext fallback) both gave
+      SHA-256 `629c32a0…87a9e6`, same as the original. Restore all: 3
+      files, 2.7 GB at 72.4 MB/s, real names. Restore on the `Photos`
+      folder: "Restored 2 file(s)", both back. History on
+      `resend-test.bin` (deleted before the update) listed both copies;
+      Delete permanently removed `resend-test.bin.v1`/`.v2` from testb.
+- [x] Reconcile (~10 min): "✓ reconciled", nothing missing/unexpected.
+      **2026-10-12:** "✓ reconciled 1m ago — 1 file(s) match".
 - [ ] Create a file with a 130-character name: failed-file line and one
       Activity problem, "too long to back up with hidden names". Not
-      repeated every cycle in Activity.
+      repeated every cycle in Activity. **2026-10-12, partly:** failed-file
+      line showed the right reason (and the buddy card said "backup
+      failed"). The long path didn't wrap and ran off the card: fixed for
+      0.14.1 (`overflow-wrap: anywhere` on the failed-file lines). Not
+      checked: Activity showing it once.
 - [ ] testb's own dashboard and logs show encrypted names for what it
       stores ("deleted file for buddy path=n1/…"). Expected.
 - [ ] Rebuild check: a fresh testa config with the same passphrase and

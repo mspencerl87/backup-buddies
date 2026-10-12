@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-11",
+  "updated": "2026-10-12",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -7,7 +7,7 @@
     },
     {
       "title": "Encrypted file and folder names",
-      "description": "Since client 0.14.0, your buddy can't see what your files or folders are called: every name is encrypted on your device, the way rclone's crypt does it, and your passphrase brings the names back on restore. Updating re-sends what's already backed up once, under the new names. Names over 127 bytes can't be backed up and are flagged on your dashboard. Your buddy still sees sizes and folder layout (see “Known limitations”)."
+      "description": "Since client 0.14.0, your buddy can't see what your files or folders are called: every name is encrypted on your device, the way rclone's crypt does it, and your passphrase brings the names back on restore. Updating re-sends what's already backed up once, under the new names. Names over 127 bytes can't be backed up and are flagged on your dashboard. What your buddy can still see: file sizes, how many files you have, how your folders nest and how many entries each holds, and when things change."
     },
     {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
@@ -90,11 +90,6 @@
       "title": "One buddy per pledge",
       "status": "limitation",
       "description": "Each pledge is a 1:1 relationship with a single buddy — there's no way to share one backup folder across multiple buddies at once."
-    },
-    {
-      "title": "Your buddy sees sizes and folder layout",
-      "status": "limitation",
-      "description": "File contents and names are encrypted, but your buddy can still see file sizes, how many files you have, how deep your folders go and how many entries each one has, and when things change. Like rclone, a name that appears in two folders encrypts the same way in both."
     }
   ]
 }

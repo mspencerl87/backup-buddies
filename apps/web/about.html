@@ -138,10 +138,10 @@
           <strong>Files are encrypted before they leave your machine.</strong>
           Each file's contents are encrypted on your device with
           <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a>,
-          using a key derived from your backup passphrase. The encrypted file
-          is sent under its path inside your backup folder, along with a
-          SHA-256 hash so both sides can verify it arrived intact. Your
-          buddy's device sees that path and the file's size, but never its
+          using a key derived from your backup passphrase, and its file and
+          folder names are encrypted too. It's sent with a SHA-256 hash so
+          both sides can verify it arrived intact. Your buddy's device sees
+          an encrypted name and the file's size, never its real name or its
           contents.
         </li>
         <li>
