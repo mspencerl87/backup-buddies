@@ -200,12 +200,14 @@ Every workflow runs on a push to `main` that touches its paths.
 | Workflow | Paths | Does | Takes |
 |---|---|---|---|
 | `deploy.yml` | `apps/api/**`, `apps/web/**`, `deploy/app/**`, `db/migrations/**` | 1. Stamps asset versions and commits "Stamp asset versions" if anything changed. 2. Builds and pushes `ghcr.io/mspencerl87/backup-buddies/api:latest` (and `:<sha>`). 3. Over SSH on app-1: `git pull`, `docker compose pull api`, `docker compose up -d`, prune images. **Doesn't run migrations** | ~1.5 min |
-| `build-client.yml` | `apps/client/**` | Builds and publishes `ghcr.io/mspencerl87/backup-buddies/client:latest` | ~7 min |
+| `build-client.yml` | `apps/client/**` | Builds and publishes `ghcr.io/mspencerl87/backup-buddies/client:latest` (and `:<sha>`), then over SSH on app-1 runs `git pull --ff-only`, so `/client/Cargo.toml` (what devices and the web dashboard compare against) only moves once the image exists | ~7 min |
 | `sync-public-client.yml` | `apps/client/**` (can also be run by hand) | Copies `apps/client` to the public repo as one commit | seconds |
 
-A client-only push doesn't update app-1's checkout, which is where
-devices read the latest client version from. After the client image is
-published, run `git pull` in `/opt/backup-buddies` on app-1.
+app-1's checkout is where devices read the latest client version from.
+`build-client.yml` pulls it once the image is published (its
+`publish-version` job; it shares the `app-1-checkout` concurrency group
+with `deploy.yml`'s deploy job so the two never `git pull` at once). If
+that job fails, run `git pull` in `/opt/backup-buddies` on app-1 by hand.
 
 Repository secrets: `LINODE_APP_HOST`, `LINODE_APP_USER`,
 `LINODE_APP_SSH_KEY` (deploy over SSH), `PUBLIC_CLIENT_DEPLOY_KEY`

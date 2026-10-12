@@ -70,6 +70,11 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    # Shared with build-client.yml's publish-version job, which also runs
+    # `git pull` in app-1's checkout.
+    concurrency:
+      group: app-1-checkout
+      cancel-in-progress: false
     permissions:
       packages: read
     steps:

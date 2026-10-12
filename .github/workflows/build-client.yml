@@ -33,3 +33,32 @@ jobs:
           build-args: BB_INSTALL_KIND=image
           push: true
           tags: ghcr.io/${{ github.repository }}/client:latest,ghcr.io/${{ github.repository }}/client:${{ github.sha }}
+
+  # Devices learn about a release from app-1's checkout (Caddy serves
+  # apps/client from it at /client/, and update_check.rs and the web
+  # dashboard read /client/Cargo.toml). That used to be a manual `git pull`
+  # after each client release, and when it lagged, devices kept saying "up
+  # to date" until an unrelated API deploy happened to pull it in. Runs
+  # only once the image is published, so app-1 never advertises a version
+  # that can't be pulled yet. Nothing to restart: the folder is
+  # bind-mounted.
+  publish-version:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Shared with deploy.yml's deploy job, so two pushes landing together
+    # don't run `git pull` in the same checkout at once.
+    concurrency:
+      group: app-1-checkout
+      cancel-in-progress: false
+    steps:
+      - name: Update app-1's checkout
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LINODE_APP_HOST }}
+          username: ${{ secrets.LINODE_APP_USER }}
+          key: ${{ secrets.LINODE_APP_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/backup-buddies
+            git pull --ff-only
+            grep -m1 '^version' apps/client/Cargo.toml

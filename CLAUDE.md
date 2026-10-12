@@ -49,9 +49,9 @@ device over iroh (direct, or through our relay). Live at filegarden.net
 - `apps/api/**`, `apps/web/**`, `deploy/app/**`, `db/migrations/**` →
   `deploy.yml` stamps asset versions, builds the API, and on app-1 runs
   `git pull` + `docker compose up -d` (~1.5 min).
-- A client-only push does **not** update app-1's checkout, which is where
-  devices read the latest version from. Spencer runs `git pull` in
-  `/opt/backup-buddies` on app-1 after the image is published.
+- Devices read the latest version from app-1's checkout. `build-client.yml`
+  runs `git pull` there itself once the image is published, so a version
+  bump shows as "Update available" about 7 minutes after the push.
 - Ship API changes the client depends on before (or with) the client.
 
 ## Building the client (this Windows PC)

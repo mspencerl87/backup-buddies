@@ -66,12 +66,18 @@
       <div id="client-update-notice" class="client-update-notice" style="display:none">
         <strong>A newer client is available</strong> (<span id="client-latest-version"></span>) for the device(s)
         marked above. Run this on each one, from inside its client folder (the one with <code>.env</code> in it):
-        <pre><code id="client-update-command">curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code></pre>
+        <pre><code id="client-update-command">docker compose pull &amp;&amp; docker compose up -d</code></pre>
         <button type="button" class="btn btn-secondary btn-sm" id="copy-update-command">Copy command</button>
-        <span class="muted">It updates in place, whichever way you set the client up: it pulls the latest image, or
-        rebuilds from source if you used the installer. Your <code>.env</code> (token and passphrase) and data
-        folders, including the backups you hold for your buddy, are kept. Don't delete the folder and reinstall
-        instead.</span>
+        <span class="muted">It pulls the latest image and restarts the client with it. Your <code>.env</code>
+        (token and passphrase) and data folders, including the backups you hold for your buddy, are kept. Don't
+        delete the folder and reinstall instead.</span>
+        <!-- Devices don't report how they were installed, so this can't pick per
+             device like the client's own dashboard does (dashboard.rs). The
+             image is the documented setup (setup.html); source builds get the
+             installer's --update, which rebuilds. -->
+        <p class="muted" style="margin:0.6rem 0 0">Built the client from source with the installer instead? Use
+        <code style="word-break:break-all">curl -fsSL https://app.filegarden.net/client/install.sh | bash -s -- --update</code>,
+        which rebuilds it.</p>
       </div>
       <div class="inline-form" style="margin-top:1rem">
         <input type="text" id="device-label" placeholder="e.g. Spencer's desktop">
