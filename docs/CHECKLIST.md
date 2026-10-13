@@ -16,6 +16,19 @@ Last reviewed: 2026-10-13.
       is ticked, and `POST /invites` stores none of them for a private
       invite.
 
+- [ ] **A buddy's old device identity leaves an orphaned folder forever.**
+      When a buddy's client gets a new node id (config folder lost, a
+      reinstall, or moving it to another machine with the same token, as
+      testb was on 2026-10-13), what the old id stored stays in
+      `<buddy-files>/<old node id>/`: it counts against your disk, never
+      expires, and shows as a nameless buddy card ("f779826288a4…",
+      "no cycle yet", "Their pledge to you: 628.2 MB / 0 B"), because the
+      dashboard lists every folder in buddy-files (`dashboard.rs`). Fix
+      options: expire a folder whose node id hasn't been one of your
+      buddies' devices for 30 days (like backup copies), or let the
+      new device of the same account adopt it, since the data is
+      encrypted to the account's key, not the device's.
+
 ## Before charging money
 
 Billing works for subscribing and cancelling (verified 2026-10-12, flat
