@@ -127,6 +127,17 @@ setups.
 
 Build when there's a reason to; roughly in order of value.
 
+- [ ] **Detect renames and moves (next, after the LAN drop test).** A
+      renamed or moved file is seen as a delete plus a new file, so it's
+      uploaded again in full (and billed over the relay), while the old
+      copy sits on the buddy as a 30-day backup copy. Seen 2026-10-13:
+      renaming four ISOs on testa re-sent ~15 GB. Reorganizing a photo
+      folder does the same. Plan: within one cycle, a new path whose
+      SHA-256 matches a path that just disappeared (`index.sqlite` has
+      both) is a rename; send the buddy a new protocol message (old
+      encrypted name → new) and let it rename the stored file, since the
+      ciphertext doesn't depend on the name. Bump the protocol version and
+      fall back to a normal upload for older buddies.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
