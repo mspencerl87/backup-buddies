@@ -202,10 +202,12 @@ Build when there's a reason to; roughly in order of value.
     format per pairing, not two side by side. Snapshots are kept **every
     one for 24 h, hourly for 2 days, daily for 30 days**, then pruned.
   - **Build order:**
-    - [ ] 1. Buddy side: protocol v5 repo messages (list, read part,
-      write, remove of opaque repo files) stored under
-      `<buddy-files>/<sender>/repo/`, counted against the pledge, with
-      the disk floor and tests.
+    - [x] 1. Buddy side (client 0.16.0): protocol v5 repo messages
+      (list, read part, write, remove of opaque repo files) stored under
+      `<buddy-files>/<sender>/.repo/`, each write checked against its
+      content-hash name, counted against the pledge, with the disk floor;
+      `repo.rs`, e2e test `e2e_repo_files`. Ships ahead of senders so
+      buddies are ready when senders start using it.
     - [ ] 2. Sender: a rustic backend over the iroh connection (with
       retries), the repo master key from our scrypt output, backups into
       the repo behind `CHUNKED_TRANSFERS=on`, our exclude rules, daily
