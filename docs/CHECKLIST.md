@@ -150,26 +150,52 @@ Build when there's a reason to; roughly in order of value.
       (restic/borg/duplicacy) splits files into content-defined chunks
       (`fastcdc`), encrypts each, and sends only chunks the buddy doesn't
       have, so renames, moves and edits cost only what changed, with dedup
-      across files and resumable restores. Plan:
-  - **Spike first** on a branch: `rustic_core` with the buddy as its
-    storage backend vs. our own `fastcdc` chunk store. Measure savings on
-    real files and how much of the hard parts below a library covers.
-  - **Coexist with today's format, never replace it.** Files already on
-    a buddy stay whole-file; only new or changed files go to the chunk
-    store; restore reads both. Old files must stay readable forever (like
-    old keys in `crypto.rs`).
-  - **Negotiate per buddy** by protocol version (as PutStream and
-    PutResumable were): older buddies keep getting whole files.
-  - **Hard parts:** pledge and disk accounting with shared chunks;
-    deleting a chunk only once no live file or kept version uses it (the
-    30-day copies); reconciliation, Browse files and "What your buddy
-    sees" assume one stored file per file.
-  - **Chunk ids are keyed hashes** (from the account key), never plain
-    content hashes, or a buddy could test whether you hold a known file.
-    Site copy on what buddies see changes too (chunking hides exact file
-    sizes).
-  - **Opt-in first** (e.g. `CHUNKED_TRANSFERS=on`) for a release or two,
-    restores included, then the default.
+      across files and resumable restores.
+  - [x] **Spike done (2026-10-13), `rustic_core` 0.13.0** (Apache/MIT, the
+    restic repository format) with a local backend, 1.9 GB of random data
+    (a 1 GB file plus 300 × 3 MB "photos"):
+
+    | Change | Stored by the next backup |
+    |---|---|
+    | first backup | 1.9 GB |
+    | renamed the 1 GB file, moved 300 photos | 0 |
+    | overwrote 1 MB mid-file | 1.1–5.7 MB |
+    | inserted 1 byte at the start | 0.7–4.4 MB |
+    | duplicated a photo | 0 |
+    | deleted the photos, forgot old snapshots, pruned | 1.9 → 1.03 GB |
+
+    Restore byte-identical. Peak memory on 2 CPUs: backup ~210–310 MB,
+    restore ~250 MB with our own loop (below); on 16 CPUs backup ~560 MB,
+    since rustic sizes its threads to the CPU count. Builds next to iroh,
+    age and tokio with no conflicts; needs Rust 1.91 (the image uses
+    `rust:bookworm`, current). A renamed file is re-read (25 s for 1.9 GB on
+    2 CPUs) but not re-sent.
+  - **Why `rustic_core` over our own `fastcdc` store:** it already does
+    packing (chunks go into ~32 MB packs, not one file each, which matters
+    on SMB/NFS), the index, snapshots, forget/prune with safe garbage
+    collection, and change detection. Our own store would be
+    reimplementing restic. Its storage interface is six calls (list, read,
+    read part, create, write, remove of opaque files), so a buddy can be
+    the backend through a few new protocol messages.
+  - **Don't use rustic's own restore:** it reads on 20 threads with no
+    backpressure (1.9 GB peak restoring 1.9 GB) and `.unwrap()`s every
+    read, so one failed network read would crash the client. Restore file
+    by file with `open_file` / `read_file_at` instead (bounded, our own
+    errors and progress).
+  - **Privacy gets better:** the buddy stores only encrypted packs, so it
+    no longer sees file counts, sizes, folder depth or how many entries
+    each folder has (today's 0.14 limits). Site copy and the status page
+    change with it.
+  - **Keys:** the repo's master key can be built from our own scrypt
+    output (a new labelled derivation, like the name key), so the
+    passphrase alone still restores everything; no restic key file to
+    lose.
+  - **Pledge accounting gets simpler:** count the whole repo's size per
+    sender (snapshots and old versions included); prune is what frees
+    space.
+  - **Negotiate per buddy** by protocol version: older buddies keep
+    getting whole files. **Opt-in first** (e.g. `CHUNKED_TRANSFERS=on`)
+    for a release or two, restores included, then the default.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
