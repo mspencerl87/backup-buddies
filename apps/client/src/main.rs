@@ -537,12 +537,19 @@ async fn main() -> Result<()> {
     // entirely rather than layering on top of it.
     // Same log to stdout as before, plus a colourless copy of the recent
     // lines in memory for the dashboard's Raw log tab (activity.rs).
+    // rustic_core (chunked backups) logs "using cache at …" and the like at
+    // info on every snapshot; only its warnings matter here, even under a
+    // RUST_LOG set for debugging something else (seen on a test device).
+    // A RUST_LOG that names rustic itself wins.
     {
         use tracing_subscriber::prelude::*;
+        let mut filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,swarm_discovery=warn"));
+        if !std::env::var("RUST_LOG").is_ok_and(|v| v.contains("rustic")) {
+            filter = filter.add_directive("rustic_core=warn".parse().expect("valid directive"));
+        }
         tracing_subscriber::registry()
-            .with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
-                |_| tracing_subscriber::EnvFilter::new("info,swarm_discovery=warn"),
-            ))
+            .with(filter)
             .with(tracing_subscriber::fmt::layer())
             .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(activity::RawLogWriter))
             .init();

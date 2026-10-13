@@ -224,9 +224,11 @@ Build when there's a reason to; roughly in order of value.
       a 32 MB file and moving 20 photos sent ~2 KB; a 1-byte edit in it
       0.6–5.2 MB (one chunk, 0.5–8 MB, varies with the repo's random
       chunker polynomial).
-    - [ ] Live on testa/testb with `CHUNKED_TRANSFERS=on`: first backup,
-      rename the ISOs (should send next to nothing), edit one, check the
-      bandwidth and the buddy's `.repo/` size.
+    - [x] Live on testa → testb, 0.17.0 with `CHUNKED_TRANSFERS=on`
+      (2026-10-13): repository created, new files sent in full (52 MB,
+      394 MB), a rename sent 2 KB, a copy of an existing file 3.7 KB,
+      idle cycles quiet, no warnings; `.repo` 427 MB = the new files, so
+      the copy wasn't stored twice. Not yet: a delete.
     - Follow-ups found in phase 2: rustic sizes its threads to the CPU
       count (~560 MB peak on 16 CPUs vs ~250 MB on 2), so cap it before
       it's the default; reconciliation still compares only whole files
