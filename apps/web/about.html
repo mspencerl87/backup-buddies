@@ -205,13 +205,22 @@
     <section class="about-section">
       <h2>What your buddy can see</h2>
       <p class="muted">
-        Your buddy's device stores your files encrypted, so it can never read
-        what's inside them. Since client 0.14.0 the names of your files and
-        folders are encrypted too. What it can still see is each file's
-        size, how many files you have, how your folders nest and how many
-        entries each holds, and when things change. Like rclone, a name
-        that appears in two folders is encrypted the same way in both, so a
-        buddy could tell the two match without knowing what the name is.
+        Your buddy's device stores your backup encrypted, so it can never
+        read what's inside. Since client 0.19.0, with a buddy on 0.16.0 or
+        later, your files are split into chunks, encrypted and packed
+        together into pack files, so your buddy sees only how many packs
+        there are, how big each one is (so roughly how big your backup is)
+        and when they change. It can't see how many files you have, their
+        names or sizes, or your folders.
+      </p>
+      <p class="muted">
+        With a buddy on an older client, each file is stored on its own. Its
+        name and its folders' names are encrypted (since client 0.14.0), but
+        your buddy can see each file's size, how many files you have, how
+        your folders nest and how many entries each holds, and when things
+        change. Like rclone, a name that appears in two folders is encrypted
+        the same way in both, so a buddy could tell the two match without
+        knowing what the name is.
       </p>
     </section>
 
@@ -221,8 +230,9 @@
       <ul class="tech-list">
         <li><strong>Transport:</strong> <a href="https://github.com/n0-computer/iroh" target="_blank" rel="noopener">Iroh</a>, a QUIC-based peer-to-peer networking library with built-in NAT hole-punching and relay fallback.</li>
         <li><strong>Encryption:</strong> <a href="https://age-encryption.org" target="_blank" rel="noopener">age</a> (X25519), with the key derived from your passphrase via scrypt, salted with your account ID. The same passphrase gives a different key on every account, so nobody holding encrypted files can test one list of guessed passphrases against every user at once. Performed entirely on your device before anything is sent; your buddy and our relay only ever handle encrypted file contents.</li>
-        <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file, verified on arrival. Every ~10 minutes your device also checks what your buddy actually holds against what it expects, and re-sends anything missing.</li>
-        <li><strong>File names:</strong> each file and folder name is encrypted on its own with AES-SIV (deterministic, authenticated), padded to 16-byte steps and base32-encoded, in the style of rclone's crypt remote, with a key derived from the same passphrase. Your buddy sees encrypted names, sizes and folder layout, never real names or contents.</li>
+        <li><strong>Integrity:</strong> a SHA-256 hash of each encrypted file or pack, verified on arrival. For a buddy on an older client, your device also checks every ~10 minutes what your buddy actually holds against what it expects, and re-sends anything missing.</li>
+        <li><strong>Chunked backups</strong> (client 0.19.0+, buddy on 0.16.0+): a <a href="https://restic.readthedocs.io/en/stable/100_references.html" target="_blank" rel="noopener">restic-format</a> repository built with <a href="https://github.com/rustic-rs/rustic_core" target="_blank" rel="noopener">rustic_core</a>. Files are split into content-defined chunks, deduplicated, encrypted (AES-256-CTR with Poly1305-AES) and packed into ~32&nbsp;MB pack files, with the key derived from the same passphrase. A renamed or moved file sends next to nothing, and an edit only the chunks it touched. Each pack is named by its SHA-256, which your buddy checks on arrival. Snapshots are kept every one for a day, hourly for two days and daily for 30 days.</li>
+        <li><strong>File names</strong> (with a buddy on an older client): each file and folder name is encrypted on its own with AES-SIV (deterministic, authenticated), padded to 16-byte steps and base32-encoded, in the style of rclone's crypt remote, with a key derived from the same passphrase. Your buddy sees encrypted names, sizes and folder layout, never real names or contents.</li>
         <li><strong>Relay:</strong> a self-hosted iroh-relay instance we operate, used only when a direct connection can't be established. It's a blind forwarder, not a storage point.</li>
         <li><strong>Source code:</strong> all of it is open source, so you can read exactly what it does with your files: the program that runs on your machine (scanning, encryption, transfers) under GPL-3.0, and the server, site and deploy files under AGPL-3.0: <a href="https://github.com/mspencerl87/backup-buddies" target="_blank" rel="noopener">github.com/mspencerl87/backup-buddies</a>.</li>
         <li><strong>Server:</strong> a small Node/Express API and Postgres database, holding only accounts, device identities (public node IDs, not keys), buddy pairings, and invite codes.</li>

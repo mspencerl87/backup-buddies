@@ -93,10 +93,18 @@ in a Rust string in `dashboard.rs`, so the compiler doesn't check it either.
 - Encryption key = scrypt(passphrase, `"backup-buddies/file-key/v2/" +
   account_id`) since client 0.7.0. Changing the KDF or salt orphans every
   backup unless old keys stay in the decrypt list (see `crypto.rs`).
-- Since client 0.14.0, buddies can't see file or folder names (each
-  component is encrypted, `names.rs`), but they still see sizes, folder
-  depth, how many entries each folder has, file counts, and when things
-  change. Don't claim more than that in site copy.
+- What a buddy can see depends on the backup kind. Chunked (client
+  0.19.0+ with a buddy on 0.16.0+, `chunked.rs`): only encrypted pack
+  files, how many, their sizes and when they change. Whole files (an
+  older buddy): since 0.14.0 no file or folder names (`names.rs`), but
+  sizes, folder depth, how many entries each folder has, file counts, and
+  when things change. Site copy has to say which is which; don't claim
+  more than that.
+- The chunked repository's master key is a third labelled derivation of
+  the same scrypt output (`crypto.rs`, `REPO_KEY_LABEL`); changing it
+  orphans every chunked backup. rustic_core is pinned exactly (0.x): its
+  own restore isn't used (unbounded memory, panics on a failed read), and
+  its backend calls are bridged onto iroh in `repo_backend.rs`.
 - The name key is derived from the same scrypt output as the file key
   (`crypto.rs`). Changing the name key label, the KDF/salt, the padding,
   the encoding or the cipher orphans every remote name, just like changing

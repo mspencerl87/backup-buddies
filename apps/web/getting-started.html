@@ -151,11 +151,13 @@
           copied, so the copy your buddy holds may not open or boot when you restore it. Back up the VM's or
           database's own export or snapshot instead.</li>
         <li><strong>Big files that change all the time</strong> (mail stores like Outlook PST files, photo
-          catalogs, encrypted containers). They work, but any change re-sends the <em>whole file</em>: a
-          20&nbsp;GB file that changes daily is around 600&nbsp;GB a month over your and your buddy's
-          internet connections. If that traffic goes through our relay, it uses up the free monthly relay
-          allowance (then syncing pauses until the 1st) or, on a paid plan, is billed per GB. Fine if they
-          change rarely.</li>
+          catalogs, encrypted containers). Since client 0.19.0 only the parts of a file that changed are
+          sent, so a small edit to a big file costs megabytes, not the whole file. But a file that's
+          rewritten a lot every day still adds up, and with a buddy on a client before 0.16.0 any change
+          re-sends the <em>whole file</em>: a 20&nbsp;GB file that changes daily is around 600&nbsp;GB a
+          month over your and your buddy's internet connections. If that traffic goes through our relay, it
+          uses up the free monthly relay allowance (then syncing pauses until the 1st) or, on a paid plan,
+          is billed per GB.</li>
         <li><strong>Things you can get back anyway:</strong> caches, temp files, downloads, games, operating
           system and program folders. They just use up the space your buddy pledged.</li>
         <li><strong>Keeping your own devices in sync.</strong> This is a one-way backup to someone else's
@@ -169,8 +171,9 @@
         The client skips the worst of these by default (Outlook PST/OST, live database files, VM disks, temp
         files), and you can exclude anything else with Syncthing-style patterns in <code>excludes.txt</code> in
         its config folder; the client's README has the details. Your buddy can't see your files' contents or
-        (since client 0.14.0) their names, but does see their <em>sizes</em> and how many files and folders
-        there are.
+        names. Since client 0.19.0 (with a buddy on 0.16.0 or later) it sees only encrypted pack files, not
+        how many files you have or their sizes; with a buddy on an older client it does see each file's
+        <em>size</em> and how many files and folders there are.
       </p>
     </section>
   </main>

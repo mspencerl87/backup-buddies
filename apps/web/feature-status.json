@@ -7,11 +7,15 @@
     },
     {
       "title": "Encrypted file and folder names",
-      "description": "Since client 0.14.0, your buddy can't see what your files or folders are called: every name is encrypted on your device, the way rclone's crypt does it, and your passphrase brings the names back on restore. Updating re-sends what's already backed up once, under the new names. Names over 127 bytes can't be backed up and are flagged on your dashboard. What your buddy can still see: file sizes, how many files you have, how your folders nest and how many entries each holds, and when things change."
+      "description": "Since client 0.14.0, your buddy can't see what your files or folders are called: every name is encrypted on your device, the way rclone's crypt does it, and your passphrase brings the names back on restore. Updating re-sends what's already backed up once, under the new names. Names over 127 bytes can't be backed up and are flagged on your dashboard. With these whole-file backups (a buddy on a client before 0.16.0), your buddy can still see file sizes, how many files you have, how your folders nest and how many entries each holds, and when things change. Chunked backups (below) hide all of that."
+    },
+    {
+      "title": "Chunked backups: renames and edits send only what changed",
+      "description": "Since client 0.19.0, with a buddy on 0.16.0 or later, your backup is split into chunks, deduplicated and encrypted into pack files (the restic format). Renaming or moving a file sends next to nothing, a small edit to a big file sends only the chunks it touched, and identical content is stored once. Every backup with a change is a snapshot: kept every one for a day, hourly for two days and daily for 30 days, so History offers far more restore points. Your buddy sees only the encrypted packs, not how many files you have, their names or sizes, or your folders. Switching re-uploads your backup once; the old whole-file copies stay on your buddy for 30 days. CHUNKED_TRANSFERS=off goes back to whole files."
     },
     {
       "title": "See what your buddy sees",
-      "description": "Since client 0.15.0, Browse files has a “What your buddy sees” view: your files listed the way they sit on your buddy's disk, with encrypted names and stored sizes, and the first bytes of any one exactly as stored (an age header, then ciphertext). You can check for yourself that nothing on their side is readable, instead of taking our word for it."
+      "description": "Since client 0.15.0, Browse files has a “What your buddy sees” view: your files listed the way they sit on your buddy's disk, with encrypted names and stored sizes, and the first bytes of any one exactly as stored (an age header, then ciphertext). You can check for yourself that nothing on their side is readable, instead of taking our word for it. With a chunked backup it shows the encrypted pack files instead, which is all your buddy's disk holds."
     },
     {
       "title": "Direct peer-to-peer transfer, with automatic relay fallback",
@@ -31,7 +35,7 @@
     },
     {
       "title": "Drift detection (reconciliation)",
-      "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects, catching anything lost or changed outside the normal backup flow, and automatically re-sends anything missing."
+      "description": "Roughly every 10 minutes, your device double-checks that what your buddy actually has on disk still matches what it expects, catching anything lost or changed outside the normal backup flow, and automatically re-sends anything missing. (For whole-file backups; a chunked backup's packs are checked by their hash as each one arrives.)"
     },
     {
       "title": "Unreachable-buddy detection",
@@ -75,7 +79,7 @@
     },
     {
       "title": "Warning for big files that keep re-sending",
-      "description": "Any change re-sends the whole file, so a big file that changes often adds up fast. Since client 0.12, the local dashboard lists files re-sent 3 or more times (1 GB or more) in the past week, with a one-click Exclude."
+      "description": "With whole-file backups (a buddy on a client before 0.16.0), any change re-sends the whole file, so a big file that changes often adds up fast. Since client 0.12, the local dashboard lists files re-sent 3 or more times (1 GB or more) in the past week, with a one-click Exclude. Chunked backups send only what changed."
     }
   ],
   "limitations": [

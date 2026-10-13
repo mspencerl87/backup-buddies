@@ -226,7 +226,7 @@ cd backup-buddies-client</code></pre>
           <h3>Known limits, for now</h3>
           <ul>
             <li>Checks for changes on a schedule (every 30 seconds by default; set <code>SCAN_INTERVAL_SECS</code> in <code>.env</code> to change it) rather than instantly</li>
-            <li>Made for an off-site copy of files that don't change constantly, not running VM disks, live databases or huge files that change every day (each change re-sends the whole file). See <a href="/getting-started.html#what-to-back-up">what to back up (and what not to)</a></li>
+            <li>Made for an off-site copy of files that don't change constantly, not running VM disks, live databases or huge files that change every day (only changed parts are sent since client 0.19.0, but constant changes still add up). See <a href="/getting-started.html#what-to-back-up">what to back up (and what not to)</a></li>
             <li>The local status dashboard is plain HTTP (no HTTPS). Keep it on your own network, or reach it over a VPN or SSH tunnel</li>
           </ul>
         </div>

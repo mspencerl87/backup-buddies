@@ -252,9 +252,18 @@ Build when there's a reason to; roughly in order of value.
       and it restored as `.v1.bak` (50 MB, direct, 25.5 MB/s), sha256
       identical to the file. An edited text file's History offered its
       earlier content (0 B before the edit), which restored.
-    - [ ] 4. Migration (re-upload, then retire the whole-file copies),
-      site copy and status page (what buddies can see), docs, version
-      bump, live test on testa/testb.
+    - [x] 4. Default on in client 0.19.0 (`CHUNKED_TRANSFERS=off` opts
+      out; Browse files follows the setting). After the first snapshot of
+      a fully readable folder, the whole-file copies sent before are
+      deleted on the buddy (kept there 30 days, logged in Activity;
+      `retire_whole_files`, in the e2e test). Backups run on at most 4
+      CPUs (`CpuCap`, unit-tested). Site copy (About, Getting started,
+      Setup, Privacy, which still said buddies see names) and the status
+      page say what a buddy sees for each kind.
+    - [ ] Live on 0.19.0: testa's old whole-file copies on testb retired
+      (Activity line; `ls` shows them under `.versions/`), a big backup's
+      memory with the CPU cap, testb (no setting) backing up to testa in
+      chunks.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
