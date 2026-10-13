@@ -44,19 +44,30 @@ $3/month plan). These paths haven't run against real Stripe events yet.
 
 ## Tests to run live
 
-### Networking (needs two machines on separate networks)
+### Networking
 
-Same-host testa/testb can't answer these. One setup covers all of them,
-e.g. one client on home Wi-Fi and one on a phone hotspot.
+Same-host testa/testb can't answer these, and they need two different
+setups.
 
-- [ ] Direct connection with `SYNC_PORT` (11235/udp) forwarded.
-- [ ] Without the forward: relay-only, works as before.
-- [ ] LAN discovery (mDNS) finds nothing across networks and changes
-      nothing there.
+**Two machines on the same LAN:**
+
 - [ ] Do long transfers still drop? Answers the open question under
-      "Known issues".
+      "Known issues". Send something multi-GB with the debug logging on.
+      If both run Docker, each still has `172.17.0.1` and the same default
+      port, so the docker0 theory can still bite: no drops means it was a
+      same-host problem; drops mean filtering bridge addresses is needed.
 - [ ] A container restart doesn't leave a stale mDNS record (the old one
       expires on the other side, `DiscoveryEvent::Expired`).
+
+**Two networks, one with a router you control** (e.g. home with
+11235/udp forwarded to one client, the other on a phone hotspot):
+
+- [ ] Direct connection with `SYNC_PORT` forwarded. testc (2026-10-03)
+      couldn't test this: no access to that network's firewall.
+- [ ] LAN discovery (mDNS) finds nothing across networks and changes
+      nothing there.
+- [x] Without a forward: relay-only, works as before. Confirmed with testc
+      on a separate network (2026-10-03).
 
 ### Client (testa/testb)
 
