@@ -69,7 +69,7 @@ target dir on the Linux side (much faster than /mnt/c):
 wsl -e bash -lc 'cd /mnt/c/Users/sleblanc/Desktop/backup-buddies/apps/client && export CARGO_TARGET_DIR=~/bb-target && cargo test --locked && cargo clippy --locked --all-targets'
 ```
 
-Expect one existing clippy warning in `update_check.rs`. Run git from
+Clippy runs clean (since client 0.20.0); keep it that way. Run git from
 Windows, not WSL (line endings make WSL's git see every file as changed).
 
 ## Checking API and web changes (this Windows PC)

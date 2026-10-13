@@ -16,7 +16,13 @@ Last reviewed: 2026-10-13.
       is ticked, and `POST /invites` stores none of them for a private
       invite.
 
-- [ ] **A buddy's old device identity leaves an orphaned folder forever.**
+- [x] **A buddy's old device identity leaves an orphaned folder forever.**
+      Fixed in client 0.20.0: once a day, against a successful buddy
+      poll, a folder whose node id isn't any buddy's device is marked
+      (`DATA_DIR/orphans.json`), removed 30 days later unless the device
+      comes back, and its pledge usage freed; the card says when
+      (`receive::sweep_orphans`, unit-tested). Covers ended pairings too.
+      Not done: adopting the old folder for the account's new device.
       When a buddy's client gets a new node id (config folder lost, a
       reinstall, or moving it to another machine with the same token, as
       testb was on 2026-10-13), what the old id stored stays in
@@ -229,11 +235,12 @@ Build when there's a reason to; roughly in order of value.
       394 MB), a rename sent 2 KB, a copy of an existing file 3.7 KB,
       idle cycles quiet, no warnings; `.repo` 427 MB = the new files, so
       the copy wasn't stored twice. Not yet: a delete.
-    - Follow-ups found in phase 2: rustic sizes its threads to the CPU
-      count (~560 MB peak on 16 CPUs vs ~250 MB on 2), so cap it before
-      it's the default; reconciliation still compares only whole files
-      ("0 files match" for a chunked-only buddy), phase 3; the Activity
-      line has no per-file list for chunked cycles.
+    - Follow-ups found in phase 2, all done: rustic's threads capped
+      at 4 CPUs (0.19.0); reconciliation skipped for chunked buddies
+      (0.18.0); Activity lists a chunked cycle's sent and removed files
+      (0.20.0), from comparing the new snapshot's tree with its parent's
+      (with a freshly loaded index: the one loaded before the backup
+      doesn't know the snapshot's own trees).
     - [x] 3. Browse files, restores and History (client 0.18.0,
       `chunked_restore.rs`, in `e2e_chunked_backup`): the latest snapshot
       is the file list; deleted files (and renamed files' old names) come
