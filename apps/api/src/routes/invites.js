@@ -75,6 +75,11 @@ function generateInviteCode() {
 invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, res) => {
   const { pledged_bytes, is_public, note, country, speed_tier, always_on, relay_only } =
     req.body ?? {};
+  // The note and listing criteria only mean anything on a public listing;
+  // a private invite stores none of them, whatever the form sent (the
+  // dashboard used to send values left over from an unticked "List this
+  // publicly").
+  const listed = Boolean(is_public);
 
   const pledgedBytes = Number(pledged_bytes);
   if (
@@ -139,12 +144,12 @@ invitesRouter.post('/invites', requireAuth, requireEmailVerified, async (req, re
       code,
       req.account.id,
       pledgedBytes,
-      Boolean(is_public),
-      note || null,
-      country || null,
-      speed_tier || null,
-      Boolean(always_on),
-      Boolean(relay_only),
+      listed,
+      (listed && note) || null,
+      (listed && country) || null,
+      (listed && speed_tier) || null,
+      listed && Boolean(always_on),
+      listed && Boolean(relay_only),
     ],
   );
 

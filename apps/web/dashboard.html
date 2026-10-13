@@ -121,8 +121,8 @@
         <div id="invite-criteria-rows" style="display:none">
           <p class="muted" style="margin-bottom:0.5rem">
             Optional, and shown on your listing so people can judge fit for
-            themselves. None of this is required to match; it's just
-            displayed, same as the note below.
+            themselves. People browsing can narrow listings by country and
+            upload speed; the rest is just displayed.
           </p>
           <label for="invite-note">Note (optional)</label>
           <input type="text" id="invite-note" maxlength="200" placeholder="e.g. Fast connection, available evenings">
@@ -659,14 +659,19 @@
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
+          // The listing fields sit in a section that's only shown while
+          // "List this publicly" is ticked, but they keep their values when
+          // it's unticked again, so a private invite used to carry them too.
           body: JSON.stringify({
             pledged_bytes: pledgedBytes,
             is_public: isPublic,
-            note: note || undefined,
-            country: country || undefined,
-            speed_tier: speedTier || undefined,
-            always_on: alwaysOn,
-            relay_only: relayOnly,
+            ...(isPublic && {
+              note: note || undefined,
+              country: country || undefined,
+              speed_tier: speedTier || undefined,
+              always_on: alwaysOn,
+              relay_only: relayOnly,
+            }),
           }),
         });
         const data = await parseJsonResponse(res);

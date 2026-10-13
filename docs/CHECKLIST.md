@@ -11,12 +11,10 @@ Last reviewed: 2026-10-13.
 
 ## Bugs
 
-- [ ] **Private invites still send the listing fields.** The dashboard's
-      create-invite form posts country, speed, "usually online" and
-      relay-only whether or not "List this publicly" is ticked
-      (`dashboard.html`, the `POST /invites` call), so a private invite can
-      carry values left over from an earlier public one. Harmless (only
-      public listings show them), but they should be sent only when public.
+- [x] **Private invites still sent the listing fields** (fixed
+      2026-10-13): the form now sends them only when "List this publicly"
+      is ticked, and `POST /invites` stores none of them for a private
+      invite.
 
 ## Before charging money
 
