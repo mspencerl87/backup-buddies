@@ -85,9 +85,9 @@
       "description": "Whether a direct connection is possible depends on your router/network's NAT behavior. Many home networks and local networks work great. Some networks (strict corporate firewalls especially) block the hole-punching direct connections need entirely, forwarded port or not. When that happens, your backups still complete normally through our relay; this is expected, graceful behavior, not a failure."
     },
     {
-      "title": "Long transfers can occasionally drop on a local network",
+      "title": "Long transfers can drop with two clients on one machine",
       "status": "limitation",
-      "description": "Between two buddies on the same local network (or two clients on the same machine), a long transfer can sometimes lose its connection partway through, usually minutes in. Nothing is lost: files of 256 MB or more carry on from where they stopped on the next check, about 30 seconds later, and smaller files are simply sent again. It mostly costs a little time. We're still tracking down the cause."
+      "description": "If you run two clients on the same machine and back them up to each other, a long transfer can sometimes lose its connection partway through, usually minutes in. Between separate machines, on the same local network or not, we haven't seen it: about 21 GB between two machines on one network ran clean. Nothing is lost when it happens: files of 256 MB or more carry on from where they stopped on the next check, about 30 seconds later, and smaller files are simply sent again."
     },
     {
       "title": "Every buddy gets the same folder",

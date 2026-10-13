@@ -51,11 +51,12 @@ setups.
 
 **Two machines on the same LAN:**
 
-- [ ] Do long transfers still drop? Answers the open question under
-      "Known issues". Send something multi-GB with the debug logging on.
-      If both run Docker, each still has `172.17.0.1` and the same default
-      port, so the docker0 theory can still bite: no drops means it was a
-      same-host problem; drops mean filtering bridge addresses is needed.
+- [x] Do long transfers still drop? **No** (2026-10-13): testa on
+      `backupbuddy`, testb moved to a clone (`backupbuddy2`), both on the
+      default port 11235 with debug logging. Three runs, ~21 GB (2.8 GB in
+      53 s, 7.3 GB in 139 s, 8.1 GB in 155 s), all direct over the LAN; no
+      `LastOpenPath`, no abandoned paths, no path through `172.17.0.1`,
+      reconcile matched afterwards. See "Known issues".
 - [ ] A container restart doesn't leave a stale mDNS record (the old one
       expires on the other side, `DiscoveryEvent::Expired`).
 
@@ -104,40 +105,58 @@ setups.
 
 ## Known issues
 
-- [ ] **Long transfers drop on a local network.** On the status page as a
-      limitation. Seen twice (2026-10-06/07) with testa and testb on the
-      same host: minutes into a multi-GB upload, noq's path idle timer
-      closes the only IP path (`failed closing path err=LastOpenPath`,
-      from `PathTimer::PathIdle`) and the connection times out ~11 s
-      later, both times just after testb's mDNS record was re-sighted.
-      With debug logging (`RUST_LOG=…,iroh::_events=debug,iroh::socket::remote_map=debug`)
-      the selected path was the Docker bridge (`172.17.0.1→172.17.0.1`),
-      with IP paths opening and closing every few seconds and a relay path
-      present. Likely cause: on 0.0.0.0, iroh offers every interface
-      address, `docker0` included even when down, and every Docker host
-      has 172.17.0.1 with the same default port, so a buddy's
-      172.17.0.1:11235 points back at your own client. Binding to one
-      address would fix that but break direct connections when the address
-      changes; filtering bridge addresses out of what's offered is the
-      likely fix if separate machines (above) don't drop. Cost today: one
-      cycle plus a resume (0.8.0), and it's no longer booked as relay
-      (0.8.1).
+- [ ] **Long transfers drop between two clients on the same machine.**
+      Not seen between separate machines: 2026-10-13, ~21 GB over three
+      runs between two VMs on one LAN, both on the default port, ran clean
+      (see "Tests to run live"). Seen twice (2026-10-06/07) with testa and
+      testb on one host: minutes into a multi-GB upload, noq's path idle
+      timer closes the only IP path (`failed closing path
+      err=LastOpenPath`, from `PathTimer::PathIdle`) and the connection
+      times out ~11 s later, both times just after testb's mDNS record was
+      re-sighted; the selected path was the Docker bridge
+      (`172.17.0.1→172.17.0.1`), with IP paths opening and closing every
+      few seconds. Every client still offers its `docker0` address as a
+      candidate (seen in the 2026-10-13 logs too), but between separate
+      machines that path was never tried. Running two clients on one host
+      is a test setup, not something users do, so this stays low priority;
+      filtering bridge addresses out of the candidates is the fix if it
+      ever shows up elsewhere. Cost when it happens: one cycle plus a
+      resume (0.8.0), not booked as relay (0.8.1).
 
 ## Backlog
 
 Build when there's a reason to; roughly in order of value.
 
-- [ ] **Detect renames and moves (next, after the LAN drop test).** A
-      renamed or moved file is seen as a delete plus a new file, so it's
-      uploaded again in full (and billed over the relay), while the old
-      copy sits on the buddy as a 30-day backup copy. Seen 2026-10-13:
-      renaming four ISOs on testa re-sent ~15 GB. Reorganizing a photo
-      folder does the same. Plan: within one cycle, a new path whose
-      SHA-256 matches a path that just disappeared (`index.sqlite` has
-      both) is a rename; send the buddy a new protocol message (old
-      encrypted name → new) and let it rename the stored file, since the
-      ciphertext doesn't depend on the name. Bump the protocol version and
-      fall back to a normal upload for older buddies.
+- [ ] **Send only changed parts of files (chunked transfers), next.**
+      Decided 2026-10-13 to build it (it was parked on 2026-10-10). Any
+      change re-sends the whole file (a 20 GB VM image with one changed
+      block costs 20 GB, billed over the relay), and so does a rename or
+      move: seen 2026-10-13, renaming four ISOs on testa re-sent ~15 GB,
+      and reorganizing a photo folder does the same. Rsync itself can't
+      work (the buddy only holds ciphertext); the encrypted equivalent
+      (restic/borg/duplicacy) splits files into content-defined chunks
+      (`fastcdc`), encrypts each, and sends only chunks the buddy doesn't
+      have, so renames, moves and edits cost only what changed, with dedup
+      across files and resumable restores. Plan:
+  - **Spike first** on a branch: `rustic_core` with the buddy as its
+    storage backend vs. our own `fastcdc` chunk store. Measure savings on
+    real files and how much of the hard parts below a library covers.
+  - **Coexist with today's format, never replace it.** Files already on
+    a buddy stay whole-file; only new or changed files go to the chunk
+    store; restore reads both. Old files must stay readable forever (like
+    old keys in `crypto.rs`).
+  - **Negotiate per buddy** by protocol version (as PutStream and
+    PutResumable were): older buddies keep getting whole files.
+  - **Hard parts:** pledge and disk accounting with shared chunks;
+    deleting a chunk only once no live file or kept version uses it (the
+    30-day copies); reconciliation, Browse files and "What your buddy
+    sees" assume one stored file per file.
+  - **Chunk ids are keyed hashes** (from the account key), never plain
+    content hashes, or a buddy could test whether you hold a known file.
+    Site copy on what buddies see changes too (chunking hides exact file
+    sizes).
+  - **Opt-in first** (e.g. `CHUNKED_TRANSFERS=on`) for a release or two,
+    restores included, then the default.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
@@ -149,7 +168,8 @@ Build when there's a reason to; roughly in order of value.
       item from the 2026-10-12 security review. Every page's inline
       `<script>` has to move into a file first.
 - [ ] **Restores resume.** Uploads of files ≥ 256 MB resume since 0.8.0;
-      an interrupted restore still starts over.
+      an interrupted restore still starts over. Chunked transfers (above)
+      would cover this.
 - [ ] **Restore progress outside the modal.** Closing the restore modal
       doesn't stop the restore, but the progress is only visible there
       until "Files from <buddy>" is reopened. A small indicator on the
@@ -166,21 +186,6 @@ Build when there's a reason to; roughly in order of value.
       `SYNC_PORT` is reachable from outside. Needs a design first: a buddy
       dial-back message (new in `protocol.rs`, proves it from one network
       only) or a probe on the relay.
-- [ ] **Chunked, rsync-like transfers. Only if usage shows a need**
-      (decided 2026-10-10). Any change re-sends the whole file: a 20 GB VM
-      image with one changed block costs 20 GB, billed when it goes over
-      the relay. Typical off-site backup files (photos, documents,
-      exports) are written once, and live VM disks and databases shouldn't
-      be backed up this way anyway. Signal to watch: a few accounts making
-      up most of the monthly relay bytes in admin stats, or users asking.
-      Rsync itself can't work (the buddy only holds ciphertext);
-      the encrypted equivalent (restic/borg/duplicacy) splits files into
-      content-defined chunks (`fastcdc`), encrypts each, and sends only new
-      ones, with dedup and resumable restores for free. A new storage
-      format on the buddy side, so restore, Browse files, versions,
-      reconciliation and pledge accounting all change. Start with a
-      `rustic_core` spike on a branch, with the buddy as its storage
-      backend.
 - [ ] **Helpdesk inbox** if support volume grows: point `SUPPORT_EMAIL` at
       one (e.g. FreeScout or Zammad). No code change; the email already
       carries the account details.
