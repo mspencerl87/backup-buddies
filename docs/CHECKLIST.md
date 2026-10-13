@@ -85,7 +85,7 @@ setups.
 
 ### Client (testa/testb)
 
-- [ ] 0.16.0 smoke test (nothing should look different): both start and
+- [x] 0.16.0 smoke test (nothing should look different): both start and
       show "Up to date"; a new small file backs up and shows in Browse
       files; "Their pledge to you" unchanged after the restart. Repo
       storage itself is covered by `e2e_repo_files` until senders use it.
@@ -212,10 +212,26 @@ Build when there's a reason to; roughly in order of value.
       content-hash name, counted against the pledge, with the disk floor;
       `repo.rs`, e2e test `e2e_repo_files`. Ships ahead of senders so
       buddies are ready when senders start using it.
-    - [ ] 2. Sender: a rustic backend over the iroh connection (with
-      retries), the repo master key from our scrypt output, backups into
-      the repo behind `CHUNKED_TRANSFERS=on`, our exclude rules, daily
-      forget + prune.
+    - [x] 2. Sender (2026-10-13, `chunked.rs`, `repo_backend.rs`,
+      e2e test `e2e_chunked_backup`): rustic backend over the iroh
+      connection (reconnects on a drop, never retries a refusal, fails
+      fast once the cycle is over, since rustic can return an error while
+      its packer threads are still writing), master key from our scrypt
+      output (no key file), backups behind `CHUNKED_TRANSFERS=on`, our own
+      walker so the exclude rules and folder skipping work as now, idle
+      cycles by a scan fingerprint, daily forget (unit-tested policy) +
+      prune, whole files for buddies before 0.16.0. Test numbers: renaming
+      a 32 MB file and moving 20 photos sent ~2 KB; a 1-byte edit in it
+      0.6–5.2 MB (one chunk, 0.5–8 MB, varies with the repo's random
+      chunker polynomial).
+    - [ ] Live on testa/testb with `CHUNKED_TRANSFERS=on`: first backup,
+      rename the ISOs (should send next to nothing), edit one, check the
+      bandwidth and the buddy's `.repo/` size.
+    - Follow-ups found in phase 2: rustic sizes its threads to the CPU
+      count (~560 MB peak on 16 CPUs vs ~250 MB on 2), so cap it before
+      it's the default; reconciliation still compares only whole files
+      ("0 files match" for a chunked-only buddy), phase 3; the Activity
+      line has no per-file list for chunked cycles.
     - [ ] 3. Restore, Browse files and History from snapshots, with our
       own bounded restore loop and progress.
     - [ ] 4. Migration (re-upload, then retire the whole-file copies),
