@@ -91,6 +91,12 @@ setups.
 
 ### Client (testa/testb)
 
+- [ ] 0.20.0: testa's Activity shows "Moved to a chunked backup: N
+      files sent the old way are kept as backup copies for 30 days", and
+      a chunked backup line lists its files when clicked.
+- [ ] 0.20.0: within a day, testa's card for the old testb identity
+      (`f779826288a4…`) says "Not one of your buddies' devices any
+      more… removed on" a date 30 days out (`DATA_DIR/orphans.json`).
 - [x] 0.16.0 smoke test (nothing should look different): both start and
       show "Up to date"; a new small file backs up and shows in Browse
       files; "Their pledge to you" unchanged after the restart. Repo
