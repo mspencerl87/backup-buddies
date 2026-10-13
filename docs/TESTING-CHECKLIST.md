@@ -1,8 +1,9 @@
-# Testing checklist
+# Testing history
 
-Running list of what's been verified against a live testa/testb pairing,
-and what's still open. Update this in place as items get checked off
-instead of re-deriving the list from scratch each session.
+What's been verified against a live testa/testb pairing, with the design
+notes behind each feature. **History only since 2026-10-13:** every item
+still open then (the unticked boxes below) moved to `CHECKLIST.md`, which
+is the one list to work from. Track new work and tests there, not here.
 
 ## Needs testing — direct-connection fix (SYNC_PORT)
 

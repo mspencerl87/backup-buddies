@@ -14,8 +14,9 @@ device over iroh (direct, or through our relay). Live at filegarden.net
 - `db/migrations`: numbered SQL, applied **by hand** on app-1 (see
   `docs/DEPLOY.md`); nothing runs them automatically.
 - `deploy/app`, `deploy/relay`: compose files for app-1 and relay-1.
-- `docs/`: `LAUNCH-CHECKLIST.md`, `POST-LAUNCH.md` (backlog),
-  `TESTING-CHECKLIST.md` (test history), `DEPLOY.md` (numbered sections
+- `docs/`: `CHECKLIST.md` (the one list of open work: bugs, tests to
+  run, known issues, backlog), `TESTING-CHECKLIST.md` (test history and
+  design notes only), `DEPLOY.md` (numbered sections
   per feature: add one when a change needs deploy steps), `API.md` (every
   route) and `OPERATIONS.md` (settings, jobs, scripts, CI, commands).
   Update those two, and the client README's "Commands and settings", when
