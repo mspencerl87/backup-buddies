@@ -85,6 +85,10 @@ setups.
 
 ### Client (testa/testb)
 
+- [ ] 0.16.0 smoke test (nothing should look different): both start and
+      show "Up to date"; a new small file backs up and shows in Browse
+      files; "Their pledge to you" unchanged after the restart. Repo
+      storage itself is covered by `e2e_repo_files` until senders use it.
 - [ ] 0.14.0, hidden names:
   - a 130-character name shows in Activity once, not every cycle;
   - testb's own dashboard and logs show only encrypted names for what it
