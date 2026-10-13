@@ -260,13 +260,17 @@ Build when there's a reason to; roughly in order of value.
       CPUs (`CpuCap`, unit-tested). Site copy (About, Getting started,
       Setup, Privacy, which still said buddies see names) and the status
       page say what a buddy sees for each kind.
-    - [ ] Live on 0.19.0 (2026-10-13: a 2.5 GB chunked backup ran at
+    - [x] Live on 0.19.0 (2026-10-13: a 2.5 GB chunked backup ran at
       92 MB/s, 277 MiB peak on testa's 2 vCPUs; the buddy card's counts
       still came from whole files and read 0, fixed in 0.19.1): testa's
       old whole-file copies on testb retired
       (Activity line; `ls` shows them under `.versions/`), a big backup's
       memory with the CPU cap, testb (no setting) backing up to testa in
-      chunks.
+      chunks. Checked 2026-10-13 on 0.19.1: testa's old whole-file
+      copies moved to `.versions/n1/` on testb; testa's card reads "10
+      files, 2.5 GB in the last snapshot" and testb's "2.3 GB chunked
+      backup" (dedup); testb's empty folder backs up to testa as an empty
+      chunked snapshot.
 - [ ] **A format switch re-uploads everything, over the relay too.**
       0.19.0 made chunked backups the default with no users yet
       (2026-10-13), so every existing pairing re-sent its whole backup
