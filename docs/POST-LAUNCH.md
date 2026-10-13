@@ -4,7 +4,7 @@ Work to do once the r/homelab beta is live. Nothing here blocks launch —
 those items live in `LAUNCH-CHECKLIST.md`. Move things here from there once
 they stop blocking, and tick them as they ship.
 
-Last reviewed: 2026-10-04.
+Last reviewed: 2026-10-13.
 
 ## Real gaps (do first)
 
@@ -82,11 +82,18 @@ Last reviewed: 2026-10-04.
       from `GET /devices/me`, cached in DATA_DIR), so each account's key
       has to be attacked separately. Files sent by 0.5–0.6 (fixed salt)
       still restore; they're only re-encrypted if they change.
-- [ ] **Files encrypted before 0.5.0 restore at the old speed** (~1.5 s
-      each — scrypt per file). Fine for now; optionally re-encrypt them in
-      the background later.
-- [ ] **File lists are built whole in memory** on both sides (chunked on
-      the wire). Fine to roughly a million files; past that, page through
+- [x] **Files encrypted before 0.5.0 restore at the old speed** (~1.5 s
+      each — scrypt per file). Resolved by client 0.14.0 (2026-10-11):
+      hiding names re-sent every live file, and every send encrypts to the
+      current key, so the old copies are now only backup copies, removed
+      after 30 days. A device still on ≤0.13 keeps its old ones.
+- [ ] **File lists are built whole in memory** on both sides. Partly
+      done in 0.5.0: `index.sqlite` replaced the JSON manifests, so
+      nothing is rewritten whole and the index lives on disk between
+      cycles. Still whole in memory: `idx.sent_entries()` (every sent row,
+      loaded per cycle and per reconcile), and the buddy's file list
+      (chunked on the wire, but `receive::list_sender_files` builds it
+      whole and the sender collects every chunk). Fine to roughly a million files; past that, page through
       the index instead.
 
 ## Polish / nice to have

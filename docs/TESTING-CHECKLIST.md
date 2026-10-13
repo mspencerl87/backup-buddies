@@ -817,11 +817,10 @@ can change that.
    - [ ] Still to glance at from that same test: the "Your Backup Buddies
          password was changed" notice arrived, and the old password is
          rejected at login while the new one works
-   - [ ] Per-IP rate limiting not done: the API has no `trust proxy`
+   - [x] ~~Per-IP rate limiting not done: the API has no `trust proxy`
          setting and sits behind Caddy + Cloudflare, so `req.ip` isn't the
-         real client. Would need Caddy/Cloudflare's client-IP header
-         trusted correctly first. Low priority while the per-account
-         cooldown and global cap are in place
+         real client.~~ Done: per-IP limits in `docs/DEPLOY.md` §24, with
+         the real client IP from Caddy in §31
 2. **Recovery story for the encryption passphrase** — no code change
    needed (see above), docs only:
    - [x] `setup.html` / `getting-started.html` tell users plainly to store
@@ -1561,7 +1560,10 @@ other migration there).
       progress endpoint would still answer correctly if it did).
       Worth a small persistent indicator elsewhere on the dashboard
       (e.g. on the buddy's card) if that's annoying in practice.
-- [ ] `always_on`/`relay_only` marketplace listing fields are self-
+- [x] ~~Decide whether to derive or filter on them~~ — decided
+      2026-10-13: they stay self-reported and display-only (only country
+      and upload speed filter). Kept for reference: `always_on`/`relay_only`
+      marketplace listing fields are self-
       reported for now (see "Design note: marketplace listing criteria"
       above). Auto-deriving them from real telemetry would need: (a) a
       new table/column for the client to report direct-vs-relay ratio
@@ -1581,13 +1583,10 @@ other migration there).
       `backup::reconcile_with_buddy` computes the manifest-vs-buddy
       comparison every 10 minutes per buddy, and it's now surfaced on the
       dashboard buddy card.
-    - ~~Rescan interval display~~ — **done** (2026-10-04), display-only:
-      the interval itself still isn't configurable (fixed ~30s cycle, see
-      "Documented, intentional limits" above — now named
-      `BACKUP_CYCLE_INTERVAL_SECS` in main.rs rather than a bare literal),
-      but the dashboard's "This Device" card now shows the real value
-      ("Rescan interval: 30s") instead of nothing. Making it an actual
-      env-configurable knob (with a toggle) is still open if ever wanted.
+    - ~~Rescan interval display~~ — **done** (2026-10-04): the
+      dashboard's "This Device" card shows the real value ("Rescan
+      interval: 30s"). Configurable too since client 0.5.0
+      (`SCAN_INTERVAL_SECS`).
     - ~~Discovery peer count~~ — **done** (2026-10-04): the mDNS task's
       dedup set (`main.rs`) is now a shared `Arc<Mutex<HashSet<EndpointId>>>`
       instead of task-local, and "This Device" shows a live
@@ -1595,7 +1594,9 @@ other migration there).
   - **Long term goals for client features** (parked 2026-10-04 — each
     needs real architecture work, not just more dashboard plumbing;
     revisit when there's appetite for that, not as a cosmetic pass):
-    - Live streaming transfer rate (bytes/sec updating during an
+    - ~~Live streaming transfer rate~~ — **done** in client 0.5.1
+      (2026-10-04): the buddy card's live progress bar shows speed and
+      time left during a cycle. Original note: (bytes/sec updating during an
       in-progress cycle, not just the after-the-fact rate computed from
       a finished cycle's bytes_sent/duration_ms). Same *pattern* as the
       restore-progress work already shipped (an `Arc<Mutex<Progress>>`
