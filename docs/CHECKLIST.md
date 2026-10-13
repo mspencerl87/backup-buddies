@@ -264,6 +264,13 @@ Build when there's a reason to; roughly in order of value.
       (Activity line; `ls` shows them under `.versions/`), a big backup's
       memory with the CPU cap, testb (no setting) backing up to testa in
       chunks.
+- [ ] **A format switch re-uploads everything, over the relay too.**
+      0.19.0 made chunked backups the default with no users yet
+      (2026-10-13), so every existing pairing re-sent its whole backup
+      once, relay traffic included (counted against the free allowance,
+      billed on a paid plan). Before the next change like that with real
+      users: switch only when a cycle runs direct, or don't count the
+      switch's traffic.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
