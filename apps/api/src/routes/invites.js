@@ -40,13 +40,17 @@ const PLEDGE_MAX_BYTES = 20_000 * GB;
 
 // Self-reported listing criteria (country, speed_tier, always_on,
 // relay_only — see migration 010) — displayed on marketplace listings so
-// a browser can judge fit for themselves (unlike pledged_bytes, these are
-// never used to filter what the API returns; see GET /invites/public).
-// Only speed_tier needs a fixed set to validate against; country is
-// free-text-ish (checked against the dashboard's own list client-side,
-// not re-validated here, since "Other" is a valid choice) and the two
-// booleans just coerce.
-const SPEED_TIERS = ['under_10', '10_50', '50_200', '200_plus'];
+// a browser can judge fit for themselves. Country and speed_tier can also
+// narrow what GET /invites/public returns; the two booleans stay
+// display-only. Only speed_tier needs a fixed set to validate against;
+// country is free-text-ish (checked against the dashboard's own list
+// client-side, not re-validated here, since "Other" is a valid choice)
+// and the two booleans just coerce.
+//
+// Slowest first: the ?min_speed_tier= filter means "this tier or any
+// faster one", by position in this list. Was four tiers (50–200 and 200+
+// split) until migration 017 merged them.
+const SPEED_TIERS = ['under_10', '10_50', '50_plus'];
 const MAX_COUNTRY_LENGTH = 100;
 const MAX_NOTE_LENGTH = 200;
 
@@ -373,10 +377,17 @@ invitesRouter.post('/invites/:code/redeem', requireAuth, requireEmailVerified, r
 // country (an exact match against COUNTRY_OPTIONS in pledge-options.js,
 // same list the invite-creation form writes from — not a partial/ILIKE
 // match, since the field is a closed dropdown, not free text). This is
-// the first of the four self-reported fields (country/speed_tier/
-// always_on/relay_only) to become a real filter rather than display-only
-// — see docs/TESTING-CHECKLIST.md's "Marketplace listing filters" entry;
-// speed/always_on/relay_only stay display-only for now.
+// one of the two self-reported fields that filter rather than just
+// display — see docs/TESTING-CHECKLIST.md's "Marketplace listing
+// criteria" entry.
+//
+// Optional ?min_speed_tier=<tier> keeps listings at that upload speed
+// tier or faster (SPEED_TIERS order): a buddy faster than you asked for
+// is never a reason to hide them. Listings that didn't say their speed
+// are left out when this is set, since there's nothing to compare.
+// always_on/relay_only stay display-only on purpose: "usually online" is
+// unverified, and relay-only is about the lister's network, which upload
+// speed already covers as far as a browser cares.
 invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
   const pledgedBytes = Number(req.query.pledged_bytes);
   if (!Number.isInteger(pledgedBytes) || pledgedBytes <= 0) {
@@ -395,6 +406,14 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
   const country = typeof req.query.country === 'string' && req.query.country.length > 0
     ? req.query.country
     : null;
+  // Same for an unselected "Any upload speed" filter.
+  const minSpeedTier = typeof req.query.min_speed_tier === 'string' && req.query.min_speed_tier.length > 0
+    ? req.query.min_speed_tier
+    : null;
+  if (minSpeedTier !== null && !SPEED_TIERS.includes(minSpeedTier)) {
+    return res.status(400).json({ error: `min_speed_tier must be one of: ${SPEED_TIERS.join(', ')}` });
+  }
+  const speedTiers = minSpeedTier === null ? null : SPEED_TIERS.slice(SPEED_TIERS.indexOf(minSpeedTier));
 
   const result = await pool.query(
     `SELECT invites.id, invites.pledged_bytes, invites.note, invites.created_at,
@@ -412,9 +431,10 @@ invitesRouter.get('/invites/public', requireAuth, async (req, res) => {
         AND invites.inviter_account_id <> $1
         AND invites.pledged_bytes = $2
         AND ($5::text IS NULL OR invites.country = $5)
+        AND ($6::text[] IS NULL OR invites.speed_tier = ANY($6))
       ORDER BY invites.created_at DESC
       LIMIT $3 OFFSET $4`,
-    [req.account.id, pledgedBytes, limit, offset, country],
+    [req.account.id, pledgedBytes, limit, offset, country, speedTiers],
   );
   const totalCount = result.rows[0] ? Number(result.rows[0].total_count) : 0;
   const listings = result.rows.map(({ total_count, ...listing }) => listing);

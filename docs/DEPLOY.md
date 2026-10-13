@@ -1161,3 +1161,22 @@ effect after recreating the container. Now:
 **Nothing to do by hand.** The first deploy with this change recreates the
 `caddy` container itself, because its mount changed: a second or two
 without the site.
+
+## 33. Three upload speed tiers, filterable on Find a buddy
+
+"Find a buddy" gets an "Upload speed" filter (Any / 10 Mbps or more /
+50 Mbps or more, `?min_speed_tier=` on `GET /invites/public`), and the
+listing speed tiers go from four to three: `under_10`, `10_50`, `50_plus`.
+Migration 017 rewrites existing `50_200` and `200_plus` listings to
+`50_plus`.
+
+**Migration** (apply on app-1 **before** pushing the code; the new API
+rejects the old values and would hide those listings from the speed
+filter until it runs). The old API only displays `speed_tier`, so running
+it early is harmless:
+```bash
+cd $CHECKOUT/deploy/app
+docker compose exec -T postgres psql -U backup_buddies -d backup_buddies   < ../../db/migrations/017_three_speed_tiers.sql
+```
+The file isn't on app-1 until the push, so copy it over first (or paste
+the one `UPDATE` line into `psql`). No new env vars.

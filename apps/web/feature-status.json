@@ -1,5 +1,5 @@
 {
-  "updated": "2026-10-12",
+  "updated": "2026-10-13",
   "available": [
     {
       "title": "Automatic encrypted backup",
@@ -43,7 +43,7 @@
     },
     {
       "title": "Find a buddy",
-      "description": "Browse public listings at an exact storage size, with optional self-reported country, upload-speed tier, always-on, and relay-only info to help you judge fit before pairing."
+      "description": "Browse public listings at an exact storage size, and narrow them by country and minimum upload speed (10 or 50 Mbps and up). Listings also show self-reported “usually online” and “relay-only” info, to help you judge fit before pairing."
     },
     {
       "title": "Free tier",
@@ -88,11 +88,6 @@
       "title": "Long transfers can occasionally drop on a local network",
       "status": "limitation",
       "description": "Between two buddies on the same local network (or two clients on the same machine), a long transfer can sometimes lose its connection partway through, usually minutes in. Nothing is lost: files of 256 MB or more carry on from where they stopped on the next check, about 30 seconds later, and smaller files are simply sent again. It mostly costs a little time. We're still tracking down the cause."
-    },
-    {
-      "title": "Marketplace listing filters",
-      "status": "in_progress",
-      "description": "You can now filter “Find a buddy” by country. Upload speed, “usually online”, and “relay-only” are still shown on listings to help you judge a buddy yourself, but don't yet filter or auto-match search results."
     },
     {
       "title": "Every buddy gets the same folder",

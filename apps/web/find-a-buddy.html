@@ -41,11 +41,14 @@
       <label for="country-filter" style="margin-top:0.75rem">Country</label>
       <select id="country-filter"></select>
 
+      <label for="speed-filter" style="margin-top:0.75rem">Upload speed</label>
+      <select id="speed-filter"></select>
+
       <p id="results-count" class="muted" style="margin-top:1rem"></p>
       <div id="listings"></div>
       <p id="listings-empty" class="muted" style="display:none">
         No public listings match right now. Be the first to
-        <a href="/dashboard.html#invite-a-buddy">list one</a>, or try a different size or country.
+        <a href="/dashboard.html#invite-a-buddy">list one</a>, or try a different size, country or speed.
       </p>
       <p class="error" id="listings-error"></p>
       <button class="btn btn-secondary" id="load-more-btn" type="button" style="display:none; margin-top:1rem">
@@ -71,6 +74,7 @@
 
     const sizeFilterEl = document.getElementById('size-filter');
     const countryFilterEl = document.getElementById('country-filter');
+    const speedFilterEl = document.getElementById('speed-filter');
     const listingsEl = document.getElementById('listings');
     const emptyEl = document.getElementById('listings-empty');
     const errorEl = document.getElementById('listings-error');
@@ -87,6 +91,7 @@
       : 50;
     populatePledgeSelect(sizeFilterEl, PLEDGE_GB_OPTIONS.includes(defaultGb) ? defaultGb : 50);
     populateCountrySelect(countryFilterEl, 'Any country');
+    populateMinSpeedSelect(speedFilterEl);
 
     function describeListing(listing) {
       const bits = [];
@@ -169,13 +174,15 @@
       const gb = Number(sizeFilterEl.value);
       pledgedBytes = Math.round(gb * 1024 ** 3);
       const country = countryFilterEl.value;
+      const minSpeedTier = speedFilterEl.value;
 
       loadMoreBtn.disabled = true;
       let data;
       try {
         const countryParam = country ? `&country=${encodeURIComponent(country)}` : '';
+        const speedParam = minSpeedTier ? `&min_speed_tier=${encodeURIComponent(minSpeedTier)}` : '';
         const res = await fetch(
-          `/api/invites/public?pledged_bytes=${pledgedBytes}&limit=${PAGE_SIZE}&offset=${offset}${countryParam}`,
+          `/api/invites/public?pledged_bytes=${pledgedBytes}&limit=${PAGE_SIZE}&offset=${offset}${countryParam}${speedParam}`,
           { credentials: 'same-origin' },
         );
         if (!res.ok) {
@@ -193,10 +200,14 @@
       for (const listing of data.listings) renderListing(listing);
       offset += data.listings.length;
 
-      const sizeAndCountry = country ? `this size in ${country}` : 'this size';
+      let where = country ? `this size in ${country}` : 'this size';
+      if (minSpeedTier) {
+        const speedLabel = MIN_SPEED_FILTER_OPTIONS.find((o) => o.value === minSpeedTier).label;
+        where += `, ${speedLabel} upload`;
+      }
       countEl.textContent = data.total_count === 0
         ? ''
-        : `${data.total_count} listing${data.total_count === 1 ? '' : 's'} at ${sizeAndCountry}`;
+        : `${data.total_count} listing${data.total_count === 1 ? '' : 's'} at ${where}`;
       emptyEl.style.display = data.total_count === 0 ? 'block' : 'none';
       loadMoreBtn.style.display = data.has_more ? '' : 'none';
       loadMoreBtn.disabled = false;
@@ -204,6 +215,7 @@
 
     sizeFilterEl.addEventListener('change', () => loadListings({ reset: true }));
     countryFilterEl.addEventListener('change', () => loadListings({ reset: true }));
+    speedFilterEl.addEventListener('change', () => loadListings({ reset: true }));
     loadMoreBtn.addEventListener('click', () => loadListings({ reset: false }));
 
     document.getElementById('logout-link').addEventListener('click', async (e) => {

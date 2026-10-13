@@ -34,9 +34,26 @@ function populatePledgeSelect(selectEl, defaultGb) {
 const SPEED_TIER_OPTIONS = [
   { value: 'under_10', label: 'Under 10 Mbps' },
   { value: '10_50', label: '10 – 50 Mbps' },
-  { value: '50_200', label: '50 – 200 Mbps' },
-  { value: '200_plus', label: '200 Mbps or more' },
+  { value: '50_plus', label: '50 Mbps or more' },
 ];
+
+// find-a-buddy.html's "at least" filter (?min_speed_tier=): each option
+// keeps that tier and every faster one. No "under 10" entry, since "at
+// least under 10" is just "any", minus listings that didn't say.
+const MIN_SPEED_FILTER_OPTIONS = [
+  { value: '10_50', label: '10 Mbps or more' },
+  { value: '50_plus', label: '50 Mbps or more' },
+];
+
+function populateMinSpeedSelect(selectEl) {
+  selectEl.innerHTML = '<option value="">Any upload speed</option>';
+  for (const { value, label } of MIN_SPEED_FILTER_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    selectEl.appendChild(option);
+  }
+}
 
 function populateSpeedTierSelect(selectEl) {
   selectEl.innerHTML = '<option value="">Prefer not to say</option>';

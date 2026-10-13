@@ -1474,15 +1474,27 @@ a given size and left the person to judge fit themselves.
   optional `?country=` query param and filters to an exact match against
   the same closed `COUNTRY_OPTIONS` dropdown list (not partial/`ILIKE`
   matching); `find-a-buddy.html` has a "Country" filter select next to the
-  size filter, defaulting to "Any country". The other three fields below
-  are still display-only.
+  size filter, defaulting to "Any country".
 - **Upload speed tier** (`invites.speed_tier`, one of `under_10` /
-  `10_50` / `50_200` / `200_plus`) — bucketed rather than a typed Mbps
+  `10_50` / `50_plus`) — bucketed rather than a typed Mbps
   number, since a raw figure is rarely accurate anyway (varies by time of
-  day, ISP throttling, Wi-Fi vs. wired).
+  day, ISP throttling, Wi-Fi vs. wired). ~~Display only~~ — **done**
+  (2026-10-13): `GET /invites/public` takes `?min_speed_tier=` and keeps
+  that tier or faster (a faster buddy is never a reason to hide one);
+  listings that didn't give a speed drop out while it's set.
+  `find-a-buddy.html` has an "Upload speed" select: Any / 10 Mbps or more
+  / 50 Mbps or more. Tiers went from four to three at the same time
+  (migration 017 merged `50_200` and `200_plus` into `50_plus`): above
+  50 Mbps a home uplink keeps up either way. To test: create public
+  invites at one size with each tier and none, then check each filter
+  value shows the right ones and the count line names the speed.
 - **Usually online** (`invites.always_on`, boolean) — self-reported; not
-  derived from `devices.last_seen_at` for this first pass.
+  derived from `devices.last_seen_at` for this first pass. Stays
+  display-only by decision (2026-10-13): unverified, so not worth
+  filtering on.
 - **Relay-only network** (`invites.relay_only`, boolean) — self-reported.
+  Stays display-only by decision (2026-10-13): it's about the lister's
+  network, and the speed filter already covers what a browser cares about.
   Auto-detecting this would need the client to report direct-vs-relay
   ratio back to the API (it already knows this per-transfer, shown in the
   local dashboard's "via relay, 92ms" messages, but never reports it

@@ -280,7 +280,7 @@ Auth: session + verified. Creates an invite, private by default.
 | `is_public` | no | `true` lists it in the marketplace |
 | `note` | no | String shown on the listing, up to 200 characters |
 | `country` | no | String, up to 100 characters, from the dashboard's country list (or "Other") |
-| `speed_tier` | no | `under_10`, `10_50`, `50_200` or `200_plus` (Mbps) |
+| `speed_tier` | no | `under_10`, `10_50` or `50_plus` (Mbps) |
 | `always_on` | no | Boolean |
 | `relay_only` | no | Boolean |
 
@@ -311,11 +311,13 @@ created_at}}`.
 
 ## Marketplace
 
-### `GET /invites/public?pledged_bytes=<n>&country=&offset=&limit=`
+### `GET /invites/public?pledged_bytes=<n>&country=&min_speed_tier=&offset=&limit=`
 Auth: session. Open public listings from **other** accounts, of exactly
 one size. `pledged_bytes` is required, since pairs trade like-for-like.
 `country` is optional and must match exactly; an empty value means any
-country. `limit` is 1 to 100 (default 50), `offset` defaults to 0.
+country. `min_speed_tier` is optional (`under_10`, `10_50` or `50_plus`)
+and keeps listings at that tier or faster; listings without a speed tier
+are left out when it's set (`400` for any other value). `limit` is 1 to 100 (default 50), `offset` defaults to 0.
 
 ```json
 {
