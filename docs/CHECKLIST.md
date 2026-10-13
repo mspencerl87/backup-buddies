@@ -244,13 +244,14 @@ Build when there's a reason to; roughly in order of value.
       the pack files and peeks one; "Delete permanently" is refused;
       reconciliation is skipped for chunked buddies (the buddy checks
       every repository file's hash as it arrives).
-    - [ ] Live: browse, restore a file, restore an older version and a
+    - [x] Live: browse, restore a file, restore an older version and a
       renamed file's old name on testa from testb. 2026-10-13: browse,
       a restore and "What your buddy sees" checked; its explanation still
       gave the whole-file wording (fixed in 0.18.1). A renamed ISO's old
       name listed as "deleted — recoverable", History offered Version 1,
-      and it restored as `.v1.bak` (50 MB, direct, 25.5 MB/s). Still to
-      check: History on an edited file.
+      and it restored as `.v1.bak` (50 MB, direct, 25.5 MB/s), sha256
+      identical to the file. An edited text file's History offered its
+      earlier content (0 B before the edit), which restored.
     - [ ] 4. Migration (re-upload, then retire the whole-file copies),
       site copy and status page (what buddies can see), docs, version
       bump, live test on testa/testb.
