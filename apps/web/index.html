@@ -63,11 +63,11 @@
           </figure>
           <figure class="carousel-slide">
             <img src="/assets/screenshots/client-buddy-view.png" alt="What your buddy sees: a list of encrypted file names with their stored sizes, and a hex dump of a stored file starting with an age-encryption header followed by ciphertext" loading="lazy">
-            <figcaption>What your buddy sees: encrypted names, and the first bytes of any file exactly as it's stored on their disk</figcaption>
+            <figcaption>What your buddy sees: only encrypted data, and the first bytes of any of it exactly as it's stored on their disk</figcaption>
           </figure>
           <figure class="carousel-slide">
             <img src="/assets/screenshots/client-history.png" alt="File version history, showing two previous backed-up versions of a file" loading="lazy">
-            <figcaption>Pull back an earlier version (the last 2 replaced copies of any file)</figcaption>
+            <figcaption>Pull back an earlier version: hourly and daily restore points, kept for 30 days</figcaption>
           </figure>
         </div>
         </div>
@@ -124,6 +124,12 @@
               <td class="us-col">A buddy you chose, backing each other up</td>
             </tr>
             <tr>
+              <th scope="row">When files change</th>
+              <td>Depends on the backup tool you use with it</td>
+              <td>Sends the changed blocks (Syncthing)</td>
+              <td class="us-col">Sends only the changed parts, and a renamed or moved file costs next to nothing</td>
+            </tr>
+            <tr>
               <th scope="row">Encryption</th>
               <td>Varies by provider and plan</td>
               <td>Varies by setup</td>
@@ -162,7 +168,11 @@
     <section class="features">
       <div class="feature">
         <h3>Encrypted before it leaves your machine</h3>
-        <p>Your buddy stores your files but can never read them, and neither can we. File names are encrypted too, and your dashboard shows you exactly what they hold, down to the stored bytes.</p>
+        <p>Your buddy stores your backup but can never read it, and neither can we. They don't even see your file names, how many files you have or their sizes, and your dashboard shows you exactly what they hold, down to the stored bytes.</p>
+      </div>
+      <div class="feature">
+        <h3>Only what changed is sent</h3>
+        <p>Rename or move a file and next to nothing goes over the wire. Edit part of a big one and only that part does. Every change is a restore point, kept for 30 days.</p>
       </div>
       <div class="feature">
         <h3>Someone you know, or someone new</h3>
