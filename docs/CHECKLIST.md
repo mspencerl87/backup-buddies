@@ -234,8 +234,18 @@ Build when there's a reason to; roughly in order of value.
       it's the default; reconciliation still compares only whole files
       ("0 files match" for a chunked-only buddy), phase 3; the Activity
       line has no per-file list for chunked cycles.
-    - [ ] 3. Restore, Browse files and History from snapshots, with our
-      own bounded restore loop and progress.
+    - [x] 3. Browse files, restores and History (client 0.18.0,
+      `chunked_restore.rs`, in `e2e_chunked_backup`): the latest snapshot
+      is the file list; deleted files (and renamed files' old names) come
+      from comparing each older snapshot's tree with the latest's,
+      skipping unchanged folders; History is a file's distinct earlier
+      contents across snapshots; restores read 4 MiB at a time into a
+      temp file (not rustic's own restore); "What your buddy sees" lists
+      the pack files and peeks one; "Delete permanently" is refused;
+      reconciliation is skipped for chunked buddies (the buddy checks
+      every repository file's hash as it arrives).
+    - [ ] Live: browse, restore a file, restore an older version and a
+      renamed file's old name on testa from testb.
     - [ ] 4. Migration (re-upload, then retire the whole-file copies),
       site copy and status page (what buddies can see), docs, version
       bump, live test on testa/testb.

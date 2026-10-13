@@ -13,6 +13,7 @@ mod receive;
 mod repo;
 mod repo_backend;
 mod chunked;
+mod chunked_restore;
 mod crypto;
 #[cfg(test)]
 mod e2e_tests;
@@ -128,7 +129,9 @@ impl Config {
         // the guard against an unmounted drive wiping the buddy's copy.
         if backup::allow_empty_backup_dir() {
             tracing::warn!(
-                "ALLOW_EMPTY_BACKUP_DIR is on: if the drive with your files isn't mounted, its empty                  folder will be mirrored to your buddy as \"everything deleted\". Remove it from .env                  once your deliberate cleanup has synced."
+                "ALLOW_EMPTY_BACKUP_DIR is on: if the drive with your files isn't mounted, its empty \
+                 folder will be mirrored to your buddy as \"everything deleted\". Remove it from .env \
+                 once your deliberate cleanup has synced."
             );
         }
         let relay_url = std::env::var("RELAY_URL")
@@ -1202,10 +1205,15 @@ async fn main() -> Result<()> {
                                 // drift that never shows up as a local file
                                 // change in the first place (see
                                 // backup::reconcile_with_buddy's doc comment).
-                                let reconcile_due = last_reconcile
-                                    .get(node_id_str)
-                                    .map(|at: &std::time::Instant| at.elapsed() >= RECONCILE_INTERVAL)
-                                    .unwrap_or(true);
+                                // Not for a chunked backup: it compares whole
+                                // files only ("0 files match"), and the buddy
+                                // already checks every repository file
+                                // against its content hash as it arrives.
+                                let reconcile_due = !chunked::has_repo(node_id_str)
+                                    && last_reconcile
+                                        .get(node_id_str)
+                                        .map(|at: &std::time::Instant| at.elapsed() >= RECONCILE_INTERVAL)
+                                        .unwrap_or(true);
                                 if reconcile_due {
                                     last_reconcile
                                         .insert(node_id_str.clone(), std::time::Instant::now());
