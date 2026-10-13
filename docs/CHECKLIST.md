@@ -196,6 +196,25 @@ Build when there's a reason to; roughly in order of value.
   - **Negotiate per buddy** by protocol version: older buddies keep
     getting whole files. **Opt-in first** (e.g. `CHUNKED_TRANSFERS=on`)
     for a release or two, restores included, then the default.
+  - **Decided 2026-10-13:** files already on a buddy are **re-uploaded
+    once** into the new format (like 0.14's name change), and the old
+    whole-file copies then become 30-day backup copies, so there's one
+    format per pairing, not two side by side. Snapshots are kept **every
+    one for 24 h, hourly for 2 days, daily for 30 days**, then pruned.
+  - **Build order:**
+    - [ ] 1. Buddy side: protocol v5 repo messages (list, read part,
+      write, remove of opaque repo files) stored under
+      `<buddy-files>/<sender>/repo/`, counted against the pledge, with
+      the disk floor and tests.
+    - [ ] 2. Sender: a rustic backend over the iroh connection (with
+      retries), the repo master key from our scrypt output, backups into
+      the repo behind `CHUNKED_TRANSFERS=on`, our exclude rules, daily
+      forget + prune.
+    - [ ] 3. Restore, Browse files and History from snapshots, with our
+      own bounded restore loop and progress.
+    - [ ] 4. Migration (re-upload, then retire the whole-file copies),
+      site copy and status page (what buddies can see), docs, version
+      bump, live test on testa/testb.
 - [ ] **Instant change pickup.** Change notifications (`notify` crate) on
       top of the periodic scan, so new files go out in seconds. They aren't
       reliable on NFS/SMB, so the scan stays as the fallback.
