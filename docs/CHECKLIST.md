@@ -245,7 +245,10 @@ Build when there's a reason to; roughly in order of value.
       reconciliation is skipped for chunked buddies (the buddy checks
       every repository file's hash as it arrives).
     - [ ] Live: browse, restore a file, restore an older version and a
-      renamed file's old name on testa from testb.
+      renamed file's old name on testa from testb. 2026-10-13: browse,
+      a restore and "What your buddy sees" checked; its explanation still
+      gave the whole-file wording (fixed in 0.18.1). Still to check:
+      History on an edited file, a renamed file's old name.
     - [ ] 4. Migration (re-upload, then retire the whole-file copies),
       site copy and status page (what buddies can see), docs, version
       bump, live test on testa/testb.
