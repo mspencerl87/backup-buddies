@@ -7,7 +7,9 @@ device over iroh (direct, or through our relay). Live at filegarden.net
 ## Layout
 
 - `apps/client`: Rust backup client (Docker image, also buildable from
-  source via `install.sh`). Encrypts with age; key derived in `crypto.rs`.
+  source via `install.sh`). Backs up into an encrypted restic-format
+  repository on the buddy (rustic_core, `chunked.rs`); key derived in
+  `crypto.rs`.
 - `apps/api`: Node/Express API (Postgres). Device-facing routes in
   `routes/devices.js` (bearer device token), browser routes use sessions.
 - `apps/web`: static site + dashboard + admin (plain HTML/JS).
@@ -90,24 +92,15 @@ in a Rust string in `dashboard.rs`, so the compiler doesn't check it either.
 
 ## Things that are easy to get wrong
 
-- Encryption key = scrypt(passphrase, `"backup-buddies/file-key/v2/" +
-  account_id`) since client 0.7.0. Changing the KDF or salt orphans every
-  backup unless old keys stay in the decrypt list (see `crypto.rs`).
-- What a buddy can see depends on the backup kind. Chunked (client
-  0.19.0+ with a buddy on 0.16.0+, `chunked.rs`): only encrypted pack
-  files, how many, their sizes and when they change. Whole files (an
-  older buddy): since 0.14.0 no file or folder names (`names.rs`), but
-  sizes, folder depth, how many entries each folder has, file counts, and
-  when things change. Site copy has to say which is which; don't claim
-  more than that.
-- The chunked repository's master key is a third labelled derivation of
-  the same scrypt output (`crypto.rs`, `REPO_KEY_LABEL`); changing it
-  orphans every chunked backup. rustic_core is pinned exactly (0.x): its
-  own restore isn't used (unbounded memory, panics on a failed read), and
-  its backend calls are bridged onto iroh in `repo_backend.rs`.
-- The name key is derived from the same scrypt output as the file key
-  (`crypto.rs`). Changing the name key label, the KDF/salt, the padding,
-  the encoding or the cipher orphans every remote name, just like changing
-  the content key orphans the contents.
+- The backup's key: scrypt(passphrase, `"backup-buddies/file-key/v2/" +
+  account_id`), then the repository's master key is a labelled hash of
+  that (`crypto.rs`, `REPO_KEY_LABEL`). Changing the KDF, the salt or the
+  label orphans every backup.
+- What a buddy can see: only encrypted pack files, how many, their sizes
+  and when they change (`chunked.rs`; since client 0.21.0 the only kind of
+  backup). Don't claim more than that in site copy.
+- rustic_core is pinned exactly (0.x): its own restore isn't used
+  (unbounded memory, panics on a failed read), and its backend calls are
+  bridged onto iroh in `repo_backend.rs`.
 - Test devices: testa / testb on Spencer's `backupbuddy` box (TrueNAS SMB
   and NFS mounts), dashboards on :8080 / :8081.

@@ -34,13 +34,12 @@ numbered sections that are referenced below as "DEPLOY §N".
 ```
 
 - **The API never sees file contents or the encryption passphrase.**
-  Clients encrypt with age before sending; the key is derived from the
-  user's passphrase and their account id (client `crypto.rs`). The API
-  holds accounts, devices, pairings, billing state and relay usage.
-- **Buddies can't see contents, or (since client 0.14.0) file and folder
-  names.** They still see sizes, folder depth, entries per folder, file
-  counts and when things change. Files from older clients stay under
-  plaintext names until the sender updates and re-sends them.
+  Clients encrypt before sending; the key is derived from the user's
+  passphrase and their account id (client `crypto.rs`). The API holds
+  accounts, devices, pairings, billing state and relay usage.
+- **Buddies see only encrypted pack files** (a restic-format repository,
+  client `chunked.rs`): how many, their sizes and when they change. Not
+  file or folder names, file counts or sizes.
 - **Losing the database is serious:** since client 0.7.0 the account id is
   part of every key, so users couldn't restore on a new machine without
   it. That's why the database has a nightly off-site backup.

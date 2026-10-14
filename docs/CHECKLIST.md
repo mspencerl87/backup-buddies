@@ -104,21 +104,20 @@ setups.
       show "Up to date"; a new small file backs up and shows in Browse
       files; "Their pledge to you" unchanged after the restart. Repo
       storage itself is covered by `e2e_repo_files` until senders use it.
-- [ ] 0.14.0, hidden names:
-  - a 130-character name shows in Activity once, not every cycle;
-  - testb's own dashboard and logs show only encrypted names for what it
-    stores;
-  - a fresh testa config with the same passphrase and account restores
-    with real names.
-- [ ] 0.13.0, Activity card lines: restart ("Started, version …"), a
-      change (and "Stored 1 file … with you" on testb), delete and exclude,
+- [ ] 0.21.0 (whole-file backups removed): both start, back up and show
+      "Up to date"; Browse files, a restore and History still work;
+      "They've sent you" reads the backup's size. Then delete what
+      whole-file backups left in each other's buddy files by hand
+      (everything in `<buddy-files>/<node id>/` except `.repo/`); 0.21.0
+      no longer uses or counts it.
+- [ ] Activity card lines: restart ("Started, version …"), a change
+      (and "Stored N packs … of their backup with you" on testb), delete
+      and exclude,
       testb stopped then back ("Working again"), a restore on both sides,
       wrong then right password, exclude list saved on the dashboard vs. by
       hand, and the raw log tab matching `docker compose logs`.
-- [ ] 0.8.1: after a LAN backup (even one that drops), the Bandwidth card
-      shows it as Direct and no relay usage reaches the API.
-- [ ] 0.8.0: restart testa after "connection dropped mid-file — finishing
-      the local copy"; the upload still resumes.
+- [ ] After a LAN backup (even one that drops), the Bandwidth card shows
+      it as Direct and no relay usage reaches the API.
 - [ ] Pledge enforcement and the disk-space floor: pledges come only from
       the invite flow, so delete the testa/testb pairing and re-pair at
       30–35 GB (against testb's ~48 GB disk) to hit the refusals.
@@ -159,7 +158,11 @@ setups.
 
 Build when there's a reason to; roughly in order of value.
 
-- [ ] **Send only changed parts of files (chunked transfers), next.**
+- [x] **Send only changed parts of files (chunked transfers).** Done in
+      client 0.16.0–0.20.0; 0.21.0 made it the only kind of backup
+      (2026-10-14: whole-file sending, receiving and restores, name
+      encryption, reconciliation, resumable uploads, the re-send warning
+      and `CHUNKED_TRANSFERS` removed). History below.
       Decided 2026-10-13 to build it (it was parked on 2026-10-10). Any
       change re-sends the whole file (a 20 GB VM image with one changed
       block costs 20 GB, billed over the relay), and so does a rename or
@@ -304,21 +307,17 @@ Build when there's a reason to; roughly in order of value.
 - [ ] **Content-Security-Policy** with real script sources: the one open
       item from the 2026-10-12 security review. Every page's inline
       `<script>` has to move into a file first.
-- [ ] **Restores resume.** Uploads of files ≥ 256 MB resume since 0.8.0;
-      an interrupted restore still starts over. Chunked transfers (above)
-      would cover this.
+- [ ] **Restores resume.** A dropped connection is retried per read, but
+      a restore that fails still starts over from its first file. Skipping
+      files already restored with the right size would cover most of it.
 - [ ] **Restore progress outside the modal.** Closing the restore modal
       doesn't stop the restore, but the progress is only visible there
       until "Files from <buddy>" is reopened. A small indicator on the
       buddy card would do.
-- [ ] **Re-send warning beyond the local dashboard** (0.12.0 shows it
-      there only): on the web dashboard or by email.
-- [ ] **File lists built whole in memory.** 0.5.0's `index.sqlite` keeps
-      the index on disk between cycles, but `idx.sent_entries()` loads
-      every sent row per cycle and per reconcile, and the buddy's file
-      list is built whole (`receive::list_sender_files`) and collected
-      whole by the sender, though it's chunked on the wire. Fine to about a
-      million files; past that, page through both.
+- [ ] **File lists built whole in memory.** Browse files, restores and
+      History read the latest snapshot's whole file list into memory
+      (`chunked_restore::files_in`), and the dashboard gets all of it at
+      once. Fine to about a million files; past that, page through it.
 - [ ] **Listener reachability check** (like Syncthing's): confirm
       `SYNC_PORT` is reachable from outside. Needs a design first: a buddy
       dial-back message (new in `protocol.rs`, proves it from one network
@@ -328,6 +327,10 @@ Build when there's a reason to; roughly in order of value.
       carries the account details.
 
 ## Standing rules
+
+- Test against the latest client only. There are no users yet, and anyone
+  new pulls `latest`, so tests for older versions or for mixed-version
+  pairings (whole-file buddies, upgrade paths) aren't worth running.
 
 - Support: act on account changes only when they're requested from the
   account's registered email address. Never ask a user for their password
