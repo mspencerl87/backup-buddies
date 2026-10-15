@@ -7,7 +7,7 @@ On 2026-10-13 this replaced `LAUNCH-CHECKLIST.md` and `POST-LAUNCH.md`
 work, bugs and tests to run go here; tick them as they're done, and move a
 finished item's write-up to `TESTING-CHECKLIST.md` if it's worth keeping.
 
-Last reviewed: 2026-10-13.
+Last reviewed: 2026-10-15.
 
 ## Bugs
 
@@ -104,12 +104,22 @@ setups.
       show "Up to date"; a new small file backs up and shows in Browse
       files; "Their pledge to you" unchanged after the restart. Repo
       storage itself is covered by `e2e_repo_files` until senders use it.
-- [ ] 0.21.0 (whole-file backups removed): both start, back up and show
-      "Up to date"; Browse files, a restore and History still work;
-      "They've sent you" reads the backup's size. Then delete what
-      whole-file backups left in each other's buddy files by hand
-      (everything in `<buddy-files>/<node id>/` except `.repo/`); 0.21.0
-      no longer uses or counts it.
+- [x] 0.21.0 (whole-file backups removed), 2026-10-14 on testa/testb:
+      a new-files backup (122 files, 219.5 MB, 7.9 s), a folder rename
+      (122 files moved for 19.7 KB) and deletes; the empty-folder guard
+      refused an empty snapshot; testb's Activity "Stored 8 packs
+      (219.5 MB) of their backup with you" and "Read back …"; Browse
+      files, History, "What your buddy sees" (packs only) and Restore all
+      (120 files, 234.5 MB, 15.8 MB/s direct); the cards count only
+      `.repo`. Deleting the leftovers by hand took the whole node-id
+      folders, `.repo` included, and testa still said "backup ok": fixed
+      in 0.21.2.
+- [x] 0.21.2: a buddy that lost the backup is noticed on the next cycle
+      (the idle ping is now a check that the buddy lists the last
+      snapshot) and backed up again in full. 2026-10-15: testa's Activity
+      "No longer has your backup (deleted on their side?) — backing it
+      up again in full", then the full backup. 0.21.1's stray "Home"
+      link in "What your buddy sees" fixed too.
 - [ ] Activity card lines: restart ("Started, version …"), a change
       (and "Stored N packs … of their backup with you" on testb), delete
       and exclude,
